@@ -21,9 +21,15 @@
   Описание: https://sberindex.ru/ru/research/data-sense-opisanie-nabora-dannikh-khakatona-sberindeksa-po-munitsipalnim-dannim
 - Росстат, БД ПМО через «Если быть точным» (https://tochno.st/datasets/bdmo, CC BY 4.0): среднемесячная зарплата и
   среднесписочная численность по разделам ОКВЭД2 (без малого бизнеса). Структура занятости = доли разделов.
-  Сопоставление с СберИндексом — через ОКТМО из справочника границ.
-- Нужные домены в Network access окружения (Custom + домены по умолчанию): `sber.ru`, `sberindex.ru`,
-  `www.sberbank.com`, `www.sberbank.ru`, `storage.yandexcloud.net`, `tochno.st`, `rosstat.gov.ru`.
+  Плюс население, розница, общепит, отгрузка, инвестиции, КСР, число организаций и ИП; доходы — 5-НДФЛ ФНС
+  (https://tochno.st/datasets/ndfl). Сопоставление с СберИндексом — через ОКТМО из справочника границ.
+- Всё скачивает `make data` в `data/raw/<источник>/` со сверкой sha256; состав, покрытие и ловушки
+  (формат ОКТМО, нарастающие итоги, «без МСП») — `docs/materials.md`.
+- Нужные домены в Network access окружения (Custom + домены по умолчанию): `sber.ru`, `s.sber.ru`, `sberindex.ru`,
+  `www.sberbank.com`, `www.sberbank.ru`, `storage.yandexcloud.net`, `tochno.st`, `rosstat.gov.ru`,
+  `pypi.org`, `files.pythonhosted.org`. В облаке PyPI открыт только через прокси агента:
+  `NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 uv sync --frozen`.
+- Сайтам Сбера нужны сертификаты из `certs/` (временная папка, загрузчик берёт их через `download.ca_files`).
 
 ## Договорённости
 
@@ -36,5 +42,7 @@
 
 ## Статус
 
-Готово: план (`PLAN.md`), 28 скилов. Дальше — этап 0: проверить доступ к доменам, каркас репозитория,
-свои скилы `sberindex-data` и `icvi`, агенты-судьи по критериям в `.claude/agents/`, затем загрузчик данных.
+Готово: план (`PLAN.md`), 28 скилов, доступ к доменам, каркас репозитория (пакет `munnet`, `configs/default.yaml`,
+Makefile, `uv.lock`, тесты, лицензия MIT), загрузчик всех данных (`make data`), конспект материалов (`docs/materials.md`).
+Дальше: свои скилы `sberindex-data` и `icvi`, агенты-эксперты и судьи в `.claude/agents/`, панель
+«МО × месяц × категория» и разведочный анализ, выбор сюжета.
