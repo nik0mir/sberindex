@@ -36,7 +36,9 @@ curl --cacert /tmp/ca.pem -A "Mozilla/5.0" https://sberindex.ru/
 
 ## Как удалить
 
-1. Убедиться, что загрузчик данных и README проекта не импортируют `certs` (`grep -rn "certs" --include=*.py .`).
-   Жюри будет запускать код без этой папки.
+1. Загрузчик (`make data`) берёт `.pem` отсюда через `download.ca_files` в `configs/default.yaml`.
+   Без них www.sberbank.com и sberindex.ru не скачиваются ни у нас, ни у жюри. Поэтому сначала перенести
+   `.pem` в постоянное место (например, `configs/ca/`) и поправить пути в конфиге, затем проверить,
+   что ссылок на папку не осталось: `grep -rn "certs/" --include=*.py --include=*.yaml --include=*.md .`
 2. `git rm -r certs` и закоммитить.
 3. Отметить пункт про удаление в `PLAN.md`.

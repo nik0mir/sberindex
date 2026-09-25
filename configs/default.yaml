@@ -1,0 +1,58 @@
+# Все настраиваемые параметры проекта.
+# Запуск: python -m munnet --config configs/default.yaml all
+# Относительные пути считаются от корня репозитория: команды запускаются из него.
+
+seed: 42
+
+paths:
+  raw: data/raw              # скачанные архивы и распакованные файлы
+  interim: data/interim      # промежуточные таблицы
+  processed: data/processed  # признаки, рёбра, кластеры
+  outputs: outputs           # графики и таблицы для отчёта и лендинга
+
+download:
+  timeout: 300
+  # sber.ru и sberindex.ru отклоняют User-Agent python-requests.
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+  # Сертификаты УЦ Минцифры (www.sberbank.com) и LiteSSL (sberindex.ru): их нет в стандартных хранилищах.
+  ca_files:
+    - certs/russian_trusted_ca.pem
+    - certs/litessl_rsa_ca_2025.pem
+
+# Исходные данные. Файл скачивается с первого доступного зеркала и проверяется по sha256.
+sources:
+  hackathon:  # расходы по МО, индекс доступности рынков, расстояния между МО; CC BY-SA 4.0
+    file: hackathonlicence.zip
+    sha256: a9f932ff4096a7df797d1547987937f34d3995ac445b4748177114488d12b010
+    urls:
+      - https://www.sberbank.com/common/img/uploaded/files/pdf/sberindex/hackathonlicence.zip
+      - https://sberindex.ru/api/files/download/7a675947-398d-45e6-8d61-c4299a6203be
+  borders:  # версионный справочник МО и полигоны границ; CC BY-SA 4.0
+    file: t_dict_municipal.rar
+    sha256: 319ed22684b77716641bc15b61f7325adc44e9fc47e9be2973d88412d27d21f5
+    urls:
+      - https://www.sberbank.com/common/files/t_dict_municipal.rar
+
+# Параметры следующих этапов: стартовые значения, уточняются при реализации (PLAN.md, этапы 1–5).
+period:
+  start: "2023-01"
+  end: "2024-12"
+
+features:
+  categories: [Продовольствие, Здоровье, Общественное питание, Транспорт, Маркетплейсы]
+
+network:
+  edge_rules: [correlation, cosine, lagged_correlation, dtw, road_distance]
+  sparsify:
+    method: knn  # knn | mutual_knn | threshold
+    k: 10
+
+clustering:
+  methods: [kmeans, ward, gmm, hdbscan, louvain, leiden, spectral]
+  n_clusters: [3, 12]  # диапазон перебора числа кластеров
+
+icvi: [silhouette, calinski_harabasz, s_dbw, avi, avu, modularity]
+
+dynamics:
+  window_months: 12
+  step_months: 1

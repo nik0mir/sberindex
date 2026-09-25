@@ -1,0 +1,48 @@
+[project]
+name = "munnet"
+version = "0.1.0"
+description = "Типы локальных экономик России: кластеризация динамической атрибутированной сети муниципалитетов"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "scipy",
+    "scikit-learn",
+    "networkx",
+    "python-igraph",
+    "leidenalg",
+    "dtaidistance",
+    "geopandas",
+    "pyogrio",
+    "openpyxl",
+    "libarchive-c",
+    "requests",
+    "pyyaml",
+    "matplotlib",
+]
+
+[project.scripts]
+munnet = "munnet.cli:main"
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/munnet"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

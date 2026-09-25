@@ -1,4 +1,5 @@
 """python -m certs — проверить доступ к сайтам с данными конкурса."""
+
 import requests
 
 from . import session
