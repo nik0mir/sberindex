@@ -1,4 +1,8 @@
-"""Этап data: скачивание исходных архивов с проверкой sha256 и распаковка в data/raw/<источник>/."""
+"""Этап data: скачивание исходных данных с проверкой sha256 в data/raw/<источник>/.
+
+Архивы zip и rar распаковываются рядом с собой. Для источников kind: zip_members из больших архивов
+берутся только перечисленные файлы (см. munnet.remotezip).
+"""
 
 import hashlib
 import logging
@@ -10,6 +14,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from munnet.config import Config
+from munnet.remotezip import fetch_member_gz, gz_stream_sha256, list_members
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +62,7 @@ def fetch(source: dict, dest: Path, session: requests.Session, timeout: float) -
     if dest.exists() and sha256(dest) == source["sha256"]:
         log.info("%s уже скачан", dest.name)
         return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     errors = []
     for url in source["urls"]:
@@ -116,16 +122,40 @@ def extract(archive: Path, dest_dir: Path) -> None:
         raise ValueError(f"Неизвестный формат архива: {archive.name}")
 
 
+def extract_once(archive: Path, dest_dir: Path, archive_sha256: str) -> None:
+    mark = dest_dir / EXTRACTED_MARK
+    if mark.exists() and mark.read_text() == archive_sha256:
+        log.info("%s уже распакован в %s", archive.name, dest_dir)
+        return
+    extract(archive, dest_dir)
+    mark.write_text(archive_sha256)
+    log.info("%s распакован в %s", archive.name, dest_dir)
+
+
+def fetch_members(source: dict, dest_dir: Path, session: requests.Session, timeout: float) -> None:
+    """Нужные файлы из больших zip-архивов: каждый сохраняется как dest_dir/<имя>.csv.gz."""
+    directories: dict[str, dict] = {}
+    for name, member in source["members"].items():
+        dest = dest_dir / f"{name}.csv.gz"
+        if dest.exists() and gz_stream_sha256(dest) == member["sha256"]:
+            log.info("%s уже скачан", dest.name)
+            continue
+        url = source["base_url"] + member["archive"]
+        if url not in directories:
+            directories[url] = list_members(session, url, timeout)
+        fetch_member_gz(session, url, directories[url][member["member"]], dest, member["sha256"], timeout)
+        log.info("%s скачан из %s", dest.name, member["archive"])
+
+
 def run(cfg: Config) -> None:
     raw = cfg.dir("raw")
     session = make_session(cfg["download"])
+    timeout = cfg["download"]["timeout"]
     for name, source in cfg["sources"].items():
-        archive = fetch(source, raw / source["file"], session, cfg["download"]["timeout"])
         dest_dir = raw / name
-        mark = dest_dir / EXTRACTED_MARK
-        if mark.exists() and mark.read_text() == source["sha256"]:
-            log.info("%s уже распакован в %s", archive.name, dest_dir)
+        if source.get("kind") == "zip_members":
+            fetch_members(source, dest_dir, session, timeout)
             continue
-        extract(archive, dest_dir)
-        mark.write_text(source["sha256"])
-        log.info("%s распакован в %s", archive.name, dest_dir)
+        path = fetch(source, dest_dir / source["file"], session, timeout)
+        if path.suffix in (".zip", ".rar"):
+            extract_once(path, dest_dir, source["sha256"])

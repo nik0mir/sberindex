@@ -6,11 +6,16 @@ from munnet.config import load_config
 
 
 def test_default_config_sources_are_pinned():
-    cfg = load_config()
-    for name, source in cfg["sources"].items():
-        assert re.fullmatch(r"[0-9a-f]{64}", source["sha256"]), name
-        assert source["urls"], name
-        assert all(url.startswith("https://") for url in source["urls"]), name
+    sha256 = re.compile(r"[0-9a-f]{64}")
+    for name, source in load_config()["sources"].items():
+        if source.get("kind") == "zip_members":
+            assert source["base_url"].startswith("https://"), name
+            assert source["members"], name
+            assert all(sha256.fullmatch(m["sha256"]) for m in source["members"].values()), name
+        else:
+            assert sha256.fullmatch(source["sha256"]), name
+            assert source["urls"], name
+            assert all(url.startswith("https://") for url in source["urls"]), name
 
 
 def test_every_stage_has_run():

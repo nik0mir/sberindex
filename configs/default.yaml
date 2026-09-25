@@ -19,7 +19,8 @@ download:
     - certs/russian_trusted_ca.pem
     - certs/litessl_rsa_ca_2025.pem
 
-# Исходные данные. Файл скачивается с первого доступного зеркала и проверяется по sha256.
+# Исходные данные: каждый источник сохраняется в data/raw/<имя источника>/.
+# Файл скачивается с первого доступного зеркала и проверяется по sha256; zip и rar распаковываются.
 sources:
   hackathon:  # расходы по МО, индекс доступности рынков, расстояния между МО; CC BY-SA 4.0
     file: hackathonlicence.zip
@@ -32,6 +33,73 @@ sources:
     sha256: 319ed22684b77716641bc15b61f7325adc44e9fc47e9be2973d88412d27d21f5
     urls:
       - https://www.sberbank.com/common/files/t_dict_municipal.rar
+  bdmo:  # БД ПМО Росстата в обработке «Если быть точным», https://tochno.st/datasets/bdmo; CC BY 4.0
+    # Архивы разделов весят до 3,7 ГБ, поэтому берём только нужные файлы запросами HTTP Range.
+    # Каждый сохраняется как data/raw/bdmo/<код показателя>.csv.gz; sha256 — сжатого потока.
+    kind: zip_members
+    base_url: https://storage.yandexcloud.net/tochno-st-catalog/Rosstat/data_bdmo_118_v20250918/by_indicator/
+    members:
+      Y48112027:  # оценка численности населения на 1 января: всё, городское, сельское
+        archive: data_section31_112_v20250918.zip
+        member: data_Y48112027_112_v20250918.csv
+        sha256: 7a75cfb076728f08e89bc7cc62501e63533af0bbd708d3992c470f292643d8ac
+      Y48112014_2023:  # население по полу и возрасту на 1 января 2023
+        archive: data_section31_112_v20250918.zip
+        member: data_Y48112014_parts/data_Y48112014_year2023_112_v20250918.csv
+        sha256: 8494e2bf88a93b4a6dad1ae7b5b8a3f285528fd7ab7829b1c250e1c1b9b6640e
+      Y48112014_2024:  # население по полу и возрасту на 1 января 2024
+        archive: data_section31_112_v20250918.zip
+        member: data_Y48112014_parts/data_Y48112014_year2024_112_v20250918.csv
+        sha256: a5941a3a70f4af29aad3da80171c13dd0a475ae7a28d6fcfa80854220d16daa2
+      Y48423005:  # среднесписочная численность работников по разделам ОКВЭД2 (без МСП)
+        archive: data_section32_112_v20250918.zip
+        member: data_Y48423005_112_v20250918.csv
+        sha256: 7546259bd2a10365466463bfaf15794e55ba008af7b9f417055a2ddfb41ac922
+      Y48423006:  # фонд заработной платы по разделам ОКВЭД2 (без МСП)
+        archive: data_section32_112_v20250918.zip
+        member: data_Y48423006_112_v20250918.csv
+        sha256: e46a9e9f4ef26c2206627e45d06cfa55579b16cefbd943782f85a2696aa6ad7d
+      Y48423007:  # среднемесячная заработная плата по разделам ОКВЭД2 (без МСП)
+        archive: data_section32_112_v20250918.zip
+        member: data_Y48423007_112_v20250918.csv
+        sha256: de1ee445a1ba4ef050cb34f6be42189518138445b963c6cfc8c7d58008b2583c
+      Y48401003:  # оборот розничной торговли по ОКВЭД2 (без МСП)
+        archive: data_section2_112_v20250918.zip
+        member: data_Y48401003_112_v20250918.csv
+        sha256: 6692e2b7e6b3d833b8b5cd41775a0b3cd39a1c9f8c5af6d67b6b096f3d0690ad
+      Y48401006:  # оборот общественного питания по ОКВЭД2 (без МСП)
+        archive: data_section2_112_v20250918.zip
+        member: data_Y48401006_112_v20250918.csv
+        sha256: 3d54f5b080c8b7d7ff0d4ace2b232301cd7ba3ebded799cc4a90a51b5f10f4c8
+      Y48401011:  # отгружено товаров собственного производства: добыча, обработка, энергетика (без МСП)
+        archive: data_section39_112_v20250918.zip
+        member: data_Y48401011_112_v20250918.csv
+        sha256: 7857f62438009077848e6c990b27ed0b679b196d56092b60f7ae5e5484f72bc0
+      Y49010002:  # число организаций по данным госрегистрации
+        archive: data_section39_112_v20250918.zip
+        member: data_Y49010002_112_v20250918.csv
+        sha256: eb1abb55a6000f27401618495701c533c0a8df2f6a304dae14754aeed191e393
+      Y49010003:  # число индивидуальных предпринимателей по данным госрегистрации
+        archive: data_section39_112_v20250918.zip
+        member: data_Y49010003_112_v20250918.csv
+        sha256: f5a324fe49cfefa9024827cd8b121d2740209ff0c7af365ae9648759ac8df165
+      Y48109001:  # инвестиции в основной капитал по источникам и ОКВЭД2 (до 2023 г.)
+        archive: data_section9_112_v20250918.zip
+        member: data_Y48109001_112_v20250918.csv
+        sha256: eb645f70a44d908a8ef1d286cadf2a49194311577b23cea86908a824def06bfc
+      Y47000004:  # число ночёвок в коллективных средствах размещения
+        archive: data_section60_112_v20250918.zip
+        member: data_Y47000004_112_v20250918.csv
+        sha256: 4b21379ad7a86e1539281e78ba50ba5ae3e9ea7b492072afc4f374b35c779b47
+      Y48060002:  # число мест в коллективных средствах размещения
+        archive: data_section60_112_v20250918.zip
+        member: data_Y48060002_112_v20250918.csv
+        sha256: ff6921bb99ce55063adb2f73df9fea2a2236cf39bfb044f361cbef337e3bbf88
+  ndfl:  # отчётность 5-НДФЛ ФНС по муниципалитетам в обработке «Если быть точным», https://tochno.st/datasets/ndfl
+    file: data_5ndfl_155_v20260722.parquet
+    sha256: b45f51b61874d7049582b5eca1baaf83be02bc03f02d253b708e1a7581d0a8b3
+    urls:
+      - https://storage.yandexcloud.net/tochno-st-catalog/FNS/data_ndfl_155_v20260722/data_5ndfl_155_v20260722.parquet
 
 # Параметры следующих этапов: стартовые значения, уточняются при реализации (PLAN.md, этапы 1–5).
 period:
