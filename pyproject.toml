@@ -3,6 +3,8 @@ name = "munnet"
 version = "0.1.0"
 description = "Типы локальных экономик России: кластеризация динамической атрибутированной сети муниципалитетов"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "numpy",

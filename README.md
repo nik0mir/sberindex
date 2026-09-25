@@ -93,3 +93,9 @@ make test   # pytest
 make lint   # ruff
 make requirements   # обновить requirements.txt после изменения зависимостей
 ```
+
+## Лицензия
+
+Код проекта распространяется по лицензии [MIT](LICENSE). Исходные и производные данные — по
+CC BY-SA 4.0 (см. раздел «Данные и лицензии»). Навыки в `.claude/skills/` — под собственными лицензиями,
+перечень в [.claude/skills/THIRD_PARTY.md](.claude/skills/THIRD_PARTY.md).
