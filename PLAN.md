@@ -41,8 +41,8 @@
       Сертификаты для sberindex.ru, sberbank и Росстата временно лежат в `certs/` (`python -m certs` проверяет доступ).
 - [x] Прочитать на сайте доп. материалы к задаче (п. 4.3): формулировку, наборы данных, требования к динамике.
       Конспект, схемы данных и ссылки — `docs/materials.md`.
-- [ ] Добавить в Network access `pypi.org`, `files.pythonhosted.org` (иначе не ставятся pandas/pyarrow)
-      и `s.sber.ru` (архив справочника границ МО).
+- [x] Добавить в Network access `pypi.org`, `files.pythonhosted.org` (иначе не ставятся pandas/pyarrow)
+      и `s.sber.ru` (архив справочника границ МО). PyPI — только через прокси агента, см. `docs/materials.md`.
 - [ ] Каркас репозитория: `configs/`, `src/<пакет>/`, `scripts/`, `tests/`, `report/`, `site/`, `Makefile`, закреплённое окружение.
 - [ ] Скилы и агенты проекта (`.claude/skills`, `.claude/agents`), включая агентов-судей по критериям.
 
