@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Скачанные и производные данные: воспроизводятся командой make all
+/data/
+/outputs/
+*.part
