@@ -12,7 +12,10 @@
   (в отчёт — строки года признаков контекста разведки, остальные годы — в CSV).
 
 Вычисления — чистые функции этого модуля; ``run_section`` только собирает факты, графики и таблицы.
-Раздел читает только ``ctx.data`` (полигоны — через ``maps.load_geometry(ctx.data.geo_path)``).
+Раздел читает ``ctx.data`` (полигоны — через ``maps.load_geometry(ctx.data.geo_path)``). Одно исключение:
+столицы субъектов без трат (их нет в выходах этапа panel) берутся из колонок ``is_capital`` и
+``name_short`` полигонов, а пока их там нет — из справочника границ правилом ``is_capital`` этапа panel
+(``panel.territory.regional_centers``); без обоих источников факты о них — «нет данных».
 Параметры — секция ``eda.coverage`` конфига; пока её нет, действуют ``COVERAGE_DEFAULTS``.
 """
 
@@ -23,6 +26,7 @@ import re
 import textwrap
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
@@ -39,6 +43,7 @@ from munnet.contracts import MATCH_METHODS, MO_TYPES, N_MONTHS, YEARS
 from munnet.eda import stats
 from munnet.eda.base import Finding, SectionContext
 from munnet.eda.data import CONTEXT_YEAR
+from munnet.panel import territory
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +54,7 @@ TITLE = "Что есть в данных"
 # действуют, только пока секции нет (раздел не падает на конфиге без неё).
 COVERAGE_DEFAULTS: dict[str, Any] = {
     "full_share_min": 0.9,  # проверка заголовка F02: полный ряд не меньше чем у 90% МО панели
+    "near_all_share": 0.99,  # заголовок F02 говорит «почти у всех», если показатель есть у такой доли МО
     "month_thresholds": [12, 18, 24],  # пороги длины ряда для узла сети: сколько МО и жителей остаётся (Б.6)
     "text_regions": 3,  # сколько регионов называть в тексте (больше всего неполных рядов, пропущенных МО)
     "missing_alpha": 0.01,  # уровень теста Манна — Уитни, ниже которого пропуски называются неслучайными
@@ -97,35 +103,43 @@ MAIN_DIM = "TOTAL"  # разрез-итог показателя в context_long
 
 @dataclass(frozen=True)
 class Indicator:
-    """Показатель контекста: подпись, источник и показывать ли его на F02."""
+    """Показатель контекста: подпись, источник, показывать ли его на F02 и короткое имя для заголовка F02
+    (пусто — подпись строчными)."""
 
     label: str
     source: str
     on_chart: bool = True
+    short: str = ""
+
+    @property
+    def title_name(self) -> str:
+        return self.short or self.label.lower()
 
 
 # Порядок — порядок строк T02; показатели не из словаря идут после, по алфавиту.
 INDICATORS: dict[str, Indicator] = {
-    "population": Indicator("Население на 1 января", ROSSTAT),
-    "age": Indicator("Возрастные группы", ROSSTAT),
+    "population": Indicator("Население на 1 января", ROSSTAT, short="население"),
+    "age": Indicator("Возрастные группы", ROSSTAT, short="возраст"),
     "population_urban": Indicator("Городское население", ROSSTAT, on_chart=False),
     "population_rural": Indicator("Сельское население", ROSSTAT, on_chart=False),
-    "wage": Indicator("Средняя зарплата", ROSSTAT),
+    "wage": Indicator("Средняя зарплата", ROSSTAT, short="зарплата"),
     "employees": Indicator("Работники", ROSSTAT),
     "payroll": Indicator("Фонд оплаты труда", ROSSTAT, on_chart=False),
-    "retail": Indicator("Оборот розницы", ROSSTAT),
-    "catering_turnover": Indicator("Оборот общепита", ROSSTAT),
-    "shipments": Indicator("Отгрузка товаров", ROSSTAT),
+    "retail": Indicator("Оборот розницы", ROSSTAT, short="розница"),
+    "catering_turnover": Indicator("Оборот общепита", ROSSTAT, short="общепит"),
+    "shipments": Indicator("Отгрузка товаров", ROSSTAT, short="отгрузка"),
     "orgs": Indicator("Организации", ROSSTAT),
-    "ip": Indicator("Индивидуальные предприниматели", ROSSTAT),
-    "nights": Indicator("Ночёвки в средствах размещения", ROSSTAT),
-    "beds": Indicator("Места в средствах размещения", ROSSTAT),
+    "ip": Indicator("Индивидуальные предприниматели", ROSSTAT, short="ИП"),
+    "nights": Indicator("Ночёвки в средствах размещения", ROSSTAT, short="ночёвки"),
+    "beds": Indicator("Места в средствах размещения", ROSSTAT, short="места размещения"),
     "invest": Indicator("Инвестиции", ROSSTAT),
-    "ndfl_income": Indicator("Доход по 5-НДФЛ", FNS),
-    "ndfl_recipients": Indicator("Получатели дохода по 5-НДФЛ", FNS),
+    "ndfl_income": Indicator("Доход по 5-НДФЛ", FNS, short="доход 5-НДФЛ"),
+    "ndfl_recipients": Indicator("Получатели дохода по 5-НДФЛ", FNS, short="получатели 5-НДФЛ"),
 }
 # Покрытие этих показателей — обязательные факты ``cov_<показатель>_<год>`` (Б.4), даже если их ещё нет.
 KEY_INDICATORS = ("population", "wage", "ndfl_income")
+# Показатели, про которые заголовок F02 говорит «почти у всех», если их покрытие не ниже ``near_all_share``.
+CORE_INDICATORS = ("population", "wage")
 
 # Флаги значений, которые этап panel оставляет в context_long, но не берёт в context_annual (значения таких МО
 # попадают и в unmatched.csv с причиной, равной флагу): в T02 это не «потеря», а «исключено».
@@ -218,11 +232,13 @@ SERIES_NOTES = {
 
 # Регионы с курортами Черноморского побережья: если их нет, курортный тип по тратам неполон.
 RESORT_REGIONS = ("Краснодарский край", "Республика Крым", "Севастополь")
+# Короткие имена регионов в тексте: «Москва и Петербург» — так же, как в остальном отчёте.
+REGION_SHORT = {"Санкт-Петербург": "Петербург"}
 
 CAVEATS = [
     "Траты — оценка средних безналичных потребительских расходов жителей МО по моделям СберИндекса "
-    "в номинальных рублях. Траты приезжих в данных не видны; траты жителей вне своего МО по описанию набора "
-    "входят, но модель привязки не раскрыта.",
+    "в номинальных рублях. Траты приезжих в данных не видны; траты жителей вне своего МО (поездки, онлайн) "
+    "по смыслу определения входят, но модель привязки не раскрыта.",
     "Показатели Росстата — без малого бизнеса; занятость и доход по 5-НДФЛ считаются по месту работодателя, "
     "поэтому у внутригородских территорий Москвы и Петербурга на жителя они не считаются.",
     "Объединения МО 2024 года: ряды предшественников и преемников не склеены, на карте 2024 года показаны "
@@ -245,6 +261,7 @@ BAR_HEIGHT = 0.8  # доля шага строки под столбцами (у
 PAIR_ROW_RATIO = 1.4  # высота строки с парой лет относительно строки воронки на F02
 XLIM_PAD = 1.1  # запас оси X справа под подписи чисел у концов столбцов
 LABEL_PAD_PT = 3  # отступ подписей у столбцов, pt
+YEAR_GAP_PT = 6  # от числа у столбца до подписи года на F02, pt
 
 
 # --- Помощники ------------------------------------------------------------------------------------
@@ -485,6 +502,60 @@ def missing_outside(frame: gpd.GeoDataFrame, names: pd.Series) -> pd.DataFrame:
     out["region_name"] = out["region_code"].map(names).astype(str)
     out = out.sort_values(["n_missing", "region_name"], ascending=[False, True])
     return out[["region_code", "region_name", "n_missing"]].reset_index(drop=True)
+
+
+# Столицы субъектов берутся из колонок полигонов, если этап panel их пишет; иначе — из справочника границ.
+CAPITAL_GEO_COLUMNS = ("is_capital", "name_short")
+CAPITAL_COLUMNS = ["region_code", "territory_id", "name"]
+
+
+def capitals_from_geo(geo: pd.DataFrame) -> pd.DataFrame | None:
+    """Столицы субъектов по колонкам ``is_capital`` и ``name_short`` полигонов; None — колонок нет."""
+    if not set(CAPITAL_GEO_COLUMNS) <= set(geo.columns):
+        return None
+    cap = geo.loc[geo["is_capital"].fillna(False).astype(bool), ["region_code", "territory_id", "name_short"]]
+    cap = cap.rename(columns={"name_short": "name"}).drop_duplicates("territory_id")
+    return cap.astype({"region_code": int, "territory_id": int, "name": str})[CAPITAL_COLUMNS]
+
+
+def capitals_from_dictionary(cfg: Config) -> pd.DataFrame | None:
+    """Столицы субъектов по справочнику границ тем же правилом, что и ``is_capital`` этапа panel
+    (``territory.regional_centers`` по версиям, действующим в годах панели); имя — короткое имя последней
+    версии. None — справочника нет (например, на синтетике)."""
+    p = cfg["panel"]
+    path = Path(cfg["paths"]["raw"]) / p["dictionary"]
+    if not path.exists():
+        return None
+    versions = territory.versions_in_years(
+        territory.read_dictionary(path), p["years"], p["dictionary_last_year"]
+    )
+    cap = territory.regional_centers(versions, p)
+    names = versions.drop_duplicates("territory_id", keep="last").set_index("territory_id")
+    cap = cap.assign(name=cap["territory_id"].map(names["municipal_district_name_short"]).astype(str))
+    return cap.astype({"region_code": int, "territory_id": int})[CAPITAL_COLUMNS]
+
+
+def absent_capitals(frame: gpd.GeoDataFrame, capitals: pd.DataFrame, names: pd.Series) -> pd.DataFrame:
+    """Столицы субъектов без трат в регионах, где другие МО панели есть (кадр карты ``frame`` — срез года).
+
+    Это часть МО из ``missing_outside``. Регион, где хотя бы одно из помеченных столицей МО в панели, не
+    попадает. Колонки: ``region_code``, ``region_name``, ``territory_id``, ``name``; по имени столицы.
+    """
+    columns = ["region_code", "region_name", "territory_id", "name"]
+    ids = frame["territory_id"].astype(int)
+    in_panel = frame["in_panel"].astype(bool)
+    has_panel = in_panel.groupby(frame["region_code"]).transform("any")
+    missing = set(ids[~in_panel & has_panel])
+    cap = capitals.assign(territory_id=capitals["territory_id"].astype(int))
+    with_capital = set(cap.loc[cap["territory_id"].isin(set(ids[in_panel])), "region_code"].astype(int))
+    out = cap.loc[cap["territory_id"].isin(missing) & ~cap["region_code"].astype(int).isin(with_capital)]
+    out = out.assign(region_name=out["region_code"].astype(int).map(names).astype(str))
+    return out.sort_values(["name", "territory_id"])[columns].reset_index(drop=True)
+
+
+def all_incomplete_regions(regions: pd.DataFrame) -> pd.DataFrame:
+    """Регионы, где ряды всех МО панели неполные (строки ``incomplete_by_region`` с долей 1)."""
+    return regions.loc[regions["n_full"] == 0].reset_index(drop=True)
 
 
 def south_west(absent: pd.DataFrame, lat: pd.Series, lon: pd.Series) -> bool:
@@ -916,6 +987,40 @@ def plot_coverage_map(
     return fig
 
 
+def hidden_note(territories: pd.DataFrame, drawn_ids: Iterable[int], year: int) -> str:
+    """Почему не все МО панели на карте ``year``: «3 МО, объединённые в 2024 году, показаны преемниками»
+    (все невидимые — предшественники объединений), иначе «2 МО нет в границах 2024 года»; пусто — видны
+    все."""
+    ids = territories["territory_id"].astype(int)
+    hidden = territories.loc[~ids.isin(set(int(i) for i in drawn_ids))]
+    k = len(hidden)
+    if not k:
+        return ""
+    nb = style.NBSP
+    if (hidden["lineage_role"].astype(str) == "union_predecessor").all():
+        merged = plural(k, "объединённое", "объединённые", "объединённые")
+        shown = plural(k, "показано преемником", "показаны преемниками", "показаны преемниками")
+        return f"{k}{nb}МО, {merged} в{nb}{year} году, {shown}"
+    return f"{k}{nb}МО нет в границах {year} года"
+
+
+def new_mo_note(
+    territories: pd.DataFrame, frame_slice: pd.DataFrame, frame_next: pd.DataFrame, slice_year: int
+) -> str:
+    """Пояснение к пунктиру F02 «все МО панели»: МО панели вне среза справочника ``slice_year`` — «ещё 2 МО
+    появились в 2024 году» (все они есть в срезе следующего года), иначе «ещё 2 МО нет в справочнике 2023
+    года»; пусто — таких нет."""
+    ids = territories["territory_id"].astype(int)
+    new = ids[~ids.isin(set(frame_slice["territory_id"].astype(int)))]
+    k = len(new)
+    if not k:
+        return ""
+    if new.isin(set(frame_next["territory_id"].astype(int))).all():
+        verb = plural(k, "появилось", "появились", "появились")
+        return f"ещё {k} МО {verb} в {slice_year + 1} году"
+    return f"ещё {k} МО нет в справочнике {slice_year} года"
+
+
 def _hbar_axis(ax) -> None:
     """Горизонтальные столбцы: сетка только по оси значений, без левой рамки и засечек подписей."""
     ax.grid(False, axis="y")
@@ -924,11 +1029,18 @@ def _hbar_axis(ax) -> None:
     ax.spines["left"].set_visible(False)
 
 
-def plot_funnel(steps: pd.DataFrame, coverage: pd.DataFrame, n_mo: int, years: Sequence[int]) -> Figure:
+def plot_funnel(
+    steps: pd.DataFrame,
+    coverage: pd.DataFrame,
+    n_mo: int,
+    years: Sequence[int],
+    total_note: str = "",
+) -> Figure:
     """F02: вверху — воронка среза справочника, внизу — МО панели со значением показателей контекста по годам.
 
-    Ось X общая (число МО), столбцы от нуля; пунктир — все МО панели; годы подписаны прямо на столбцах первой
-    строки, показатели отсортированы по лучшему из годов покрытию.
+    Ось X общая (число МО), столбцы от нуля; пунктир — все МО панели (``total_note`` — пояснение в скобках
+    у подписи пунктира); год подписан прямо справа от числа у верхнего столбца этого года тем же кеглем,
+    показатели отсортированы по лучшему из годов покрытию.
     """
     shown = [i for i, spec in INDICATORS.items() if spec.on_chart]
     cov = coverage.loc[coverage["indicator"].isin(shown) & coverage["year"].isin(years)]
@@ -957,26 +1069,28 @@ def plot_funnel(steps: pd.DataFrame, coverage: pd.DataFrame, n_mo: int, years: S
         color = year_colors[j % len(year_colors)]
         yy = part["indicator"].map(row).to_numpy() - BAR_HEIGHT / 2 + height * (j + 0.5)
         bars = bottom.barh(yy, part["n_mo"], height=height, color=color)
-        bottom.bar_label(
+        values = bottom.bar_label(
             bars, [style.fmt_num(v) for v in part["n_mo"]], padding=LABEL_PAD_PT, fontsize=BAR_LABEL_PT
         )
-        first = part["indicator"].to_numpy() == order[0]
-        if first.any():  # прямая подпись года на первой строке вместо легенды
+        if len(part):  # прямая подпись года справа от числа верхней строки с этим годом вместо легенды
+            first = int(np.argmin(part["indicator"].map(row).to_numpy()))
             bottom.annotate(
-                str(year),
-                (0, yy[first][0]),
-                xytext=(LABEL_PAD_PT, 0),
+                f"{year} год",
+                (1, 0.5),
+                xycoords=values[first],
+                xytext=(YEAR_GAP_PT, 0),
                 textcoords="offset points",
                 va="center",
                 ha="left",
                 fontsize=BAR_LABEL_PT,
-                color="white" if color == style.ACCENT else style.TEXT,
+                fontweight="bold",
+                color=style.TEXT if color == style.ACCENT else style.TEXT2,
             )
     bottom.set_yticks(np.arange(len(order)), [INDICATORS.get(i, Indicator(i, "")).label for i in order])
     bottom.invert_yaxis()
     bottom.axvline(n_mo, color=style.TEXT2, linewidth=0.8, linestyle=":")
     bottom.annotate(
-        f"все МО панели: {style.fmt_num(n_mo)}",
+        f"все МО панели: {style.fmt_num(n_mo)}" + (f" ({total_note})" if total_note else ""),
         (n_mo, 1),
         xycoords=("data", "axes fraction"),
         xytext=(-LABEL_PAD_PT, LABEL_PAD_PT),
@@ -996,14 +1110,40 @@ def plot_funnel(steps: pd.DataFrame, coverage: pd.DataFrame, n_mo: int, years: S
     return fig
 
 
-def lowest_coverage(coverage: pd.DataFrame, year: int) -> str:
-    """«оборот общепита (1402 МО)» — показатель графика F02 с наименьшим покрытием за год."""
+def lowest_row(coverage: pd.DataFrame, year: int) -> pd.Series | None:
+    """Строка ``context_coverage`` показателя графика F02 с наименьшим покрытием за год (при равенстве —
+    раньше в порядке INDICATORS); None — строк года нет."""
     on_chart = [i for i, spec in INDICATORS.items() if spec.on_chart]
     part = coverage.loc[(coverage["year"] == year) & coverage["indicator"].isin(on_chart)]
     if part.empty:
+        return None
+    return part.sort_values("n_mo", kind="mergesort").iloc[0]
+
+
+def lowest_coverage(coverage: pd.DataFrame, year: int) -> str:
+    """«оборот общепита (1402 МО)» — показатель графика F02 с наименьшим покрытием за год."""
+    row = lowest_row(coverage, year)
+    if row is None:
         return "нет данных"
-    row = part.sort_values("n_mo").iloc[0]
     return f"{str(row['label']).lower()} ({style.fmt_num(row['n_mo'])} МО)"
+
+
+def funnel_title(full_share: float, shares: Mapping[str, float], lowest: str | None, near_all: float) -> str:
+    """Заголовок F02: доля МО с полным рядом; «население и зарплата — почти у всех», если обе доли не ниже
+    ``near_all`` (иначе — доля зарплаты); показатель с наименьшим покрытием ``lowest``, если он не среди них
+    и его доля ниже ``near_all``. ``shares`` — доля МО панели со значением по показателю за год заголовка."""
+    nb = style.NBSP
+    head = f"Траты за все {months_word(N_MONTHS)} — у{nb}{style.fmt_pct(full_share, 0)} МО"
+    core = [i for i in CORE_INDICATORS if i in shares]
+    rest = []
+    if core and all(shares[i] >= near_all for i in core):
+        rest.append(f"{_and_list(INDICATORS[i].title_name for i in core)} — почти у{nb}всех")
+    elif "wage" in shares:
+        rest.append(f"зарплата — у{nb}{style.fmt_pct(shares['wage'], 0)}")
+    if lowest is not None and lowest not in core and shares.get(lowest, 1.0) < near_all:
+        name = INDICATORS.get(lowest, Indicator(lowest, "")).title_name
+        rest.append(f"{name} — у{nb}{style.fmt_pct(shares[lowest], 0)}")
+    return head + (f"; {', '.join(rest)}" if rest else "")
 
 
 # --- Раздел ---------------------------------------------------------------------------------------
@@ -1043,7 +1183,9 @@ def _series_facts(ctx: SectionContext, params: Mapping[str, Any], ref_year: int)
             ("pop_share_inner_city", inner["pop_share"], "pct", f"доля населения выборки; {weight_note}"),
             (
                 "inner_city_by_region",
-                counts_text(inner["by_region"].index, inner["by_region"].to_numpy()),
+                counts_text(
+                    [REGION_SHORT.get(r, r) for r in inner["by_region"].index], inner["by_region"].to_numpy()
+                ),
                 "str",
             ),
         ],
@@ -1066,14 +1208,38 @@ def _series_facts(ctx: SectionContext, params: Mapping[str, Any], ref_year: int)
 
 
 def _absence_facts(
-    ctx: SectionContext, frame: gpd.GeoDataFrame, names: pd.Series, year: int, k_text: int
+    ctx: SectionContext,
+    frame: gpd.GeoDataFrame,
+    names: pd.Series,
+    year: int,
+    k_text: int,
+    capitals: pd.DataFrame | None,
 ) -> dict[str, Any]:
-    """Кого нет: срез справочника ``year``, выпавшие регионы, МО без данных в остальных регионах."""
+    """Кого нет: срез справочника ``year``, выпавшие регионы, МО без данных в остальных регионах и среди
+    них — столицы субъектов (``capitals`` None — источника столиц нет, факты «нет данных»)."""
     ter = ctx.data.territories
     absent = absent_regions(frame, names)
     outside = missing_outside(frame, names)
     steps = funnel(frame, ter, year)
     n_absent = len(absent)
+    caps = None if capitals is None else absent_capitals(frame, capitals, names)
+    cap_note = (
+        f"столицы субъектов (правило is_capital этапа panel) без трат среди МО среза {year} года в регионах, "
+        "где другие МО панели есть: у этих регионов в сети нет ядра"
+    )
+    if caps is None:
+        cap_facts = [
+            ("n_absent_capitals", None, "int", f"{cap_note}; источника столиц нет"),
+            ("absent_capitals", "нет данных", "str"),
+            ("absent_capital_regions", "нет данных", "str"),
+        ]
+    else:
+        cap_facts = [
+            ("n_absent_capitals", len(caps), "int", cap_note),
+            ("absent_capitals", ", ".join(caps["name"]) or "нет", "str", "по алфавиту"),
+            ("absent_capital_regions", join_regions(caps["region_name"]) or "нет", "str"),
+        ]
+    _facts(ctx, cap_facts)
     _facts(
         ctx,
         [
@@ -1100,7 +1266,13 @@ def _absence_facts(
             ),
         ],
     )
-    return {"absent": absent, "steps": steps, "n_slice": len(frame)}
+    return {
+        "absent": absent,
+        "steps": steps,
+        "n_slice": len(frame),
+        "capitals": caps,
+        "n_missing_outside": int(outside["n_missing"].sum()),
+    }
 
 
 def _missing_facts(ctx: SectionContext, params: Mapping[str, Any]) -> dict[str, Any]:
@@ -1108,6 +1280,7 @@ def _missing_facts(ctx: SectionContext, params: Mapping[str, Any]) -> dict[str, 
     mo = ctx.data.mo
     feats, auc, p = missingness(mo, seed=int(ctx.cfg["seed"]))
     regions = incomplete_by_region(mo)
+    whole = all_incomplete_regions(regions)
     incomplete = mo["series_status"].astype(str) != "full"
     pop = mo[POP_COLUMN].astype("float64")
     pop_full, pop_inc = float(pop[~incomplete].median()), float(pop[incomplete].median())
@@ -1137,11 +1310,30 @@ def _missing_facts(ctx: SectionContext, params: Mapping[str, Any]) -> dict[str, 
                 "str",
                 "регионы с наибольшим числом неполных рядов",
             ),
+            (
+                "n_all_incomplete_regions",
+                len(whole),
+                "int",
+                "регионы, где ряды всех МО панели неполные",
+            ),
+            (
+                "all_incomplete_regions",
+                counts_text(whole["region_name"], whole["n_incomplete"]) or "нет",
+                "str",
+                "регион — число МО панели, у всех ряд неполный",
+            ),
+            (
+                "n_all_incomplete_mo",
+                int(whole["n_incomplete"].sum()),
+                "int",
+                "МО панели в регионах, где неполные ряды у всех МО",
+            ),
         ],
     )
     return {
         "features": feats,
         "regions": regions,
+        "n_whole_regions": len(whole),
         "auc": auc,
         "p": p,
         "pop_smaller": pop_inc < pop_full,
@@ -1172,6 +1364,25 @@ def _context_facts(
                 ctx.fact(
                     f"cov_{fact_key(ind)}_{year}", 0, "int", note=f"{ind} за {year} год нет в context_long"
                 )
+    low = lowest_row(coverage, CONTEXT_YEAR)
+    _facts(
+        ctx,
+        [
+            (
+                "context_min_indicator",
+                None if low is None else str(low["label"]).lower(),
+                "str",
+                f"показатель графика F02 с наименьшим покрытием, {CONTEXT_YEAR} год",
+            ),
+            (
+                "context_min_n",
+                None if low is None else int(low["n_mo"]),
+                "int",
+                "МО панели с этим показателем",
+            ),
+            ("context_min_share", None if low is None else low["share"], "pct", "их доля от МО панели"),
+        ],
+    )
     gap_ind = str(params["gap_indicator"])
     gaps = regions_without_rows(ctx.data.unmatched, ctx.data.territories, gap_ind, ref_year)
     where = f"{_indicator_label(gap_ind).lower()} ({gap_ind}) за {ref_year} год"
@@ -1188,7 +1399,7 @@ def _context_facts(
             (f"n_gap_mo_{ref_year}", int(gaps["n_mo"].sum()), "int", f"МО панели в этих регионах: {where}"),
         ],
     )
-    return {"coverage": coverage, "gap_regions": gaps, "gap_indicator": gap_ind}
+    return {"coverage": coverage, "gap_regions": gaps, "gap_indicator": gap_ind, "has_min": low is not None}
 
 
 def hard_ok_text(summary: Mapping[str, int]) -> str:
@@ -1269,10 +1480,13 @@ def _save_map(
     top = miss["regions"]["region_name"].iloc[0] if len(miss["regions"]) else "нет"
     absent_text = join_regions(absent["region_name"]) if n_absent else "нет"
     nb = style.NBSP
-    # Заголовок и подзаголовок — в одну строку на ширине карты (длиннее — перенос и карта меньше).
-    subtitle = f"Статус ряда трат за {YEAR_SPAN} годы; на карте {len(drawn)} из {n_mo}{nb}МО панели"
-    if len(drawn) < n_mo:
-        subtitle += f" в границах {year} года"
+    # Подзаголовок объясняет, почему в легенде меньше МО, чем в тексте: МО, объединённые к году карты, в её
+    # границах не видны, их территорию показывают преемники.
+    # Годы ряда — в заголовке легенды, здесь их нет: подзаголовок не длиннее 120 знаков.
+    subtitle = f"Статус ряда трат, границы {year} года: на карте {len(drawn)} из {n_mo}{nb}МО"
+    hidden = hidden_note(ter, drawn.index, year)
+    if hidden:
+        subtitle += f" — {hidden}"
     ctx.save_figure(
         fig,
         fid="F01",
@@ -1301,26 +1515,24 @@ def _save_funnel(
     params: Mapping[str, Any],
     slice_year: int,
     year: int,
+    total_note: str = "",
 ) -> None:
     """F02: воронка среза справочника ``slice_year`` и покрытие контекста; в заголовке — покрытие года
     ``year`` (год признаков контекста разведки). Проверка заголовка: полный ряд — у подавляющего большинства
-    МО."""
-    cov = coverage_lookup(coverage)
-    full_min = float(params["full_share_min"])
-    nb = style.NBSP
-    # Год покрытия — в подписях столбцов, не в заголовке: с ним заголовок не помещается в одну строку.
-    parts = [f"Полный ряд — у{nb}{s['n_full']}{nb}МО"]
-    if cov.get(("wage", year)):
-        parts.append(f"зарплата — у{nb}{style.fmt_num(cov[('wage', year)])}")
-    if cov.get(("ndfl_income", year)):
-        parts.append(f"доход 5-НДФЛ — у{nb}{style.fmt_num(cov[('ndfl_income', year)])}")
+    МО; слова «почти у всех» и показатель с наименьшим покрытием выбираются по данным (``funnel_title``)."""
+    full_min, near_all = float(params["full_share_min"]), float(params["near_all_share"])
+    part = coverage.loc[coverage["year"] == year]
+    shares = dict(zip(part["indicator"].astype(str), part["n_mo"] / s["n_mo"], strict=True))
+    low = lowest_row(coverage, year)
     title = ctx.headline(
-        ", ".join(parts),
+        funnel_title(
+            s["n_full"] / s["n_mo"], shares, None if low is None else str(low["indicator"]), near_all
+        ),
         s["n_full"] >= full_min * s["n_mo"],
         f"F02: полный ряд у {s['n_full']} из {s['n_mo']} МО, нужно не меньше {style.fmt_pct(full_min, 0)}",
     )
     steps = gaps["steps"]
-    fig = plot_funnel(steps, coverage, s["n_mo"], list(YEARS))
+    fig = plot_funnel(steps, coverage, s["n_mo"], list(YEARS), total_note)
     cols = ["block", "step", "label", "year", "n_mo"]
     context = coverage.loc[coverage["year"].isin(YEARS)].rename(columns={"indicator": "step"})
     data = pd.concat(
@@ -1375,7 +1587,7 @@ def _save_tables(
         tid="T00",
         slug="controls",
         title=(
-            f"Контрольные числа этапа panel: жёстких {csum['hard_n']}, не сошлось {csum['hard_failed']}; "
+            f"Контрольные числа этапа `panel`: жёстких {csum['hard_n']}, не сошлось {csum['hard_failed']}; "
             f"мягких {csum['soft_n']}, вне допуска {csum['soft_warnings']}"
         ),
         md_rows=int(t00["kind"].isin([KIND_LABELS[k] for k in CHECKED_KINDS]).sum()),
@@ -1446,22 +1658,30 @@ def run_section(ctx: SectionContext) -> Finding:
     if "region_name" not in geo.columns:
         log.warning("В territories_geo нет region_name: регионы без МО панели будут подписаны кодами")
     names = region_names(geo, ctx.data.territories)
+    capitals = capitals_from_geo(geo)
+    if capitals is None:
+        capitals = capitals_from_dictionary(ctx.cfg)
+    if capitals is None:
+        log.warning(
+            "Нет ни колонок столиц в territories_geo, ни справочника границ: столицы без трат не ищутся"
+        )
+    frame = maps.map_frame(geo, slice_year)
 
     s = _series_facts(ctx, params, ref_year)
-    gaps = _absence_facts(
-        ctx, maps.map_frame(geo, slice_year), names, slice_year, int(params["text_regions"])
-    )
+    gaps = _absence_facts(ctx, frame, names, slice_year, int(params["text_regions"]), capitals)
     miss = _missing_facts(ctx, params)
     context = _context_facts(ctx, s["n_mo"], params, ref_year)
     coverage = context["coverage"]
     csum = _controls_facts(ctx)
 
     _save_map(ctx, geo, names, s, gaps, miss, ref_year)
-    _save_funnel(ctx, s, gaps, coverage, params, slice_year, CONTEXT_YEAR)
+    note = new_mo_note(ctx.data.territories, frame, maps.map_frame(geo, slice_year + 1), slice_year)
+    _save_funnel(ctx, s, gaps, coverage, params, slice_year, CONTEXT_YEAR, note)
     _save_tables(ctx, csum, miss, coverage, ref_year)
 
     cov = coverage_lookup(coverage)
     gap_ind = context["gap_indicator"]
+    caps = gaps["capitals"]
     summary = summary_md(
         s,
         n_absent=len(gaps["absent"]),
@@ -1475,6 +1695,10 @@ def run_section(ctx: SectionContext) -> Finding:
         has_cov={ind: (ind, CONTEXT_YEAR) in cov for ind in KEY_INDICATORS},
         n_gap_regions=len(context["gap_regions"]),
         gap_indicator=INDICATORS.get(gap_ind, Indicator(gap_ind, "")),
+        n_missing_outside=gaps["n_missing_outside"],
+        n_absent_capitals=None if caps is None else len(caps),
+        n_whole_regions=miss["n_whole_regions"],
+        has_min=context["has_min"],
     )
     return ctx.finding(title=TITLE, summary_md=summary, caveats=CAVEATS)
 
@@ -1493,52 +1717,79 @@ def summary_md(
     has_cov: Mapping[str, bool],
     n_gap_regions: int = 0,
     gap_indicator: Indicator | None = None,
+    n_missing_outside: int = 0,
+    n_absent_capitals: int | None = None,
+    n_whole_regions: int = 0,
+    has_min: bool = False,
 ) -> str:
-    """«Что видно» и «Что это значит для сюжета»: числа — только ``{{e1.ключ}}``; формы слов и утверждения
-    выбираются по данным («неслучайны» — только при p ниже порога, «курорты» — только если их регионы
-    выпали, фраза о регионах без строк источника — только если такие регионы есть).
+    """«Что видно» (пункты: покрытие; неполные ряды; у кого они; контекст) и «Что это значит для сюжета»:
+    числа — только ``{{e1.ключ}}``; формы слов и утверждения выбираются по данным («неслучайны» — только при
+    p ниже порога, «курорты» — только если их регионы выпали, столицы и регионы без полных рядов — только
+    если они есть, фраза о регионах без строк источника — только если такие регионы есть).
 
     ``slice_year`` — срез справочника воронки, ``context_year`` — год признаков контекста разведки,
     ``ref_year`` — опорный год трат; ``n_gap_regions`` — регионы без строк показателя ``gap_indicator``
-    за опорный год."""
+    за опорный год; ``n_missing_outside`` — МО справочника без трат вне выпавших регионов;
+    ``n_absent_capitals`` — столицы субъектов среди них (None — источника столиц нет); ``n_whole_regions`` —
+    регионы, где неполные ряды у всех МО панели; ``has_min`` — есть факт о показателе с наименьшим
+    покрытием."""
     nb = style.NBSP
 
     def f(key: str) -> str:
         return f"{{{{{SECTION_ID}.{key}}}}}"
 
+    def bullets(items: Sequence[tuple[str, str]]) -> str:
+        return "\n".join(f"- **{head}.** {text}" for head, text in items)
+
     regions_gen = genitive_plural(s["n_regions"], "региона", "регионов")
-    seen = [
-        f"Траты есть по {f('n_mo')} МО {f('n_regions')} {regions_gen}. Полный ряд за "
-        f"{months_word(N_MONTHS)} — у{nb}{f('n_full')} МО ({f('full_share')}), ровно {YEARS[0]} год — "
-        f"у{nb}{f(f'n_only_{YEARS[0]}')}, ровно {YEARS[1]} год — у{nb}{f(f'n_only_{YEARS[1]}')}, прочие "
-        "неполные — "
-        f"у{nb}{f('n_partial')}; больше всего неполных рядов "
-        f"в{nb}регионах: {f('incomplete_regions')}. Меньше всего МО с{nb}тратами в{nb}одном месяце — "
-        f"{f('mo_per_month_min')} ({f('mo_per_month_min_date')}), больше всего — {f('mo_per_month_max')} "
-        f"({f('mo_per_month_max_date')})."
-    ]
+    coverage = [f"Траты есть по {f('n_mo')} МО {f('n_regions')} {regions_gen}."]
     if n_absent:
-        seen.append(
+        coverage.append(
             f"Целиком без данных СберИндекса {f('n_absent_regions')} "
-            f"{plural(n_absent, 'регион', 'региона', 'регионов')}: {f('absent_regions')}; в{nb}остальных "
-            f"регионах нет ещё {f('n_missing_outside')} МО справочника {slice_year} года (больше всего: "
+            f"{plural(n_absent, 'регион', 'региона', 'регионов')}: {f('absent_regions')}."
+        )
+    if n_missing_outside:
+        where = "В остальных регионах" if n_absent else "В регионах с тратами"
+        coverage.append(
+            f"{where} нет ещё {f('n_missing_outside')} МО справочника {slice_year} года (больше всего: "
             f"{f('missing_outside_regions')})."
         )
-    tests = (
-        f"тест Манна — Уитни, p{nb}={nb}{f('missing_mw_p')}); логистическая модель по населению, зарплате, "
-        f"доле горожан, широте, доступности рынков и типу МО отличает неполные ряды от полных с{nb}AUC "
-        f"{f('missing_auc')} (0,5 — не лучше угадывания)."
-    )
+        if n_absent_capitals:
+            capitals = plural(n_absent_capitals, "столица субъекта", "столицы субъектов", "столиц субъектов")
+            coverage.append(f"Среди них {f('n_absent_capitals')} {capitals}: {f('absent_capitals')}.")
+
+    series = [
+        f"Полный ряд за {months_word(N_MONTHS)} — у{nb}{f('n_full')} МО ({f('full_share')}); ровно "
+        f"{YEARS[0]} год — у{nb}{f(f'n_only_{YEARS[0]}')}, ровно {YEARS[1]} год — "
+        f"у{nb}{f(f'n_only_{YEARS[1]}')}, прочие неполные — у{nb}{f('n_partial')}.",
+        f"Меньше всего МО с{nb}тратами в{nb}одном месяце — {f('mo_per_month_min')} "
+        f"({f('mo_per_month_min_date')}), больше всего — {f('mo_per_month_max')} "
+        f"({f('mo_per_month_max_date')}).",
+    ]
+    mw = f"тест Манна — Уитни, p{nb}={nb}{f('missing_mw_p')}"
+    dropouts = []
     if pop_smaller:
-        seen.append(
-            f"Неполные ряды — у{nb}меньших МО: медиана населения {f('pop_median_incomplete')} человек против "
-            f"{f('pop_median_full')} у{nb}полных ({tests}"
+        dropouts.append(
+            f"Неполные ряды чаще у{nb}меньших МО: медиана населения {f('pop_median_incomplete')} человек "
+            f"против {f('pop_median_full')} у{nb}полных ({mw})."
         )
     else:
-        seen.append(
+        dropouts.append(
             f"Медиана населения МО с неполным рядом — {f('pop_median_incomplete')} человек, с полным — "
-            f"{f('pop_median_full')} ({tests}"
+            f"{f('pop_median_full')} ({mw})."
         )
+    dropouts.append(
+        "Модель пропуска по населению, зарплате, доле горожан, широте, доступности рынков и типу МО отличает "
+        f"неполные ряды от полных с{nb}AUC {f('missing_auc')} (0,5 — не лучше угадывания)."
+    )
+    if n_whole_regions:
+        where = genitive_plural(n_whole_regions, "регионе", "регионах")
+        dropouts.append(
+            f"Пропуски идут и целыми регионами: в{nb}{f('n_all_incomplete_regions')} {where} неполные ряды "
+            f"у{nb}всех МО панели ({f('all_incomplete_regions')})."
+        )
+
+    context = []
     cov_parts = []
     if has_cov.get("population"):
         cov_parts.append(f"население на 1{nb}января — у{nb}{f(f'cov_population_{context_year}')} МО панели")
@@ -1547,48 +1798,85 @@ def summary_md(
     if has_cov.get("ndfl_income"):
         cov_parts.append(f"доход по 5-НДФЛ — у{nb}{f(f'cov_ndfl_income_{context_year}')}")
     if cov_parts:
-        seen.append(f"Контекст {context_year} года: " + ", ".join(cov_parts) + " (таблица T02).")
+        context.append(f"В{nb}{context_year} году значения есть: " + ", ".join(cov_parts) + ".")
+    if has_min:
+        context.append(
+            f"Реже всего есть показатель «{f('context_min_indicator')}» — у{nb}{f('context_min_share')} МО "
+            "панели (таблица T02)."
+        )
     if n_gap_regions and gap_indicator is not None and ref_year != context_year:
         where = genitive_plural(n_gap_regions, "регионе", "регионах")
         who = SOURCE_GENITIVE.get(gap_indicator.source, gap_indicator.source)
         source = f"у{nb}{who} " if who else ""
-        seen.append(
+        context.append(
             f"В{nb}{ref_year} году {source}нет годового значения показателя «{gap_indicator.label.lower()}» "
             f"ни у{nb}одного МО в{nb}{f(f'n_gap_regions_{ref_year}')} {where}: "
-            f"{f(f'gap_regions_{ref_year}')} ({f(f'n_gap_mo_{ref_year}')} МО панели), поэтому признаки "
-            f"контекста разведки взяты за{nb}{context_year} год."
+            f"{f(f'gap_regions_{ref_year}')} ({f(f'n_gap_mo_{ref_year}')} МО панели)."
         )
+        context.append(f"Поэтому признаки контекста разведки взяты за{nb}{context_year} год.")
+
+    seen = [
+        ("Покрытие", " ".join(coverage)),
+        ("Неполные ряды", " ".join(series)),
+        ("Кто выпадает", " ".join(dropouts)),
+    ]
+    if context:
+        seen.append(("Контекст", " ".join(context)))
 
     regions_prep = genitive_plural(s["n_regions"], "регионе", "регионах")  # предложный падеж: о 77 регионах
-    means = [f"Выводы разведки — о{nb}{f('n_regions')} {regions_prep} с тратами, а не обо всей России."]
+    scope = [f"Выводы разведки — о{nb}{f('n_regions')} {regions_prep} с тратами, а не обо всей России."]
     if absent_has_resorts:
-        means.append(
+        scope.append(
             "Курорты Черноморского побережья в данные не попали, а траты приезжих в данные курортного МО "
             "не входят: траты привязаны к жителям. Поэтому курортный тип по тратам не выделить, только по "
             "ночёвкам и местам в средствах размещения (Росстат)."
         )
+    means = [("Покрытие", " ".join(scope))]
+    if n_absent_capitals:
+        whose = genitive_plural(n_absent_capitals, "региона", "регионов")
+        means.append(
+            (
+                "Регионы без столицы",
+                f"У{nb}{f('n_absent_capitals')} {whose} с тратами столицы субъекта в данных нет. Для "
+                "сюжетов С2 «Ядра и периферия» и С6 «Где зарабатывают и где тратят» у этих регионов в сети "
+                "не будет ядра, а пригороды считаются от центра, которого в сети нет.",
+            )
+        )
     if nonrandom:
         means.append(
-            "Пропуски неслучайны, поэтому неполные МО нельзя молча выбросить: выводы о типах — о покрытых "
-            "МО, а неполные ряды показываются отдельно."
+            (
+                "Пропуски",
+                "Пропуски неслучайны, поэтому неполные МО нельзя молча выбросить: выводы о типах — "
+                "о покрытых МО, а неполные ряды показываются отдельно.",
+            )
         )
     if thresholds:
         ks = [int(k) for k in thresholds]
         months = genitive_plural(ks[-1], "месяца", "месяцев")  # «не короче 12, 18 и 24 месяцев»
         means.append(
-            "Порог длины ряда для узла сети выбирает этап 2: ряд не короче "
-            f"{_and_list(map(str, ks))} {months} есть у{nb}{_and_list(f(f'n_months_ge{k}') for k in ks)} МО "
-            f"({_and_list(f(f'pop_share_months_ge{k}') for k in ks)} населения выборки); все 12 месяцев "
-            f"{ref_year} года — у{nb}{f(f'n_full_{ref_year}')} МО."
+            (
+                "Длина ряда",
+                "Порог длины ряда для узла сети выбирает этап 2: ряд не короче "
+                f"{_and_list(map(str, ks))} {months} есть у{nb}{_and_list(f(f'n_months_ge{k}') for k in ks)} "
+                f"МО ({_and_list(f(f'pop_share_months_ge{k}') for k in ks)} населения выборки). Все 12 "
+                f"месяцев {ref_year} года — у{nb}{f(f'n_full_{ref_year}')} МО.",
+            )
         )
     means.append(
-        f"Москва и Петербург — {f('n_inner_city')} внутригородских территорий ({f('inner_city_by_region')}): "
-        f"{f('inner_city_node_share')} узлов и {f('pop_share_inner_city')} населения выборки. Оставить ли их "
-        "отдельными узлами или свернуть в два, решается до этапа 2 (раздел «Регион или место»)."
+        (
+            "Москва и Петербург",
+            f"Внутригородских территорий — {f('n_inner_city')} ({f('inner_city_by_region')}): "
+            f"{f('inner_city_node_share')} узлов и {f('pop_share_inner_city')} населения выборки. "
+            "Оставить ли их отдельными узлами или свернуть в два, решается до этапа 2 (раздел «Регион "
+            "или место»).",
+        )
     )
     means.append(
-        f"Контрольные числа этапа panel: жёстких {f('controls_hard_n')}, "
-        f"не сошлось {f('controls_hard_failed')}; мягких {f('controls_soft_n')}, "
-        f"вне допуска {f('controls_soft_warnings')} (таблица T00)."
+        (
+            "Проверки",
+            f"Контрольные числа этапа `panel`: жёстких {f('controls_hard_n')}, "
+            f"не сошлось {f('controls_hard_failed')}; мягких {f('controls_soft_n')}, "
+            f"вне допуска {f('controls_soft_warnings')} (таблица T00).",
+        )
     )
-    return "**Что видно.** " + " ".join(seen) + "\n\n**Что это значит для сюжета.** " + " ".join(means)
+    return f"**Что видно.**\n\n{bullets(seen)}\n\n**Что это значит для сюжета.**\n\n{bullets(means)}"

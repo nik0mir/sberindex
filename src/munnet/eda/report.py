@@ -7,20 +7,30 @@
   оговорки; рисунки и таблицы, поставленные в шаблоне отдельно, в блок раздела не входят;
 - ``<!-- figure: F16 -->``, ``<!-- table: T14 -->`` — один рисунок или одна таблица в этом месте;
 - ``<!-- lead: F16 -->`` — заголовок-вывод рисунка жирным (он защищён проверкой) как подводка раздела;
+- ``<!-- title: F15 -->`` — тот же заголовок-вывод простым текстом, без точки: чтобы вставить его в фразу;
 - ``<!-- sources -->`` — версии исходных данных из ``sources`` конфига;
 - ``<!-- if e3 e4 -->…<!-- endif -->`` — текст только при итогах всех названных разделов (без вложенности);
 - ``<!-- note: … -->`` — заметка для редактора шаблона, в отчёт не попадает.
 
+Перекрёстные ссылки: у каждого рисунка и таблицы — якорь (``fig-4``, ``tab-t14``), а «рис. 4, 5» и «таблица
+T06» в тексте становятся ссылками на них, чтобы из «Главного за минуту» можно было перейти к рисунку.
+
+Типографика: неразрывные пробелы (после однобуквенных предлогов и союзов, перед тире, в «рис. 4») ставятся
+одним проходом по готовому Markdown — в тексте шаблона, итогах разделов, подписях, оговорках и ячейках таблиц.
+
 Проверки (В.7): неизвестный ключ факта — ``KeyError``; незаполненное поле или директива — ``ValueError``;
 ``lint_ru`` (прямые кавычки, дефис вместо тире, десятичная точка, три точки, двойные пробелы) не пуст —
 ``EdaCheckError``, отчёт не пишется; PNG в ``docs/img/eda`` больше ``eda.figure.docs_max_kb`` — сначала
-сжимается палитрой, не помогло — ``ValueError``. Повторная сборка на тех же данных даёт тот же файл.
+сжимается палитрой, не помогло — ``ValueError``; картинка без файла или ссылка на несуществующий якорь —
+``EdaCheckError``. Числа текста, которых нет среди фактов (``stray_numbers``), попадают в лог предупреждением.
+Повторная сборка на тех же данных даёт тот же файл.
 """
 
 from __future__ import annotations
 
 import copy
 import io
+import logging
 import os
 import re
 import tempfile
@@ -30,6 +40,8 @@ from typing import Any
 
 from munnet.config import Config
 from munnet.eda.base import EDA_SUBDIR, PLACEHOLDER, EdaCheckError, Fact, FigureRecord, Finding, TableRecord
+
+log = logging.getLogger(__name__)
 
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "eda.md"
 KB = 1024
@@ -41,9 +53,18 @@ DEFAULTS: dict[str, Any] = {
     "strict_lint": True,  # замечания lint_ru останавливают сборку (EdaCheckError), отчёт не пишется
     "shrink_oversize": True,  # PNG больше лимита — пересохранить с палитрой (без сглаживания цветов)
     "png_colors": 256,  # цветов палитры при сжатии
+    # Числа текста, которые не обязаны быть фактами (регулярные выражения): годы, порядковые («90-й
+    # перцентиль», «2024-м»), шкала баллов «1–5», константа MAD 1,4826, AUC 0,5 угадывания.
+    "number_allow": [
+        r"\b20\d\d\b",
+        r"\b\d+-(?:й|го|м|му|х|е|я)\b",
+        r"\b1–5\b",
+        r"1,4826",
+        r"\b0,5(?=\W+не лучше угадывания)",
+    ],
 }
 
-_DIRECTIVE = re.compile(r"<!--\s*(section|figure|table|lead|sources)\b\s*:?\s*([^>]*?)\s*-->")
+_DIRECTIVE = re.compile(r"<!--\s*(section|figure|table|lead|title|sources)\b\s*:?\s*([^>]*?)\s*-->")
 _IF_OPEN = re.compile(r"<!--\s*if\s+([^>]*?)\s*-->")
 # Перевод строки после открывающего и закрывающего тегов входит в блок: соседние условные пункты списка
 # остаются одним плотным списком, а удалённый блок не оставляет пустых строк.
@@ -186,13 +207,14 @@ def typograph(text: str) -> str:
     return "".join(parts)
 
 
-NBSP = " "
+NBSP = "\u00a0"
 # Однобуквенные предлоги и союзы: после них — неразрывный пробел (ru-text), чтобы строка не кончалась на «в».
 _ONE_LETTER = re.compile(r"(?<![\w-])([ВвСсКкОоУуИиАаЯя]) (?=\S)")
-_BEFORE_DASH = re.compile(r"(?<=\S) — ")
+_BEFORE_DASH = re.compile(r"(?<=[^\s|]) — ")  # не в начале ячейки таблицы «| — |»
 _ABBREV = re.compile(r"\b(рис\.|см\.|т\.|п\.) (?=[\w\d{])")
 # Начало строки Markdown, которое не продолжает абзац предыдущей строки.
 _BLOCK_START = re.compile(r"^\s*(?:[-*+] |\d+\. |#|\||>|```|<!--)")
+_CODE_MARK = "\x00"  # заглушка кода `…` на время расстановки неразрывных пробелов
 
 
 def unwrap_paragraphs(text: str) -> str:
@@ -226,27 +248,152 @@ def unwrap_paragraphs(text: str) -> str:
 
 
 def nbsp_markdown(text: str) -> str:
-    """Неразрывные пробелы в тексте шаблона: после однобуквенных предлогов и союзов, перед тире, в «рис. 4»,
-    «т. е.», «п. п.». Код, таблицы и комментарии не трогаются."""
+    """Неразрывные пробелы в Markdown: после однобуквенных предлогов и союзов, перед тире, в «рис. 4»,
+    «т. е.», «п. п.». Работает и в ячейках таблиц; код (блоки и `встроенный`) и комментарии не трогаются."""
     out = []
     fenced = False
     for line in text.split("\n"):
         if line.lstrip().startswith("```"):
             fenced = not fenced
-        if fenced or line.lstrip().startswith(("|", "<!--", "```")):
+        if fenced or line.lstrip().startswith(("<!--", "```")):
             out.append(line)
             continue
-        parts = re.split(r"(`[^`]*`)", line)
+        # код в `…` заменяется заглушкой без пробелов: «в `файле`» тоже получает неразрывный пробел
+        codes = _INLINE_CODE.findall(line)
+        s = _INLINE_CODE.sub(_CODE_MARK, line)
+        previous = None
+        while previous != s:  # «и в МО»: два однобуквенных подряд
+            previous = s
+            s = _ONE_LETTER.sub(lambda m: m.group(1) + NBSP, s)
+        s = _BEFORE_DASH.sub(NBSP + "— ", s)
+        s = _ABBREV.sub(lambda m: m.group(1) + NBSP, s)
+        pieces = s.split(_CODE_MARK)
+        out.append(pieces[0] + "".join(code + rest for code, rest in zip(codes, pieces[1:], strict=True)))
+    return "\n".join(out)
+
+
+# --- Перекрёстные ссылки -------------------------------------------------------------------------
+
+
+def fig_anchor(fid: str) -> str:
+    """Якорь рисунка: «F04» → «fig-4» (номер рисунка в тексте — «рис. 4»)."""
+    return f"fig-{int(fid[1:])}"
+
+
+def tab_anchor(tid: str) -> str:
+    """Якорь таблицы: «T14» → «tab-t14»."""
+    return f"tab-{tid.lower()}"
+
+
+def anchor_tag(name: str) -> str:
+    """Пустой HTML-якорь без кавычек (``lint_ru`` не любит прямые кавычки; GitHub понимает ``name``)."""
+    return f"<a name={name}></a>"
+
+
+# Строки, где ссылки не ставятся: код, заголовки, таблицы, картинки и подписи таблиц с якорем.
+_NO_LINK_LINE = re.compile(r"^\s*(?:#|\||```|!\[|<a name=)")
+# Код в `…` и готовые ссылки [текст](адрес) не трогаются.
+_PROTECTED = re.compile(r"(`[^`]*`|!?\[[^\]]*\]\([^)]*\))")
+_FIG_REF = re.compile(r"рис\.[ \u00a0](\d+(?:(?:,[ \u00a0]|[ \u00a0]и[ \u00a0]|–)\d+)*)")
+_TAB_REF = re.compile(r"(?<![\w./\\-])((?:таблиц[аеуы][ \u00a0])?T(\d{2}))(?![\w-])")
+_NUMBER = re.compile(r"\d+")
+
+
+def link_refs(text: str, figures: Iterable[str], tables: Iterable[str]) -> str:
+    """«рис. 4, 5» → ссылки на якоря ``fig-4``, ``fig-5``; «таблица T06» и «T06» → ссылка на ``tab-t06``.
+
+    Ссылка ставится, только если такой рисунок (``F04``) или таблица есть в отчёте; код, готовые ссылки,
+    заголовки, таблицы и строки картинок не трогаются.
+    """
+    fig_numbers = {int(f[1:]) for f in figures}
+    table_ids = set(tables)
+
+    def fig(m: re.Match) -> str:
+        head, nums = m.group(0)[: m.start(1) - m.start(0)], m.group(1)
+        first = True
+
+        def one(n: re.Match) -> str:
+            nonlocal first
+            label = (head if first else "") + n.group(0)
+            first = False
+            return f"[{label}](#{fig_anchor('F' + n.group(0))})" if int(n.group(0)) in fig_numbers else label
+
+        return _NUMBER.sub(one, nums)
+
+    def tab(m: re.Match) -> str:
+        tid = f"T{m.group(2)}"
+        return f"[{m.group(1)}](#{tab_anchor(tid)})" if tid in table_ids else m.group(0)
+
+    out = []
+    fenced = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        if fenced or _NO_LINK_LINE.match(line):
+            out.append(line)
+            continue
+        parts = _PROTECTED.split(line)
         for i in range(0, len(parts), 2):
-            s = parts[i]
-            previous = None
-            while previous != s:  # «и в МО»: два однобуквенных подряд
-                previous = s
-                s = _ONE_LETTER.sub(lambda m: m.group(1) + NBSP, s)
-            s = _BEFORE_DASH.sub(NBSP + "— ", s)
-            parts[i] = _ABBREV.sub(lambda m: m.group(1) + NBSP, s)
+            parts[i] = _TAB_REF.sub(tab, _FIG_REF.sub(fig, parts[i]))
         out.append("".join(parts))
     return "\n".join(out)
+
+
+_IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+_ANCHOR_LINK = re.compile(r"\]\(#([^)\s]+)\)")
+_ANCHOR = re.compile(r"<a name=([\w-]+)></a>")
+
+
+def check_links(md: str, report_dir: Path) -> list[str]:
+    """Битые ссылки отчёта: картинка без файла (путь — от каталога отчёта) и ссылка на якорь, которого нет.
+
+    Якоря — ``<a name=…>`` и заголовки в написании GitHub (строчные буквы, пробелы → «-», без знаков).
+    """
+    problems = [f"нет файла картинки {p}" for p in _IMAGE.findall(md) if not (Path(report_dir) / p).exists()]
+    anchors = set(_ANCHOR.findall(md))
+    for heading in re.findall(r"^#+ (.+)$", md, flags=re.M):
+        slug = re.sub(r"[^\w\- ]", "", heading.replace("\u00a0", " ").strip().lower()).replace(" ", "-")
+        anchors.add(slug)
+    problems += [f"ссылка на несуществующий якорь #{a}" for a in _ANCHOR_LINK.findall(md) if a not in anchors]
+    return problems
+
+
+# --- Числа текста --------------------------------------------------------------------------------
+
+# Число текста: цифры с узкими неразрывными пробелами в разрядах и десятичной запятой («26 561», «0,77»);
+# не часть слова, кода или названия через дефис («T14», «k5», «e3», «X-13»).
+_NUM_TOKEN = re.compile(r"(?<![\w.-])\d[\d\u202f]*(?:,\d+)?(?![\w])")
+_INTERNAL_LINK = re.compile(r"\[[^\]]*\]\(#[^)]*\)")
+_NO_NUMBER_LINE = re.compile(r"^\s*(?:#|\||```|!\[|<a name=|\*Рисунок|>)")
+
+
+def _tokens(text: str) -> set[str]:
+    return {t.replace("\u202f", "") for t in _NUM_TOKEN.findall(text)}
+
+
+def stray_numbers(md: str, facts: Mapping[str, Fact], allow: Sequence[str] | None = None) -> list[str]:
+    """Числа текста отчёта, которых нет ни в одном факте (сравниваются готовые тексты фактов).
+
+    Проверяются абзацы и пункты списков; таблицы, код, заголовки, картинки, подписи рисунков, цитаты,
+    ссылки на рисунки и таблицы, пути и образцы ``allow`` (по умолчанию — ``DEFAULTS["number_allow"]``:
+    годы, шкала баллов) не проверяются. Пустой список — все числа текста взяты из фактов.
+    """
+    known: set[str] = set()
+    for f in facts.values():
+        known |= _tokens(f.text)
+    allowed = [re.compile(p) for p in (DEFAULTS["number_allow"] if allow is None else allow)]
+    problems = []
+    fenced = False
+    for n, raw in enumerate(md.splitlines(), 1):
+        if raw.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced or _NO_NUMBER_LINE.match(raw):
+            continue
+        line = _LIST_MARKER.sub("", _mask(_INTERNAL_LINK.sub(MASK, raw), allowed), count=1)
+        for token in sorted(_tokens(line) - known):
+            problems.append(f"строка {n}: число {token} не из фактов")
+    return problems
 
 
 # --- Картинки ------------------------------------------------------------------------------------
@@ -363,14 +510,15 @@ def render_figure(rec: FigureRecord, layout: _Layout) -> str:
     if source:
         caption += f" Источник: {typograph(_strip_end(source))}."
     data = _code_path(layout.outputs / rec.data_csv)
-    return f"![{alt}]({image})\n\n*{caption}* Данные: {data}."
+    return f"{anchor_tag(fig_anchor(rec.fid))}![{alt}]({image})\n\n*{caption}* Данные: {data}."
 
 
 def render_table(rec: TableRecord, layout: _Layout) -> str:
     """Таблица: номер и название, Markdown первых строк, путь к CSV целиком."""
     title = typograph(_strip_end(rec.title))
     csv = _code_path(layout.outputs / rec.csv)
-    return f"**Таблица {rec.tid}.** {title}.\n\n{typograph(rec.markdown)}\n\nЦеликом: {csv}."
+    head = f"{anchor_tag(tab_anchor(rec.tid))}**Таблица {rec.tid}.** {title}."
+    return f"{head}\n\n{typograph(rec.markdown)}\n\nЦеликом: {csv}."
 
 
 def render_section(finding: Finding, layout: _Layout, placed: set[str]) -> str:
@@ -423,7 +571,9 @@ def _index(findings: Sequence[Finding]) -> tuple[dict[str, FigureRecord], dict[s
 def render_report(
     cfg: Config, findings: list[Finding], synthesis: Finding, template: str | None = None
 ) -> str:
-    """Markdown отчёта: условия → директивы → поля фактов. Шаблон по умолчанию — ``templates/eda.md``.
+    """Markdown отчёта: условия → директивы → поля фактов → ссылки → неразрывные пробелы одним проходом.
+
+    Шаблон по умолчанию — ``templates/eda.md``.
 
     Раздел без итога получает заглушку; рисунок или таблица, которых нет ни в одном итоге, — ``ValueError``
     (директиву для необязательного раздела ставят внутри ``<!-- if … -->``).
@@ -435,7 +585,7 @@ def render_report(
     figures, tables = _index(everything)
     layout = _Layout(cfg)
 
-    text = nbsp_markdown(unwrap_paragraphs(_NOTE.sub("", apply_conditions(text, present))))
+    text = unwrap_paragraphs(_NOTE.sub("", apply_conditions(text, present)))
     placed = {
         arg.strip() for kind, arg in _DIRECTIVE.findall(text) if kind in ("figure", "table") and arg.strip()
     }
@@ -448,11 +598,13 @@ def render_report(
             return (
                 render_section(by_section[arg], layout, placed) if arg in by_section else missing_section(arg)
             )
-        if kind in ("figure", "lead"):
+        if kind in ("figure", "lead", "title"):
             if arg not in figures:
                 raise ValueError(f"в шаблоне рисунок {arg}, а в итогах разделов его нет")
             if kind == "lead":
                 return f"**{typograph(_strip_end(figures[arg].title))}.**"
+            if kind == "title":
+                return typograph(_strip_end(figures[arg].title))
             return render_figure(figures[arg], layout)
         if arg not in tables:
             raise ValueError(f"в шаблоне таблица {arg}, а в итогах разделов её нет")
@@ -465,7 +617,7 @@ def render_report(
     facts: dict[str, Fact] = {}
     for f in everything:
         facts.update(f.facts)
-    text = fill(text, facts)
+    text = nbsp_markdown(link_refs(fill(text, facts), figures, tables))
     text = "\n".join(line.rstrip() for line in text.splitlines())
     text = re.sub(r"\n{3,}", "\n\n", text).strip() + "\n"
     return text
@@ -475,8 +627,9 @@ def write_report(cfg: Config, findings: list[Finding], synthesis: Finding) -> Pa
     """Собирает ``docs/eda.md`` и копирует его картинки в ``docs/img/eda``.
 
     Порядок: Markdown → ``lint_ru`` (замечания при ``strict_lint`` — ``EdaCheckError``) → картинки (больше
-    лимита — ``ValueError``) → запись отчёта через временный файл, только если текст изменился. При любой
-    ошибке прежний отчёт остаётся на месте.
+    лимита — ``ValueError``) → ``check_links`` (картинка без файла, ссылка на несуществующий якорь —
+    ``EdaCheckError``) → числа не из фактов — предупреждения в лог → запись отчёта через временный файл,
+    только если текст изменился. При любой ошибке прежний отчёт остаётся на месте.
     """
     prm = params(cfg)
     md = render_report(cfg, findings, synthesis)
@@ -486,7 +639,8 @@ def write_report(cfg: Config, findings: list[Finding], synthesis: Finding) -> Pa
             f"{len(problems)} замечаний к типографике отчёта, отчёт не записан:\n- " + "\n- ".join(problems)
         )
     layout = _Layout(cfg)
-    figures = [r for f in [*findings, synthesis] for r in f.figures]
+    everything = [*findings, synthesis]
+    figures = [r for f in everything for r in f.figures]
     copy_images(
         figures,
         layout.outputs,
@@ -496,6 +650,16 @@ def write_report(cfg: Config, findings: list[Finding], synthesis: Finding) -> Pa
         colors=int(prm["png_colors"]),
     )
     path = layout.report
+    broken = check_links(md, path.parent)
+    if broken:
+        raise EdaCheckError(
+            f"{len(broken)} битых ссылок в отчёте, отчёт не записан:\n- " + "\n- ".join(broken)
+        )
+    facts: dict[str, Fact] = {}
+    for f in everything:
+        facts.update(f.facts)
+    for problem in stray_numbers(md, facts, prm["number_allow"]):
+        log.warning("Отчёт: %s", problem)
     data = md.encode("utf-8")
     if not path.exists() or path.read_bytes() != data:
         _atomic_write_bytes(path, data)

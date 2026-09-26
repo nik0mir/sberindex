@@ -53,6 +53,15 @@ EXTRA_FACTS = (
     "median_access_north",
     "median_access_rest",
     "eta2_region_level_no_inner",
+    "rho_level_wage_no_inner",
+    "n_level_wage_no_inner",
+    "rho_level_wage_within_localrank",
+    "partial_rho_access_within_localrank",
+    "partial_rho_access_within_centered",
+    "partial_rho_access_within_size",
+    "n_partial_access_size",
+    "rho_access_pop_within",
+    "rho_level_pop_within",
 )
 
 
@@ -141,6 +150,21 @@ def test_level_summary_by_type_and_spend_to_wage():
     assert np.isnan(out["median_level_go"]) and out["n_level_go"] == 0  # уровня нет — медиана не выдумывается
     assert np.isnan(out["median_level_mo"]) and out["n_level_mo"] == 0
     assert out["spend_to_wage_median"] == pytest.approx(np.median([0.25, 0.5, 1.0, 0.75]))
+    assert out["n_spend_to_wage"] == 4
+
+
+def test_spend_to_wage_skips_workplace_based():
+    """Зарплата внутригородских территорий — по месту работодателя: их отношение трат к зарплате не входит
+    в медиану (та же выборка, что у e5.spend_to_wage_median)."""
+    mo = make_mo(
+        4,
+        level_2023=[10.0, 20.0, 30.0, 40.0],
+        wage_2023=[40.0, 40.0, 1.0, 1.0],
+    )
+    mo["workplace_based"] = [False, False, True, True]
+    out = s2.level_summary(mo)
+    assert out["spend_to_wage_median"] == pytest.approx(np.median([0.25, 0.5]))
+    assert out["n_spend_to_wage"] == 2
 
 
 def test_place_groups_north_excludes_inner_city():
@@ -214,7 +238,8 @@ def _regional(n_regions: int = 20, per_region: int = 60) -> tuple[pd.DataFrame, 
 
 
 def test_access_through_wage_only_gives_zero_partial_rho():
-    """Ловушка С2: доступность рынков связана с тратами только через зарплату — частный ρ ≈ 0."""
+    """Ловушка С2: доступность рынков связана с тратами только через зарплату — частный ρ ≈ 0
+    при всех трёх определениях «внутри регионов»."""
     rng = np.random.default_rng(7)
     mo, offset = _regional()
     n = len(mo)
@@ -225,6 +250,8 @@ def test_access_through_wage_only_gives_zero_partial_rho():
     out = s2.level_drivers(mo)
     assert out["rho_level_access"] > 0.8  # в целом связь сильная — повторяет регион и зарплату
     assert abs(out["partial_rho_access_within"]) < 0.1
+    assert abs(out["partial_rho_access_within_localrank"]) < 0.1
+    assert abs(out["partial_rho_access_within_centered"]) < 0.1
     assert out["n_access_wage"] == n
     assert out["n_partial_access"] == n
 
@@ -240,6 +267,60 @@ def test_access_beyond_wage_is_found_within_regions():
     mo["market_access"] = access + offset  # доступность тоже выше в «богатых» регионах
     out = s2.level_drivers(mo)
     assert out["partial_rho_access_within"] > 0.5
+    assert out["partial_rho_access_within_localrank"] > 0.5
+    assert out["partial_rho_access_within_centered"] > 0.5
+    assert out["partial_rho_access_within_size"] > 0.5  # население — шум, сигнал не размер МО
+
+
+def test_access_that_only_tracks_size_vanishes_under_size_control():
+    """Ловушка С2: доступность рынков внутри регионов лишь повторяет размер МО, а траты растут с размером —
+    частный ρ при контроле зарплаты заметен, при контроле ещё и численности населения ≈ 0.
+
+    Траты здесь зависят только от размера: у рангов суммы двух слагаемых остаётся нелинейная часть, и
+    линейный контроль рангов не убрал бы её до нуля."""
+    rng = np.random.default_rng(12)
+    mo, offset = _regional()
+    n = len(mo)
+    log_pop = rng.normal(10, 1, n)
+    mo["wage_2023"] = np.exp(10 + 0.1 * rng.normal(0, 1, n))
+    mo["pop_2023"] = np.exp(log_pop)
+    mo["level_2024"] = np.exp(9 + 0.1 * (log_pop + rng.normal(0, 0.3, n)))
+    mo["market_access"] = log_pop + rng.normal(0, 0.5, n) + offset  # регион сдвигает и доступность
+    out = s2.level_drivers(mo)
+    assert out["partial_rho_access_within"] > 0.3
+    assert abs(out["partial_rho_access_within_size"]) < 0.1
+    assert out["n_partial_access_size"] == n
+    assert out["rho_access_pop_within"] > 0.5 and out["rho_level_pop_within"] > 0.5
+    note = s2.size_note(out["partial_rho_access_within"], out["partial_rho_access_within_size"], 0.2)
+    assert note.startswith("сигнал доступности")
+
+
+def test_partial_rank_corr_definitions():
+    """Три определения «внутри регионов»: global — как stats.partial_spearman; local ранжирует внутри
+    региона и видит монотонную связь целиком, даже если ранги всей выборки её портят."""
+    x = pd.Series([1.0, 2.0, 3.0, 10.0, 20.0, 30.0])
+    y = pd.Series([1.0, 2.0, 100.0, 5.0, 6.0, 7.0])
+    g = pd.Series([1, 1, 1, 2, 2, 2])
+    none = pd.DataFrame(index=x.index)
+    rho_local, n = s2.partial_rank_corr(x, y, none, g, "local")
+    assert rho_local == pytest.approx(1.0) and n == 6
+    rho_global, _ = s2.partial_rank_corr(x, y, none, g, "global")
+    assert rho_global == pytest.approx(stats.spearman_within(x, y, g)[0]) and rho_global < 0.9
+    ctrl = pd.DataFrame({"c": [3.0, 1.0, 2.0, 6.0, 4.0, 5.0]})
+    assert s2.partial_rank_corr(x, y, ctrl, g, "global") == stats.partial_spearman(x, y, ctrl, groups=g)
+    # Регион из одного МО и пропуски отбрасываются; чистый эффект региона не виден ни при каком определении.
+    rng = np.random.default_rng(3)
+    region = np.repeat(np.arange(30), 20)
+    shift = 5.0 * region
+    xs = pd.Series(np.r_[shift + rng.normal(0, 1, 600), 0.0, np.nan])
+    ys = pd.Series(np.r_[shift + rng.normal(0, 1, 600), 1.0, 2.0])
+    gs = pd.Series(np.r_[region, 99, 5])
+    for ranking in s2.RANKINGS:
+        rho, n = s2.partial_rank_corr(xs, ys, pd.DataFrame(index=xs.index), gs, ranking)
+        assert abs(rho) < 0.15, ranking
+        assert n == 600, ranking
+    with pytest.raises(ValueError):
+        s2.partial_rank_corr(x, y, none, g, "unknown")
 
 
 def test_partial_rho_without_inner_city_drops_their_effect():
@@ -345,21 +426,63 @@ def test_partial_rho_ci_brackets_estimate_and_is_reproducible():
     assert all(np.isnan(s2.partial_rho_ci(make_mo(2), np.random.default_rng(0), 10)))
 
 
+NO_INNER = "без внутригородских территорий"
+REAL_CHECKS = [  # реальные данные 2026-09: основная оценка 0,204, интервал 0,153–0,253, порог 0,2
+    (0.198, NO_INNER),
+    (0.169, "при рангах внутри региона"),
+    (0.182, "при рангах центрированных значений"),
+    (0.089, "при контроле размера МО"),
+]
+
+
 @pytest.mark.parametrize(
     ("args", "expected", "absent"),
     [
-        ((0.35, 0.30, 0.40, 0.33, 0.2), "уверенно", "границе"),
-        ((-0.35, -0.40, -0.30, -0.33, 0.2), "уверенно", "границе"),  # критерий по модулю
-        ((0.10, 0.05, 0.15, 0.10, 0.2), "не выполняется", "границе"),
-        ((0.204, 0.153, 0.253, 0.198, 0.2), "по другую сторону", "уверенно"),  # реальные данные 2026-09
-        ((0.21, 0.15, 0.25, 0.22, 0.2), "на самой границе", "по другую сторону"),
-        ((float("nan"), 0.1, 0.2, 0.1, 0.2), "не посчитан", "границе"),
+        ((0.35, 0.30, 0.40, 0.2, [(0.33, NO_INNER)]), "уверенно", "неустойчив"),
+        ((-0.35, -0.40, -0.30, 0.2, [(-0.33, NO_INNER)]), "уверенно", "неустойчив"),  # критерий по модулю
+        ((0.10, 0.05, 0.15, 0.2, [(0.10, NO_INNER)]), "не выполняется", "неустойчив"),
+        ((0.204, 0.153, 0.253, 0.2, REAL_CHECKS), "ниже порога — без внутригородских территорий", "уверенно"),
+        ((0.21, 0.15, 0.25, 0.2, [(0.22, NO_INNER)]), "неустойчив", "порога —"),  # интервал накрывает порог
+        ((0.35, 0.30, 0.40, 0.2, [(0.10, "при контроле размера МО")]), "неустойчив", "уверенно"),
+        ((0.10, 0.05, 0.15, 0.2, [(0.30, "при рангах")]), "выше порога — при рангах", "не выполняется"),
+        ((0.35, 0.30, 0.40, 0.2, [(float("nan"), NO_INNER)]), "уверенно", "неустойчив"),  # пропуск не в счёт
+        ((float("nan"), 0.1, 0.2, 0.2, [(0.1, NO_INNER)]), "не посчитан", "неустойчив"),
     ],
 )
 def test_c2_verdict(args, expected, absent):
     text = s2.c2_verdict(*args)
     assert expected in text and absent not in text
     assert not any(ch.isdigit() for ch in text)  # числа текста — только из фактов
+
+
+def test_c2_verdict_lists_every_flipped_check():
+    text = s2.c2_verdict(0.204, 0.153, 0.253, 0.2, REAL_CHECKS)
+    for _, label in REAL_CHECKS:
+        assert label in text
+    assert text.index("значений и\u00a0при контроле размера МО") > 0  # перечень: запятые и «и» в конце
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ([0.204, 0.169, 0.182], "только при одном"),  # реальные данные 2026-09
+        ([0.3, 0.25, 0.21], "при всех трёх"),
+        ([-0.25, 0.25, 0.1], "при двух"),  # по модулю
+        ([float("nan"), 0.1, 0.1], "ни при одном"),
+    ],
+)
+def test_definitions_note(values, expected):
+    assert s2.definitions_note(values, 0.2).startswith(expected)
+    with pytest.raises(ValueError):
+        s2.definitions_note([0.3, 0.3], 0.2)
+
+
+def test_size_note():
+    assert "в\u00a0основном идёт вместе с\u00a0размером МО" in s2.size_note(0.204, 0.089, 0.2)
+    half = s2.size_note(0.204, 0.15, 0.2)  # ниже порога, но не вдвое меньше — без слов «в основном»
+    assert "не выполняется" in half and "в\u00a0основном" not in half
+    assert "держится" in s2.size_note(0.3, 0.25, 0.2)
+    assert "не посчитана" in s2.size_note(0.2, float("nan"), 0.2)
 
 
 def test_column_limits_moves_points_clear_of_label_columns():
@@ -592,6 +715,22 @@ def test_map_classes_match_map_bins_and_population():
     assert labels[0].endswith("×") and "–" in labels[0]
 
 
+def test_class_labels_add_population_share():
+    values = pd.Series(np.linspace(0.5, 2.0, 21), index=np.arange(101, 122))
+    table, _ = s2.map_classes(values, pd.Series(1.0, index=values.index), 7)
+    labels = s2.class_labels(table)
+    assert list(labels) == list(range(7))
+    share = style.fmt_pct(table["pop_share"].iloc[6])
+    assert labels[6] == f"{table['label'].iloc[6]}{s2.CLASS_SEP}{share} жителей"
+    no_pop, _ = s2.map_classes(values, pd.Series(np.nan, index=values.index), 7)
+    assert s2.class_labels(no_pop)[0] == no_pop["label"].iloc[0]  # без населения — без доли
+
+
+@pytest.mark.parametrize(("x", "expected"), [(299.4, 300), (2096 / 7, 300), (96.6, 97), (21.4, 21)])
+def test_about(x, expected):
+    assert s2.about(x) == expected
+
+
 # --- Мелкие помощники ----------------------------------------------------------------------------
 
 
@@ -712,7 +851,10 @@ def test_run_section_outputs_and_required_facts(finding, synth_root):
     bare = PLACEHOLDER.sub("", finding.summary_md)
     assert "{" not in bare and "}" not in bare  # вывод о С2 и фраза о доступности подставлены
     assert "критерия отказа С2" in finding.summary_md
+    assert "Три определения «внутри регионов»" in finding.summary_md
     assert finding.caveats
+    in_caveats = {f"{s}.{k}" for s, k in PLACEHOLDER.findall(" ".join(finding.caveats))}
+    assert in_caveats <= set(finding.facts)  # оговорка о ценах ссылается на факт, а не на число
 
 
 def test_headlines_pass_and_planted_signal_found(finding):

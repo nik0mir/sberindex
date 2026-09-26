@@ -138,6 +138,99 @@ def test_hatch_patch_and_kinds(geo):
         maps.russia_map(status, geo, 2023, kind="categorical", cmap="viridis")
 
 
+def test_row_major_order_reads_by_rows():
+    assert maps.row_major_order(9, 5) == [0, 5, 1, 6, 2, 7, 3, 8, 4]
+    assert maps.row_major_order(4, 5) == [0, 1, 2, 3]
+    assert sorted(maps.row_major_order(7, 3)) == list(range(7))
+
+
+def _legend_rows(fig, legend) -> list[list[str]]:
+    """Подписи легенды, прочитанные по строкам: группировка по высоте, внутри строки — слева направо."""
+    fig.draw_without_rendering()
+    renderer = fig.canvas.get_renderer()
+    items = []
+    for t in legend.get_texts():
+        box = t.get_window_extent(renderer=renderer)
+        items.append((round(box.y0), box.x0, t.get_text()))
+    rows: dict[int, list] = {}
+    for y, x, text in items:
+        rows.setdefault(y, []).append((x, text))
+    return [[text for _, text in sorted(row)] for _, row in sorted(rows.items(), reverse=True)]
+
+
+def test_class_legend_reads_in_ascending_order_by_rows(geo):
+    frame = maps.map_frame(geo, 2024)
+    ids = frame.loc[frame["in_panel"], "territory_id"].to_numpy()
+    values = pd.Series(np.linspace(0.5, 3.0, len(ids)), index=ids)
+    values.iloc[0] = np.nan
+    fig, ax = maps.russia_map(values, geo, 2024, k=7, fmt=lambda v: style.fmt_num(v, 2) + "×")
+    rows = _legend_rows(fig, ax.get_legend())
+    flat = [t for row in rows for t in row]
+    classes = [t for t in flat if t.endswith("×")]
+    lows = [float(t.split("–")[0].replace(",", ".")) for t in classes]
+    assert len(rows) >= 2 and lows == sorted(lows)  # по строкам — по возрастанию
+    assert flat[-2:] == ["нет значения", maps.NO_SBER_LABEL]  # пункты «нет данных» — в конце
+
+
+def test_legend_columns_fit_figure_width():
+    fig, _ = style.new_figure("map")
+    long = [f"очень длинная подпись класса номер {i}" for i in range(8)]
+    ncols = maps.legend_ncols(fig, long)
+    assert 1 <= ncols < 5
+    assert maps.legend_width_in(fig, long, ncols) <= fig.get_figwidth() - 2 * style.MARGIN_IN
+    assert maps.legend_ncols(fig, ["1–2", "2–3", "3–4"]) == 3
+
+
+def test_diverging_norm_is_symmetric_around_center():
+    norm = maps.diverging_norm(pd.Series([-0.06, 0.0, 0.1, 0.28]), center=0.0)
+    assert (norm.vmin, norm.vcenter, norm.vmax) == (pytest.approx(-0.28), 0.0, pytest.approx(0.28))
+    assert norm(-0.06) - 0.5 == pytest.approx(-(norm(0.06) - 0.5))  # равные отклонения — равная яркость
+
+
+def test_colorbar_and_na_legend_below_map(geo):
+    frame = maps.map_frame(geo, 2023)
+    ids = frame.loc[frame["in_panel"], "territory_id"].to_numpy()
+    values = pd.Series(np.linspace(-0.06, 0.28, len(ids)), index=ids)
+    values.iloc[0] = np.nan
+    fig, ax = maps.russia_map(
+        values,
+        geo,
+        2023,
+        kind="diverging",
+        center=0.0,
+        legend_title="Отклонение от медианы",
+        na_label="нет значения за 2023 год",
+        absent_note="Регионы без данных СберИндекса: 8",
+    )
+    style.finish(fig, "Заголовок", "Подзаголовок", style.SOURCE_SBER, 8)
+    fig.draw_without_rendering()
+    renderer = fig.canvas.get_renderer()
+    map_box = ax.get_window_extent(renderer=renderer)
+    cbar_ax = ax.child_axes[0]
+    cbar_box = cbar_ax.get_tightbbox(renderer)
+    legend_box = ax.get_legend().get_window_extent(renderer=renderer)
+    note_box = ax.texts[0].get_window_extent(renderer=renderer)
+    assert cbar_box.y1 <= map_box.y0 + 1 and legend_box.y1 <= map_box.y0 + 1  # под картой
+    assert not legend_box.overlaps(cbar_box) and not note_box.overlaps(cbar_box)
+    assert fig.bbox.contains(legend_box.x1, legend_box.y0)
+
+
+def test_inset_connectors_from_lower_corners(geo, cfg):
+    frame = maps.map_frame(geo, 2024)
+    values = pd.Series(1.0, index=frame.loc[frame["in_panel"], "territory_id"])
+    fig, ax = maps.russia_map(values, geo, 2024, kind="continuous", insets=maps.insets_from_config(cfg))
+    indicators = [c for c in ax.get_children() if type(c).__name__ == "InsetIndicator"]
+    assert len(indicators) == 2
+    below = 0
+    for ind, which, rect in zip(indicators, maps.insets_from_config(cfg), maps.INSET_RECTS, strict=True):
+        _, _, _, top = maps.inset_window(frame, which)
+        if ax.transLimits.transform((0.0, top))[1] < rect[1]:  # рамка на карте ниже врезки
+            below += 1
+            visible = [bool(c.get_visible()) for c in ind.connectors]
+            assert visible == [True, False, True, False]  # нижний левый и нижний правый углы врезки
+    assert below >= 1  # на синтетике рамка Москвы ниже врезок, Петербург — у верхнего края
+
+
 def test_load_geometry_accepts_file_path(tmp_path):
     processed = make_processed(tmp_path)
     by_dir = maps.load_geometry(processed)

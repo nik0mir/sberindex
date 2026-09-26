@@ -48,3 +48,7 @@ extend-exclude = [".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+# Технические задания этапов — текст для людей: примеры кода в них с выровненными комментариями, не код проекта
+exclude = ["docs/spec_*.md"]

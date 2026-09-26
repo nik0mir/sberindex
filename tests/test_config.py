@@ -157,6 +157,40 @@ def test_eda_parameters_are_consistent():
         assert isinstance(spec["rule"], str) and spec["rule"], name
 
 
+def test_eda_section_params_accept_config():
+    """Секции параметров разделов и отчёта в конфиге читаются модулями: неизвестный ключ там — ошибка
+    (ValueError или KeyError), и этап eda упал бы на реальных данных."""
+    from munnet.eda import report, stories, synthesis
+    from munnet.eda import s1_coverage as s1
+    from munnet.eda import s2_level as s2
+    from munnet.eda import s3_rhythm as s3
+    from munnet.eda import s4_basket as s4
+    from munnet.eda import s5_place as s5
+
+    cfg = load_config()
+    eda = cfg["eda"]
+    for section in ("coverage", "level", "basket", "place", "stories", "synthesis", "report_render"):
+        assert isinstance(eda[section], dict) and eda[section], section
+    assert set(s1.coverage_params(cfg)) == set(s1.COVERAGE_DEFAULTS)
+    assert set(s2.params(cfg)) == set(s2.DEFAULTS)
+    assert s3.SeasonParams.from_config(cfg).top_n == eda["season"]["top_n"]
+    assert set(s4.basket_params(cfg)) == set(s4.BASKET_DEFAULTS)
+    assert set(s5.params(cfg)) == set(s5.PLACE_DEFAULTS)
+    assert set(eda["stories"]) <= set(stories.params(cfg))
+    # пороги балла сигнала в конфиге — ровно те, что используют сюжеты (лишний ключ молча не действует)
+    assert set(eda["stories"]["signal_bins"]) == set(stories.DEFAULTS["signal_bins"])
+    assert set(stories.DEFAULTS["rejection"]) <= set(eda["rejection"])  # пороги отказа — в одной секции
+    assert synthesis.params(cfg)["headline"]["level"] == f"log_level_{eda['reference_year']}"
+    assert set(report.params(cfg)) == set(report.DEFAULTS)
+    assert all(isinstance(k, int) and isinstance(v, str) and v for k, v in eda["annotations"].items())
+
+
+def test_context_tolerances():
+    context = load_config()["context"]
+    assert 0 < context["age"]["sum_tolerance"] < 0.1
+    assert 0 < context["unallocated_tolerance"] < 0.1
+
+
 def test_context_indicator_specs():
     context = load_config()["context"]
     total = context["okved_total"]

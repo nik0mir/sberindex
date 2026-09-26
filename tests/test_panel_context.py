@@ -344,6 +344,35 @@ def test_flagged_values_are_excluded_from_annual():
     assert np.isnan(two["ndfl_income_rub"]) and np.isnan(two["ndfl_income_pc"]) and not two["ndfl_ok"]
 
 
+def test_ndfl_ok_from_neighbour_year_when_recipients_are_defect():
+    rows = []
+    for tid, rec_2024 in ((1, 400.0), (2, 10.0), (3, 400.0), (4, 400.0)):
+        rows += [
+            (tid, 2023, "population", "TOTAL", 1000.0, "direct"),
+            (tid, 2024, "population", "TOTAL", 1000.0, "direct"),
+            (tid, 2023, "ndfl_income", "TOTAL", 1.2e7, "direct"),
+            (tid, 2024, "ndfl_income", "TOTAL", 1.3e7, "direct"),
+            (tid, 2023, "ndfl_recipients", "TOTAL", 5.0, "direct"),
+            (tid, 2024, "ndfl_recipients", "TOTAL", rec_2024, "direct"),
+        ]
+    long = _long(rows)
+    jump = (long["indicator"] == "ndfl_recipients") & (long["year"] == 2023) & (long["territory_id"] != 4)
+    long.loc[jump, "flag"] = "recipients_jump"  # у МО 4 пять получателей без флага — учёт по месту работы
+    a = build_annual(long, _territories([1, 2, 3, 4], inner=(3,)), CFG)[0].set_index(["territory_id", "year"])
+    one = a.loc[(1, 2023)]  # 2024 год: 40% жителей — в интервале
+    assert one["ndfl_ok"] and one["ndfl_ok_neighbour"]
+    assert one["ndfl_income_pc"] == pytest.approx(1000.0)
+    assert np.isnan(one["recipients_to_pop"]) and np.isnan(one["ndfl_income_per_recipient"])
+    assert a.loc[(1, 2024), "ndfl_ok"] and not a.loc[(1, 2024), "ndfl_ok_neighbour"]
+    two = a.loc[(2, 2023)]  # сосед вне интервала (1% жителей)
+    assert not two["ndfl_ok"] and not two["ndfl_ok_neighbour"] and np.isnan(two["ndfl_income_pc"])
+    three = a.loc[(3, 2023)]  # внутригородская территория: по месту работы не считаем
+    assert not three["ndfl_ok"] and not three["ndfl_ok_neighbour"]
+    four = a.loc[(4, 2023)]  # без дефекта своё отношение 0,5% решает, сосед не смотрится
+    assert not four["ndfl_ok"] and not four["ndfl_ok_neighbour"]
+    assert four["recipients_to_pop"] == pytest.approx(0.005)
+
+
 def test_employment_shares_close_to_one_with_unallocated():
     rows = [
         (1, 2023, "employees", "TOTAL", 1000.0, "direct"),

@@ -4,6 +4,7 @@ import copy
 import io
 import math
 import re
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -89,6 +90,14 @@ def test_unwrap_and_nbsp_in_template_text():
     assert report.nbsp_markdown("см. рис. 4 и т. е.") == f"см.{NB}рис.{NB}4 и{NB}т.{NB}е."
 
 
+def test_nbsp_in_table_cells_but_not_code_or_empty_cells():
+    row = "| в МО и — город | — | `a и b` |"
+    assert report.nbsp_markdown(row) == f"| в{NB}МО и{NB}— город | — | `a и b` |"
+    assert report.nbsp_markdown("|---|---:|") == "|---|---:|"
+    # перед кодом тоже: «в `файле`», а внутри кода ничего не меняется
+    assert report.nbsp_markdown("лежит в `a и b` — тут") == f"лежит в{NB}`a и b`{NB}— тут"
+
+
 # --- Типографика ---------------------------------------------------------------------------------
 
 
@@ -129,6 +138,71 @@ def test_typograph_data_strings():
     assert report.typograph('поселение Мосрентген""') == "поселение Мосрентген"
     assert report.typograph('посёлок "Новый" и ...') == "посёлок «Новый» и …"
     assert report.typograph('код `a "b"...`') == 'код `a "b"...`'
+
+
+# --- Перекрёстные ссылки и числа -----------------------------------------------------------------
+
+
+def test_link_refs_links_figures_and_tables():
+    text = "\n".join(
+        [
+            f"Текст (рис. 4, 5) и рис.{NB}11 и 12, таблица T06 и T13, рис. 99.",
+            "`рис. 4` и [рис. 4](#fig-4) не трогаются; файл `T06_x.csv`, путь outputs/T06",
+            "## Заголовок рис. 4",
+            "| T06 | рис. 4 |",
+            "![альт рис. 4](img.png)",
+            f"{report.anchor_tag('tab-t06')}**Таблица T06.** Подпись",
+        ]
+    )
+    out = report.link_refs(text, ["F04", "F05", "F11", "F12"], ["T06"]).split("\n")
+    assert out[0] == (
+        f"Текст ([рис. 4](#fig-4), [5](#fig-5)) и [рис.{NB}11](#fig-11) и [12](#fig-12), "
+        "[таблица T06](#tab-t06) и T13, рис. 99."
+    )
+    assert (
+        out[1:] == text.split("\n")[1:]
+    )  # код, готовые ссылки, пути, заголовки, таблицы, картинки — как были
+
+
+def test_check_links_finds_missing_images_and_anchors(tmp_path):
+    (tmp_path / "img").mkdir()
+    (tmp_path / "img" / "a.png").write_bytes(b"png")
+    md = "\n".join(
+        [
+            "# Отчёт",
+            f"## 2. Сколько{NB}тратят",
+            f"{report.anchor_tag('fig-1')}![a](img/a.png)",
+            "![b](img/b.png)",
+            "[рис. 1](#fig-1), [рис. 2](#fig-2), [раздел](#2-сколько-тратят)",
+        ]
+    )
+    assert report.check_links(md, tmp_path) == [
+        "нет файла картинки img/b.png",
+        "ссылка на несуществующий якорь #fig-2",
+    ]
+
+
+def test_stray_numbers_flags_numbers_not_from_facts():
+    facts = facts_of({"e1.n": (2190, "int"), "e3.s": (0.156, "pct"), "e2.rub": (26561, "rub")})
+    md = "\n".join(
+        [
+            "Траты есть по 2190 МО, доля 15,6%, 26 561 ₽ в 2024 году; 90-й перцентиль, баллы 1–5.",
+            "Ещё 42 МО и 0,5 угадывания.",
+            "| 777 | таблица |",
+            "```",
+            "999",
+            "```",
+            "[рис. 4](#fig-4), код `T 55`, путь outputs/x/7.csv",
+            "*Рисунок 3. n = 2048.*",
+        ]
+    )
+    assert report.stray_numbers(md, facts) == [
+        "строка 2: число 0,5 не из фактов",
+        "строка 2: число 42 не из фактов",
+    ]
+    assert (
+        report.stray_numbers("AUC 0,73 (0,5 — не лучше угадывания)", facts_of({"e1.a": (0.73, "num2")})) == []
+    )
 
 
 # --- Картинки ------------------------------------------------------------------------------------
@@ -208,6 +282,49 @@ def test_render_report_on_synthetic(built):
     assert md.count("**Таблица T00.**") == 1  # поставлена отдельно — в блоке раздела e1 её нет
     assert md.count("**Таблица T14.**") == 1 and md.count("**Таблица T13.**") == 1
     assert built["syn"].facts["syn.verdict"].text in md
+    tables = [t for f in [*built["findings"], built["syn"]] for t in f.tables]
+    for r in figures:  # у каждого рисунка и таблицы — якорь, на который ведут «рис. N» и «таблица TNN»
+        assert md.count(report.anchor_tag(report.fig_anchor(r.fid))) == 1
+    for t in tables:
+        assert md.count(report.anchor_tag(report.tab_anchor(t.tid))) == 1
+    assert "](#fig-1)" in md and "](#tab-t14)" in md
+    facts = {k: v for f in [*built["findings"], built["syn"]] for k, v in f.facts.items()}
+    assert report.stray_numbers(md, facts) == []  # каждое число текста — из фактов
+
+
+def test_main_points_are_short_with_numbers_and_links(built):
+    """В.6: «Главное за минуту» — 5–7 пунктов, в каждом число и ссылка на рисунок или таблицу."""
+    md = report.render_report(built["cfg"], built["findings"], built["syn"])
+    block = md.split("## Главное за минуту", 1)[1].split("\n## ", 1)[0]
+    points = [ln for ln in block.strip().split("\n") if ln.startswith("- ")]
+    assert 5 <= len(points) <= 7 and len(points) == len(block.strip().split("\n"))  # только пункты
+    for p in points:
+        assert re.search(r"\d", p) and re.search(r"\]\(#(?:fig|tab)-", p), p
+        assert p.startswith("- **")  # вывод жирным в начале — читается за секунды
+
+
+def test_nbsp_reaches_section_text_captions_and_tables(built):
+    """Неразрывные пробелы ставятся по готовому Markdown: в итогах разделов, оговорках и ячейках таблиц,
+    а не только в тексте шаблона."""
+    findings = [copy.copy(f) for f in built["findings"]]
+    e2 = next(f for f in findings if f.section == "e2")
+    e2.summary_md = e2.summary_md + " Центры и периферия — проверка."
+    e2.caveats = [*e2.caveats, "Траты в МО с тестом."]
+    table = e2.tables[0]
+    e2.tables = [replace(table, markdown=table.markdown + "\n| в строке | и ещё |"), *e2.tables[1:]]
+    md = report.render_report(built["cfg"], findings, built["syn"])
+    assert f"Центры и{NB}периферия{NB}— проверка." in md
+    assert f"Траты в{NB}МО с{NB}тестом." in md
+    assert f"| в{NB}строке | и{NB}ещё |" in md
+    assert report.lint_ru(md) == []
+
+
+def test_title_directive_inserts_headline_as_plain_text(built):
+    cfg, findings, syn = built["cfg"], built["findings"], built["syn"]
+    title = syn.figures[0].title
+    md = report.render_report(cfg, findings, syn, template="**Раздел. <!-- title: F16 -->.**\n")
+    assert md.replace(NB, " ").strip() == f"**Раздел. {title.replace(NB, ' ').rstrip('.')}.**"
+    assert "**" + title not in md  # не жирная подводка, а часть фразы
 
 
 def test_missing_section_gets_stub_not_error(built):
@@ -240,12 +357,17 @@ def test_write_report_is_idempotent_and_guarded(built):
     limit = cfg["eda"]["figure"]["docs_max_kb"] * 1024
     assert all((built["root"] / "docs" / "img" / "eda" / n).stat().st_size <= limit for n in images)
     assert report.write_report(cfg, findings, syn).read_bytes() == first  # повторная сборка — тот же файл
+    assert report.check_links(first.decode("utf-8"), path.parent) == []  # все картинки и якоря на месте
 
     broken = copy.copy(findings[0])
     broken.summary_md = findings[0].summary_md + ' Посёлок "Новый".'
     with pytest.raises(EdaCheckError, match="прямая кавычка"):
         report.write_report(cfg, [broken, *findings[1:]], syn)
     assert path.read_bytes() == first  # при замечаниях отчёт не перезаписан
+    broken.summary_md = findings[0].summary_md + " См. [раздел](#нет-такого)."
+    with pytest.raises(EdaCheckError, match="нет-такого"):
+        report.write_report(cfg, [broken, *findings[1:]], syn)
+    assert path.read_bytes() == first
 
 
 def test_full_run_through_cli(tmp_path):

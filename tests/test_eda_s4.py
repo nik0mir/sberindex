@@ -259,6 +259,7 @@ def test_basket_summary_sorted_by_median_share(data):
     assert summary["median"].is_monotonic_decreasing
     assert set(summary.index) == set(PARTS)
     assert (summary["q25"] <= summary["median"]).all() and (summary["median"] <= summary["q75"]).all()
+    assert np.allclose(summary["ratio"], summary["q75"] / summary["q25"]) and (summary["ratio"] >= 1).all()
 
 
 # --- Маркетплейсы ---------------------------------------------------------------------------------
@@ -315,8 +316,32 @@ def test_quintile_gap_groups_and_planted_gradient(data):
     assert list(gap["group"]) == [1, 2, 3, 4, 5]
     assert gap["n"].sum() == len(data.mo.dropna(subset=["mp_pp_change", "log_level_2023"]))
     assert (gap["level_max"].iloc[:-1].to_numpy() <= gap["level_min"].iloc[1:].to_numpy()).all()
-    assert np.allclose(gap["dpp"], 100 * (gap["share_2024"] - gap["share_2023"]))
+    assert np.allclose(gap["dpp_exact"], 100 * (gap["share_2024"] - gap["share_2023"]))
+    assert (gap["dpp"] - gap["dpp_exact"]).abs().max() <= 0.1 + 1e-9  # из округлённых концов — не дальше 0,1
     assert gap["dpp"].iloc[0] - gap["dpp"].iloc[-1] > 1  # бедные МО прибавляют больше (заложено в синтетике)
+    assert "n_inner" in gap and "dpp_mo" in gap
+
+
+def test_quintile_gap_increment_matches_rounded_ends_and_counts_inner_city():
+    """Прирост «гантели» считается из концов, округлённых до десятых процента, как они подписаны рядом
+    (13,1% − 10,5% = +2,6, а не +2,5 из точных медиан); медиана приростов МО — отдельная колонка."""
+    mo = pd.DataFrame(
+        {
+            "territory_id": [1, 2, 3, 4],
+            "log_level_2023": [9.0, 9.1, 10.0, 10.1],
+            "level_2023": np.exp([9.0, 9.1, 10.0, 10.1]),
+            "sh_marketplace_2023": [0.11, 0.12, 0.10505, 0.10505],
+            "sh_marketplace_2024": [0.17, 0.17, 0.13054, 0.13054],
+            "is_inner_city": [False, False, True, False],
+        }
+    )
+    gap = s4.quintile_gap(mo, 2)
+    assert list(gap["n_inner"]) == [0, 1]
+    top = gap.iloc[-1]
+    assert np.isclose(top["dpp_exact"], 2.549) and np.isclose(top["dpp"], 2.6)
+    assert style.fmt_pct(top["share_2024"]) == "13,1%" and style.fmt_pct(top["share_2023"]) == "10,5%"
+    assert np.isclose(gap.iloc[0]["dpp_mo"], 100 * np.median([0.06, 0.05]))
+    assert list(s4.quintile_gap(mo.drop(columns="is_inner_city"), 2)["n_inner"]) == [0, 0]
 
 
 # --- Рост -------------------------------------------------------------------------------------------
@@ -348,10 +373,31 @@ def test_growth_table_and_divergence_on_synth(data):
     full = data.mo.loc[data.mo["series_status"].astype(str) == "full", "growth"]
     assert np.isclose(table.set_index("code").loc["all", "growth_median"], full.median())
     assert (table["growth_p10"] <= table["growth_median"]).all()
+    assert table["rub_incr_rho"].between(-1, 1).all()
     rel = s4.growth_vs_level(data.panel_wide, data.mo)
     assert rel["rho_growth_level"] > 0.2  # в синтетике рост выше у богатых МО
     assert rel["n"] == full.notna().sum()
-    assert np.isfinite(rel["rho_growth_level_split"])
+    for key in ("rho_growth_level_split", "rho_growth_level_split_rev", "rho_growth_level_no_inner"):
+        assert np.isfinite(rel[key]), key
+    no_inner = s4.growth_vs_level(data.panel_wide, data.mo.drop(columns="is_inner_city"))
+    assert np.isnan(no_inner["rho_growth_level_no_inner"])
+
+
+def test_split_growth_level_swaps_months():
+    """Раздельные месяцы в обе стороны: уровень по нечётным и рост по чётным — и наоборот."""
+    rng = np.random.default_rng(11)
+    n = 300
+    level = rng.normal(10, 0.3, n)
+    t = np.arange(24)
+    growth = 0.1 + 0.2 * (level - 10)  # рост выше у богатых — в обоих наборах месяцев
+    base = np.exp(level)[:, None] * np.exp(rng.normal(0, 0.02, (n, 24)))
+    v_all = base * np.where(t >= 12, 1 + growth[:, None], 1.0)
+    wide = month_rows(n, np.full((n, 24), 0.1))
+    wide["v_all"] = v_all.ravel()
+    ids = pd.Index(np.arange(1, n + 1))
+    split = s4.split_growth_level(wide, ids, s4.ODD_MONTHS, s4.EVEN_MONTHS)
+    rev = s4.split_growth_level(wide, ids, s4.EVEN_MONTHS, s4.ODD_MONTHS)
+    assert split > 0.8 and rev > 0.8
 
 
 # --- ИПЦ ------------------------------------------------------------------------------------------
@@ -407,7 +453,8 @@ def test_group_count_changes_the_words_not_only_the_numbers(tmp_path, data):
     result, _ = run(tmp_path, data, basket={"level_groups": 4, "trend_bins": 5})
     f12 = next(f for f in result.figures if f.fid == "F12")
     assert f12.subtitle.startswith("Четверти МО")
-    assert "У четверти МО" in result.summary_md
+    assert f"у{style.NBSP}четверти МО с{style.NBSP}самыми низкими" in result.summary_md
+    assert "пятой части" not in result.summary_md
     assert "нижняя четверть" in result.facts["e4.q1_share_2023"].note
     assert result.headline_errors == []
 
@@ -418,12 +465,39 @@ def test_nbsp_binds_single_letter_words_and_dash():
     assert s4.nbsp("С4 (корзина)") == "С4 (корзина)"
 
 
+def test_nbsp_binds_percentage_points():
+    nb = style.NBSP
+    assert s4.nbsp("размах 4,1 → 4,8 п. п.") == f"размах 4,1 → 4,8{nb}п.{nb}п."
+    assert s4.nbsp("В п. п. догоняния нет") == f"В{nb}п.{nb}п. догоняния нет"
+    assert s4.nbsp("{{e4.mp_iqr_2024}} п. п.)") == f"{{{{e4.mp_iqr_2024}}}}{nb}п.{nb}п.)"
+
+
 def test_region_short_names():
     assert s4.region_short("Вологодская область") == "Вологодская обл."
     assert s4.region_short("Республика Северная Осетия — Алания") == "Северная Осетия"
     assert s4.region_short("Ханты-Мансийский автономный округ — Югра") == "Ханты-Мансийский АО"
-    assert s4.region_short("Чувашская Республика") == "Чувашская"
     assert s4.region_short("Москва") == "Москва"
+    # республики — устойчивым коротким названием, а не обрубком прилагательного («Чувашская»)
+    assert s4.region_short("Чувашская Республика") == "Чувашия"
+    assert s4.region_short("Удмуртская Республика") == "Удмуртия"
+    assert s4.region_short("Чеченская Республика") == "Чечня"
+    assert s4.region_short("Кабардино-Балкарская Республика") == "Кабардино-Балкария"
+    assert s4.region_short("Карачаево-Черкесская Республика") == "Карачаево-Черкесия"
+    assert s4.region_short("Республика Саха (Якутия)") == "Якутия"
+    assert s4.region_short("Республика Тыва") == "Тыва"
+
+
+def test_part_word_forms_cover_all_parts():
+    assert set(s4.PART_FORMS) == set(PARTS)
+    assert s4.part_word("cafe", s4.GEN) == "общепита" and s4.part_word("food", s4.DAT) == "продуктам"
+    assert s4.part_word("cafe", s4.PREP) == "общепите"
+
+
+def test_paragraphs_keep_list_items_and_slot_lines():
+    template = "**Что видно.** Корзина:\n\n- первый\nпункт\n$robust\n- второй\n\nАбзац\nв две строки"
+    assert s4._paragraphs(template) == (
+        "**Что видно.** Корзина:\n\n- первый пункт\n$robust\n- второй\n\nАбзац в две строки"
+    )
 
 
 def test_point_names_add_region():
@@ -451,13 +525,34 @@ def test_summary_wording_follows_the_data(data, tmp_path):
     p = s4.basket_params(ctx.cfg) | {"step_test_pp": 2.0}
     rej = ctx.cfg["eda"]["rejection"]
     values = {k.split(".", 1)[1]: f.value for k, f in ctx.facts.items()}
-    weak = values | {"rho_mp_pp_initial": 0.01, "rho_mp_rub_incr_level": 0.6}
-    slots = s4._summary_slots(weak, p, rej, cpi_used=False)
-    assert slots["catch_up"].startswith("догоняния по доле нет")
-    assert "в рублях разрыв растёт" in slots["s5"] or "не все критерии" in slots["s5"]
-    strong = values | {"rho_mp_pp_initial": -0.5, "rho_mp_rub_incr_level": -0.3}
+    ok = {
+        "mp_split_half": 0.7,
+        "rho_mp_pp_level_within": -0.6,
+        "mp_step_max_pp": 1.0,
+        "rho_mp_pp_level": -0.7,
+    }
+    # В п. п. связи со стартовой долей нет, в логарифмах — догоняние (Б.1, п. 10: обе шкалы сразу)
+    scales = values | ok
+    scales |= {"rho_mp_pp_initial": 0.01, "rho_mp_pp_initial_rev": 0.05}
+    scales |= {"rho_mp_log_initial": -0.5, "rho_mp_log_initial_rev": -0.5, "rho_mp_rub_incr_level": 0.6}
+    slots = s4._summary_slots(scales, p, rej, cpi_used=False)
+    assert slots["catch_up"].startswith("В п. п. догоняния нет")
+    assert "Поэтому в относительном выражении МО с малой долей растут быстрее" in slots["catch_up"]
+    assert "в п. п. догоняния по доле нет, в относительном выражении есть" in slots["s5"]
+    assert "в рублях разрыв растёт" in slots["s5"]
+    # догоняния нет ни в одной шкале
+    flat = scales | {"rho_mp_log_initial": 0.02, "rho_mp_log_initial_rev": -0.03}
+    assert "ни в п. п., ни в относительном выражении" in s4._summary_slots(flat, p, rej, False)["s5"]
+    # два варианта раздельных месяцев не согласны — вывод не делается
+    mixed = scales | {"rho_mp_pp_initial_rev": -0.4}
+    assert "зависит от выбора месяцев" in s4._summary_slots(mixed, p, rej, False)["catch_up"]
+    strong = scales | {
+        "rho_mp_pp_initial": -0.5,
+        "rho_mp_pp_initial_rev": -0.5,
+        "rho_mp_rub_incr_level": -0.3,
+    }
     slots = s4._summary_slots(strong, p, rej, cpi_used=False)
-    assert "есть догоняние" in slots["catch_up"] and "низким уровнем" in slots["rub"]
+    assert "есть догоняние" in slots["catch_up"] and "низкими тратами" in slots["rub"]
     assert "догоняния по доле нет" not in slots["s5"]
     unstable = values | {"residual_pc1_stability": 0.1}
     assert "неустойчива" in s4._summary_slots(unstable, p, rej, cpi_used=False)["s4"]
@@ -470,32 +565,39 @@ def test_growth_wording_follows_sign_and_spread(data, tmp_path):
     values = {k.split(".", 1)[1]: f.value for k, f in ctx.facts.items()}
     diverge = values | {"rho_growth_level": 0.4, "sd_loglevel_2023": 0.30, "sd_loglevel_2024": 0.32}
     assert s4._summary_slots(diverge, p, rej, cpi_used=False)["growth_rel"].startswith(
-        "Уровни трат расходятся"
+        "Разрыв в уровнях трат растёт медленно"  # SD выросло на 6,7% — меньше порога slow_spread
+    )
+    fast = values | {"rho_growth_level": 0.4, "sd_loglevel_2023": 0.30, "sd_loglevel_2024": 0.36}
+    assert s4._summary_slots(fast, p, rej, cpi_used=False)["growth_rel"].startswith(
+        "Разрыв в уровнях трат растёт:"
     )
     converge = values | {"rho_growth_level": -0.4, "sd_loglevel_2023": 0.32, "sd_loglevel_2024": 0.30}
     text = s4._summary_slots(converge, p, rej, cpi_used=False)["growth_rel"]
     assert text.startswith("Уровни трат сближаются") and "тратили меньше" in text
     mixed = values | {"rho_growth_level": 0.4, "sd_loglevel_2023": 0.32, "sd_loglevel_2024": 0.30}
     text = s4._summary_slots(mixed, p, rej, cpi_used=False)["growth_rel"]
-    assert "расходятся" not in text and "сближаются" not in text and text.startswith("Рост выше")
+    assert "Разрыв" not in text and "сближаются" not in text and text.startswith("Номинальный рост выше")
+    assert "на раздельных месяцах {{e4.rho_growth_level_split}} и {{e4.rho_growth_level_split_rev}}" in text
 
 
 def test_rub_wording_says_gap_grows_only_when_scales_disagree(data, tmp_path):
     """Формулировка С5 «в рублях разрыв растёт» — только если доля растёт быстрее у бедных МО, а прибавка
-    в рублях больше у богатых; при согласных знаках — «В рублях» без «картина другая»."""
+    в рублях больше у богатых; причина называется — база выше, как во всех категориях."""
     _, ctx = run(tmp_path, data)
     p = s4.basket_params(ctx.cfg) | {"step_test_pp": 2.0}
     rej = ctx.cfg["eda"]["rejection"]
     values = {k.split(".", 1)[1]: f.value for k, f in ctx.facts.items()}
     base = values | {"mp_split_half": 0.7, "rho_mp_pp_level_within": -0.6, "mp_step_max_pp": 1.0}
+    base |= {"rho_mp_rub_growth_level": -0.3, "rub_incr_rho_min": 0.6}
     disagree = s4._summary_slots(
         base | {"rho_mp_pp_level": -0.7, "rho_mp_rub_incr_level": 0.6}, p, rej, False
     )
-    assert (
-        disagree["rub"].startswith("В рублях картина другая") and "в рублях разрыв растёт" in disagree["s5"]
-    )
+    assert "разрыв в рублях всё же растёт" in disagree["rub"] and "потому что база выше" in disagree["rub"]
+    assert "Так во всех категориях" in disagree["rub"] and "(номинал)" in disagree["rub"]
+    assert "в рублях разрыв растёт" in disagree["s5"]
     agree = s4._summary_slots(base | {"rho_mp_pp_level": -0.7, "rho_mp_rub_incr_level": -0.4}, p, rej, False)
-    assert not agree["rub"].startswith("В рублях картина другая") and "разрыв растёт" not in agree["s5"]
+    assert "прибавка в рублях больше у МО с низкими тратами" in agree["rub"]
+    assert "разрыв растёт" not in agree["s5"]
 
 
 def test_summary_reads_cleanly_after_filling(finding):
@@ -603,6 +705,79 @@ def test_share_gain_falls_but_ruble_increment_rises_with_level():
     assert checks["mp_share_dec23"] == pytest.approx(0.12)
 
 
+def test_constant_pp_gain_is_catch_up_in_logs_on_split_months():
+    """Одинаковая прибавка в п. п. при разной стартовой доле: в п. п. догоняния нет (ρ ≈ 0), а в логарифмах
+    МО с малой долей растут быстрее (ρ < 0) — и это видно на раздельных месяцах, без регрессии к среднему."""
+    rng = np.random.default_rng(12)
+    n = 1500
+    start = rng.uniform(0.06, 0.18, n)[:, None]
+    gain = np.where(np.arange(24) >= 12, 0.04, 0.0)[None, :]
+    share = np.clip(start + gain + rng.normal(0, 0.003, (n, 24)), 0.01, None)
+    wide = month_rows(n, share)
+    mo = mo_from_wide(wide, rng)
+    nat = national_mp({f"{y}-{m:02d}": 0.12 + 0.04 * (y - 2023) for y in (2023, 2024) for m in range(1, 13)})
+    checks = s4.marketplace_checks(wide, mo, nat)
+    assert abs(checks["rho_mp_pp_initial"]) < 0.1 and abs(checks["rho_mp_pp_initial_rev"]) < 0.1
+    assert checks["rho_mp_log_initial"] < -0.8 and checks["rho_mp_log_initial_rev"] < -0.8
+    assert checks["rho_mp_log_initial_naive"] < -0.8
+
+
+def test_fixed_denominator_removes_the_denominator_effect():
+    """Маркетплейсы растут у всех МО одинаково (+50%), а все траты — быстрее у богатых: прирост доли падает
+    с уровнем только из-за знаменателя; при медианном росте знаменателя связи нет."""
+    rng = np.random.default_rng(13)
+    n = 600
+    z = rng.normal(0, 1, n)
+    v23 = 20_000.0 * np.exp(0.4 * z)
+    growth_all = 0.15 + 0.05 * z + rng.normal(0, 0.005, n)
+    t = np.arange(24)
+    v_all = np.where(t >= 12, v23[:, None] * (1 + growth_all[:, None]), v23[:, None])
+    mp23 = 0.12 * v23 * np.exp(rng.normal(0, 0.05, n))
+    v_mp = np.where(t >= 12, mp23[:, None] * 1.5, mp23[:, None])
+    wide = month_rows(n, np.full((n, 24), 0.1))
+    wide["v_all"], wide["v_marketplace"] = v_all.ravel(), v_mp.ravel()
+    mo = mo_from_wide(wide, rng)
+    mo["log_level_2023"] = np.log(v23)
+    frame = s4.marketplace_frame(wide, mo)
+    assert stats.spearman(frame["mp_pp_change"], frame["log_level_2023"])[0] < -0.5
+    assert abs(stats.spearman(s4.fixed_denominator_gain(frame), frame["log_level_2023"])[0]) < 0.15
+    assert np.isnan(s4.partial_level_within(frame, "mp_pp_change"))  # нет плотности и населения
+    frame["log_density_2023"], frame["pop_2023"] = rng.normal(3, 1, n), np.exp(rng.normal(9, 1, n))
+    assert s4.partial_level_within(frame, "mp_pp_change") < -0.5
+    # траты на маркетплейсах пропорциональны уровню: у верхней пятой части база в exp(0,4 · 2,8) ≈ 3 раза выше
+    assert 2.0 < s4.base_ratio(frame, "rub_2023", 5) < 4.5
+
+
+def test_robust_items_name_trivial_explanations(data, tmp_path):
+    """Пункты о знаменателе, районах Москвы и Петербурга и размере МО появляются по данным и называют
+    риски."""
+    _, ctx = run(tmp_path, data)
+    p = s4.basket_params(ctx.cfg) | {"step_test_pp": 2.0}
+    values = {k.split(".", 1)[1]: f.value for k, f in ctx.facts.items()}
+    v = values | {
+        "rho_mp_pp_level_within": -0.6,
+        "rho_mp_pp_level_within_fixed": -0.4,
+        "rho_growth_level_within": 0.4,
+        "q5_n_inner": 237,
+        "q5_n": 403,
+        "dq1_pp": 5.5,
+        "dq5_pp": 2.6,
+        "dq1_pp_no_inner": 5.5,
+        "dq5_pp_no_inner": 3.4,
+        "rho_mp_pp_level_partial": -0.4,
+    }
+    items, risks = s4._robust_items(v, p)
+    assert len(items) == 3 and risks == ["знаменатель", "районы Москвы и Петербурга в верхней группе"]
+    assert "разрыв меньше, но остаётся" in items[1] and "остаётся: частный" in items[2]
+    none = v | {
+        "q5_n_inner": 0,
+        "rho_mp_pp_level_partial": float("nan"),
+        "rho_mp_pp_level_within_fixed": -0.7,
+    }
+    items, risks = s4._robust_items(none, p)
+    assert len(items) == 1 and items[0].startswith("Знаменатель связь не объясняет") and risks == []
+
+
 def test_start_phrase_uses_close_only_when_start_gap_is_small():
     gap = pd.DataFrame({"share_2023": [0.117, 0.105], "dpp": [5.5, 2.5]})
     assert s4.start_phrase(gap, ("11,7%", "10,5%")) == "старт близок (11,7% и 10,5%)"
@@ -697,6 +872,11 @@ def test_run_section_indicator_and_summary(finding):
     assert "basket_resid_pc1" in result.indicator_labels
     assert "$" not in result.summary_md and "{{e4." in result.summary_md
     assert "  " not in result.summary_md and "..." not in result.summary_md
+    assert s4.DROP not in result.summary_md and "\n\n\n" not in result.summary_md
+    # «одна мысль — один пункт»: выводы для сюжетов — отдельные пункты, у каждого — вердикт
+    assert "**Что это значит для сюжета.**\n\n- **С4" in result.summary_md
+    assert result.summary_md.count("\n- **С") == 3
+    assert "Маркетплейсы:\n\n- " in result.summary_md
 
 
 def test_run_section_with_cpi_draws_nominal_real(tmp_path, data):
@@ -713,7 +893,7 @@ def test_run_section_with_cpi_draws_nominal_real(tmp_path, data):
 
 
 def test_headline_check_fails_when_claim_is_false(tmp_path, data):
-    result, _ = run(tmp_path, data, basket={"headline": {"pc1_rho_min": 1.01, "mp_growth_ratio_min": 50.0}})
+    result, _ = run(tmp_path, data, basket={"headline": {"pc1_rho_min": 1.01, "mp_annual_ratio_min": 50.0}})
     errors = " ".join(result.headline_errors)
     assert "F10" in errors and "F11" in errors
     assert "F09" not in errors and "F12" not in errors

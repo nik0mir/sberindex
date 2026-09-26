@@ -89,6 +89,7 @@ class FigureRecord:
     svg: str
     data_csv: str
     check: str  # формулировка проверки заголовка
+    source: str = ""  # источник данных, как в строке «Источник» на рисунке (пусто в старых JSON)
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,43 @@ def make_fact(key: str, value: Any, kind: FactKind, note: str = "") -> Fact:
     return Fact(key=key, value=plain, kind=kind, text=_FORMATTERS[kind](plain), note=note)
 
 
+# --- Названия МО ---------------------------------------------------------------------------------
+
+# Типы МО, к названию-прилагательному которых добавляется существительное: «Яльчикский» -> «Яльчикский округ».
+MO_TYPE_NOUNS: dict[str, str] = {"mr": "район", "mo": "округ"}
+ADJECTIVE_ENDINGS: tuple[str, ...] = ("ий", "ый", "ой")
+
+
+def display_name(name: Any, mo_type: Any = "") -> str:
+    """Название МО для таблиц, подписей и текста: к одному слову-прилагательному района (``mr``) или
+    округа (``mo``) добавляется «район» или «округ»; остальные названия — как есть, пропуск — «—».
+
+    «Булунский» (mr) -> «Булунский район», «Яльчикский» (mo) -> «Яльчикский округ», «Эгвекинот» (go) —
+    без изменений.
+    """
+    if name is None or (not isinstance(name, str) and pd.isna(name)):
+        return style.NA_TEXT
+    text = str(name)
+    noun = MO_TYPE_NOUNS.get(str(mo_type))
+    if noun and " " not in text and text.endswith(ADJECTIVE_ENDINGS):
+        return f"{text} {noun}"
+    return text
+
+
+def display_names(frame: pd.DataFrame) -> pd.Series:
+    """``display_name`` для строк таблицы: ``name_short`` (пропуск — ``name``) и ``mo_type``, если есть.
+
+    Индекс — как у ``frame``; так разделы подписывают МО одинаково.
+    """
+    base = frame["name"].astype("object")
+    if "name_short" in frame.columns:
+        short = frame["name_short"].astype("object")
+        base = short.where(short.notna(), base)
+    types = frame["mo_type"].astype(str) if "mo_type" in frame.columns else pd.Series("", index=frame.index)
+    names = [display_name(n, t) for n, t in zip(base, types, strict=True)]
+    return pd.Series(names, index=frame.index, dtype="object", name="name")
+
+
 # --- Контекст раздела ----------------------------------------------------------------------------
 
 
@@ -217,6 +255,7 @@ def _close(fig: Figure) -> None:
 
 
 def _md_cell(value: Any, formatter: Callable[[Any], str] | None) -> str:
+    """Ячейка Markdown; пустая строка — «—»: иначе «|  |» даёт двойной пробел, который ловит lint_ru."""
     if formatter is not None:
         text = formatter(value)
     elif value is None or (not isinstance(value, str) and pd.isna(value)):
@@ -229,7 +268,8 @@ def _md_cell(value: Any, formatter: Callable[[Any], str] | None) -> str:
         text = style.fmt_num(value, 0 if abs(value) >= MD_BIG_NUMBER else 2)
     else:
         text = str(value)
-    return text.replace("|", "\\|").replace("\n", " ")
+    text = " ".join(str(text).replace("|", "\\|").split("\n")).strip()
+    return text or style.NA_TEXT
 
 
 def to_markdown(
@@ -355,6 +395,7 @@ class SectionContext:
                 svg=self._rel(by_ext["svg"]) if "svg" in by_ext else "",
                 data_csv=self._rel(data_path),
                 check=check,
+                source=source,
             )
             self.figures.append(record)
             return record
@@ -371,11 +412,13 @@ class SectionContext:
         md_rows: int = 15,
         md_formats: dict[str, Callable[[Any], str]] | None = None,
         md_labels: dict[str, str] | None = None,
+        md_columns: Sequence[str] | None = None,
     ) -> TableRecord:
         """Пишет ``tables/Txx_slug.csv`` целиком и Markdown первых ``md_rows`` строк для отчёта.
 
         ``md_formats`` — форматтер значения по колонке (например, ``style.fmt_pct``), ``md_labels`` —
-        русские заголовки колонок только для Markdown (CSV остаётся с машинными именами).
+        русские заголовки колонок только для Markdown (CSV остаётся с машинными именами), ``md_columns`` —
+        колонки Markdown в нужном порядке (CSV пишется со всеми колонками; None — все).
         """
         problems = []
         if not _TID.fullmatch(tid):
@@ -384,10 +427,14 @@ class SectionContext:
             problems.append(f"slug {slug!r}: латиница в нижнем регистре, цифры и «_»")
         if any(t.tid == tid for t in self.tables):
             problems.append(f"{tid} уже сохранена в этом разделе")
+        unknown = [c for c in (md_columns or ()) if c not in df.columns]
+        if unknown:
+            problems.append(f"md_columns: нет колонок {unknown}")
         if problems:
             raise ValueError(f"{self.section} {tid} {slug}: " + "; ".join(problems))
         path = write_csv(df, self.out_dir / TABLES_SUBDIR / f"{tid}_{slug}.csv")
-        md = to_markdown(df.head(md_rows), md_formats, md_labels)
+        shown = df if md_columns is None else df[list(md_columns)]
+        md = to_markdown(shown.head(md_rows), md_formats, md_labels)
         record = TableRecord(
             tid=tid, slug=slug, section=self.section, title=title, csv=self._rel(path), markdown=md
         )

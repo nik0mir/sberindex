@@ -7,9 +7,9 @@
 поверх МО.
 
 Раскладка ``russia_map`` подобрана по пустым местам карты России в этой проекции: врезки — в левом верхнем
-углу (над Калининградом, левее Кольского полуострова), выноска о выпавших регионах — в левом нижнем углу,
-непрерывная шкала — правее неё (под южной границей, где Казахстан); легенда классов — под картой: внутри
-карты ей не хватает места.
+углу (над Калининградом, левее Кольского полуострова), выноска о выпавших регионах — в левом нижнем углу;
+легенда классов и непрерывная шкала — под картой: внутри карты им не хватает места, и они ложатся на
+полигоны юга Сибири.
 """
 
 from __future__ import annotations
@@ -57,10 +57,12 @@ INSET_RECTS: tuple[tuple[float, float, float, float], ...] = (
     (0.0, 0.79, 0.12, 0.21),
     (0.125, 0.79, 0.11, 0.21),
 )
-LEGEND_COLS = 5  # легенда классов под картой: не больше пяти колонок
-COLORBAR_RECT = (0.2, 0.03, 0.2, 0.025)  # непрерывная шкала: под южной границей (Казахстан), доли осей
-COLORBAR_LEGEND_ANCHOR = (0.19, 0.09)  # пункты «нет данных» над полосой шкалы
-NOTE_XY = (0.0, 0.0)  # выноска о выпавших регионах: левый нижний угол осей
+LEGEND_COLS = 5  # легенда классов под картой: не больше пяти колонок (меньше, если подписи не влезают)
+# Непрерывная шкала — под картой слева (доли осей: x0, y0, ширина, высота), пункты «нет данных» — правее
+# неё в одну колонку: внутри карты шкала и легенда ложились на полигоны юга Сибири.
+COLORBAR_RECT = (0.0, -0.1, 0.3, 0.03)
+COLORBAR_LEGEND_GAP = 0.08  # от правого края шкалы до пунктов «нет данных», доля ширины осей
+NOTE_XY = (0.0, 0.0)  # выноска о выпавших регионах: левый нижний угол осей (над легендой и шкалой)
 
 
 @dataclass(frozen=True)
@@ -290,12 +292,30 @@ def add_inset(
         spine.set_color(INSET_EDGE_COLOR)
         spine.set_linewidth(INSET_EDGE_WIDTH)
     inset.set_title(which.title, fontsize=LEGEND_PT, fontweight="normal", color=style.TEXT, loc="left", pad=2)
-    ax.indicate_inset(
+    indicator = ax.indicate_inset(
         (x0, y0, x1 - x0, y1 - y0), inset, edgecolor=INSET_EDGE_COLOR, linewidth=INSET_EDGE_WIDTH, alpha=1.0
     )
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
+    _lower_connectors(ax, indicator, rect, y1)
     return inset
+
+
+def _lower_connectors(ax: Axes, indicator: Any, rect: tuple[float, float, float, float], top: float) -> None:
+    """Если рамка на карте ниже врезки, линии идут только от нижних углов врезки к тем же углам рамки.
+
+    Так линии соседних врезок в левом верхнем углу не пересекаются: matplotlib выбирает пару углов сам
+    и у левой врезки берёт верхний правый угол, линия от которого проходит через линии правой врезки.
+    """
+    connectors = getattr(indicator, "connectors", None)
+    if not connectors or len(connectors) != len(("ll", "ul", "lr", "ur")):
+        return
+    frame_top = ax.transLimits.transform((ax.get_xlim()[0], top))[1]  # доля высоты осей
+    if frame_top >= rect[1]:
+        return
+    lower_left, upper_left, lower_right, upper_right = connectors
+    for conn, visible in ((lower_left, True), (upper_left, False), (lower_right, True), (upper_right, False)):
+        conn.set_visible(visible)
 
 
 def absent_regions(frame: gpd.GeoDataFrame) -> list[int]:
@@ -336,27 +356,124 @@ def _fmt_ticks(fmt: Callable[[float], str]) -> FuncFormatter:
 
 
 _LEGEND_STYLE: dict[str, Any] = {
+    "frameon": False,  # и вне ``style.use()``: карта строится и без rcParams проекта
     "fontsize": LEGEND_PT,
     "title_fontsize": LEGEND_PT,
     "alignment": "left",
     "handlelength": 1.2,
     "handleheight": 1.0,
+    "handletextpad": 0.8,
     "columnspacing": 1.2,
+    "borderpad": 0.4,
 }
+PT_PER_INCH = 72
+
+
+def row_major_order(n: int, ncols: int) -> list[int]:
+    """Порядок пунктов для ``ax.legend(ncols=…)``, при котором они читаются по строкам слева направо.
+
+    matplotlib заполняет колонки сверху вниз (первые ``n % ncols`` колонок на пункт длиннее), поэтому
+    без перестановки в строке идут классы через один. Для 9 пунктов и 5 колонок — [0, 5, 1, 6, 2, 7, 3, 8, 4].
+    """
+    ncols = max(1, min(int(ncols), n))
+    nrows = -(-n // ncols)
+    return [r * ncols + c for c in range(ncols) for r in range(nrows) if r * ncols + c < n]
+
+
+def legend_width_in(fig: Figure, labels: Sequence[str], ncols: int, title: str = "") -> float:
+    """Ширина легенды карты (дюймы) при раскладке ``labels`` по строкам в ``ncols`` колонок.
+
+    Колонка шириной в самую длинную свою подпись плюс значок и отступы (``_LEGEND_STYLE``); заголовок
+    легенды шире таблицы пунктов — ширина по нему.
+    """
+    n = len(labels)
+    ncols = max(1, min(int(ncols), n))
+    em = LEGEND_PT / PT_PER_INCH
+    widths = [
+        max(style.text_width_in(fig, str(labels[i]), LEGEND_PT) for i in range(c, n, ncols))
+        for c in range(ncols)
+    ]
+    handle = (_LEGEND_STYLE["handlelength"] + _LEGEND_STYLE["handletextpad"]) * em
+    pad = 2 * _LEGEND_STYLE["borderpad"] * em
+    grid = sum(widths) + ncols * handle + (ncols - 1) * _LEGEND_STYLE["columnspacing"] * em + pad
+    head = style.text_width_in(fig, title, LEGEND_PT) + pad if title else 0.0
+    return max(grid, head)
+
+
+def legend_ncols(fig: Figure, labels: Sequence[str], title: str = "", max_cols: int = LEGEND_COLS) -> int:
+    """Наибольшее число колонок (не больше ``max_cols``), при котором легенда уже ширины фигуры за вычетом
+    полей ``style.MARGIN_IN``; не влезает и одна колонка — 1."""
+    available = fig.get_figwidth() - 2 * style.MARGIN_IN
+    for ncols in range(min(len(labels), max_cols), 1, -1):
+        if legend_width_in(fig, labels, ncols, title) <= available:
+            return ncols
+    return 1
 
 
 def _class_legend(ax: Axes, handles: list[Patch], title: str) -> None:
-    """Легенда классов под картой, слева, в несколько колонок: легенда осей за их нижним краем, макет
-    constrained оставляет ей место и не пускает на строку источника."""
+    """Легенда классов под картой, слева, по строкам: легенда осей за их нижним краем, макет constrained
+    оставляет ей место и не пускает на строку источника. Колонок столько, сколько влезает в ширину фигуры
+    (не больше ``LEGEND_COLS``); пункты переставлены так, чтобы классы читались по строкам по возрастанию."""
+    labels = [h.get_label() for h in handles]
+    ncols = legend_ncols(ax.figure, labels, title)
     ax.legend(
-        handles=handles,
+        handles=[handles[i] for i in row_major_order(len(handles), ncols)],
         title=title or None,
         loc="upper left",
         bbox_to_anchor=(0.0, 0.0),
-        ncols=min(len(handles), LEGEND_COLS),
+        ncols=ncols,
         borderaxespad=0.0,
         **_LEGEND_STYLE,
     )
+
+
+def _colorbar_below(
+    fig: Figure,
+    ax: Axes,
+    scale: ScalarMappable,
+    kind: str,
+    fmt: Callable[[float], str],
+    title: str,
+    handles: list[Patch],
+) -> None:
+    """Непрерывная шкала под картой слева (``COLORBAR_RECT``) и пункты «нет данных» правее неё.
+
+    Обе — за нижним краем осей карты: макет constrained оставляет им место, на полигоны они не ложатся.
+    """
+    cax = ax.inset_axes(COLORBAR_RECT)
+    cbar = fig.colorbar(scale, cax=cax, orientation="horizontal")
+    cbar.outline.set_visible(False)
+    cbar.ax.tick_params(labelsize=LEGEND_PT, length=2)
+    if kind == "diverging":  # края и центр: у двухсторонней нормы равномерные деления вводят в заблуждение
+        norm = scale.norm
+        cbar.set_ticks([norm.vmin, norm.vcenter, norm.vmax])
+    cbar.ax.xaxis.set_major_formatter(style.RuFormatter("num") if fmt is style.fmt_num else _fmt_ticks(fmt))
+    if title:
+        cbar.ax.set_title(title, fontsize=LEGEND_PT, fontweight="normal", loc="left", pad=3)
+    if handles:
+        x0, _, width, _ = COLORBAR_RECT
+        ax.legend(
+            handles=handles,
+            loc="upper left",
+            bbox_to_anchor=(x0 + width + COLORBAR_LEGEND_GAP, 0.0),
+            borderaxespad=0.0,
+            **_LEGEND_STYLE,
+        )
+
+
+def diverging_norm(values: pd.Series, center: float | None = None) -> TwoSlopeNorm:
+    """Расходящаяся шкала с одинаковой яркостью по обе стороны центра: края — центр ∓ max|v − центр|.
+
+    Без симметрии ``TwoSlopeNorm`` растягивает каждую сторону до своего края, и −6% окрашено так же ярко,
+    как +28%. Центр по умолчанию — медиана.
+    """
+    v = pd.Series(values, dtype="float64").dropna()
+    if v.empty:
+        raise ValueError("diverging_norm: нет значений")
+    mid = float(v.median()) if center is None else float(center)
+    half = float(np.max(np.abs(v.to_numpy() - mid)))
+    half = max(half, np.finfo(float).eps * max(1.0, abs(mid)))
+    return TwoSlopeNorm(vcenter=mid, vmin=mid - half, vmax=mid + half)
 
 
 def russia_map(
@@ -378,11 +495,12 @@ def russia_map(
     """Карта России: МО года ``year`` по ``values`` (индекс — ``territory_id``).
 
     ``kind``: ``quantile`` — ``k`` квантильных классов с подписями ``fmt`` (``labels`` заменяет подпись класса
-    по номеру); ``diverging`` — шкала ``DIV_CMAP`` с центром ``center`` (по умолчанию медиана);
-    ``continuous`` — непрерывная ``SEQ_CMAP``; ``categorical`` — ``cmap`` задаёт значение → цвет.
-    МО вне панели — штриховка «нет данных СберИндекса», МО панели без значения — серые ``na_label``.
-    ``insets`` — врезки (``insets_from_config``); ``absent_note`` — текст выноски о выпавших регионах.
-    Легенда — ``ax.get_legend()``: классы — под картой, у непрерывной шкалы — пункты «нет данных» над ней.
+    по номеру); ``diverging`` — шкала ``DIV_CMAP`` с центром ``center`` (по умолчанию медиана), края
+    симметричны (``diverging_norm``); ``continuous`` — непрерывная ``SEQ_CMAP``; ``categorical`` — ``cmap``
+    задаёт значение → цвет. МО вне панели — штриховка «нет данных СберИндекса», МО панели без значения —
+    серые ``na_label``. ``insets`` — врезки (``insets_from_config``); ``absent_note`` — текст выноски
+    о выпавших регионах. Легенда — ``ax.get_legend()``, под картой: классы — по строкам, у непрерывной
+    шкалы — пункты «нет данных» правее полосы шкалы.
     """
     frame = map_frame(geo, year)
     fig, ax = style.new_figure("map")
@@ -401,11 +519,7 @@ def russia_map(
     elif kind in ("diverging", "continuous"):
         v = values.dropna()
         if kind == "diverging":
-            mid = float(v.median()) if center is None else float(center)
-            eps = np.finfo(float).eps * max(1.0, abs(mid))
-            norm: Normalize = TwoSlopeNorm(
-                vcenter=mid, vmin=min(float(v.min()), mid - eps), vmax=max(float(v.max()), mid + eps)
-            )
+            norm: Normalize = diverging_norm(v, center)
             cm = cmap or style.DIV_CMAP
         else:
             norm, cm = Normalize(vmin=float(v.min()), vmax=float(v.max())), cmap or style.SEQ_CMAP
@@ -420,27 +534,7 @@ def russia_map(
     ax.set_aspect("equal")
     ax.set_axis_off()
     if scale is not None:
-        cax = ax.inset_axes(COLORBAR_RECT)
-        cbar = fig.colorbar(scale, cax=cax, orientation="horizontal")
-        cbar.outline.set_visible(False)
-        cbar.ax.tick_params(labelsize=LEGEND_PT, length=2)
-        if (
-            kind == "diverging"
-        ):  # края и центр: у двухсторонней нормы равномерные деления вводят в заблуждение
-            cbar.set_ticks([norm.vmin, norm.vcenter, norm.vmax])
-        cbar.ax.xaxis.set_major_formatter(
-            style.RuFormatter("num") if fmt is style.fmt_num else _fmt_ticks(fmt)
-        )
-        if legend_title:
-            cbar.ax.set_title(legend_title, fontsize=LEGEND_PT, fontweight="normal", loc="left", pad=3)
-        if handles:
-            ax.legend(
-                handles=handles,
-                loc="lower left",
-                bbox_to_anchor=COLORBAR_LEGEND_ANCHOR,
-                borderaxespad=0.0,
-                **_LEGEND_STYLE,
-            )
+        _colorbar_below(fig, ax, scale, kind, fmt, legend_title, handles)
     elif handles:
         _class_legend(ax, handles, legend_title)
     for inset, rect in zip(insets, INSET_RECTS, strict=False):

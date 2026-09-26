@@ -137,11 +137,41 @@ def test_t12_markdown_is_russian(finding):
     assert n_rows == len(s5.QUANTILES) + 2 * s5.PLACE_DEFAULTS["edge_n"]
 
 
-def test_t11_rules_are_code_in_markdown(finding):
-    md = next(t for t in finding.tables if t.tid == "T11").markdown
-    assert "`emp_sh_B_2023 >= 0.2`" in md
+def test_t11_rules_are_words_in_markdown_and_code_in_csv(finding, ctx):
+    rec = next(t for t in finding.tables if t.tid == "T11")
+    md = rec.markdown
+    header = md.splitlines()[0]
+    # В отчёте правило словами и без служебных колонок; код правила и фактическое правило — в CSV.
+    assert "занятых в добыче не меньше 20%" in md and "emp_sh_B_2023" not in md
+    assert header.startswith("| Тип | Правило | МО |") and "Код" not in header
+    assert "внутригородских" not in header
     body = re.sub(r"`[^`]*`", "", "\n".join(md.splitlines()[2:]))
     assert not re.search(r"\d\.\d", body)
+    csv = pd.read_csv(ctx.out_dir / rec.csv)
+    assert "emp_sh_B_2023 >= 0.2" in csv["rule"].tolist()
+    # Фактическое правило воспроизводит число МО типа: внутригородские — только в своём типе.
+    mo = ctx.data.mo
+    for r in csv.loc[csv["type"] != "all"].itertuples():
+        assert len(mo.query(r.rule_applied, engine="python")) == r.n, r.type
+    assert csv.set_index("type").loc["north", "rule_applied"] == "(point_lat >= 60) and not workplace_based"
+
+
+@pytest.mark.parametrize(
+    ("key", "rule", "words"),
+    [
+        ("mining", "emp_sh_B_2023 >= 0.2", "занятых в добыче не меньше 20%"),
+        ("public_periphery", "emp_sh_public_2023 >= 0.55", "не меньше 55% работников"),
+        ("north", "point_lat >=   60", "центр севернее 60° с. ш."),
+        ("resort", "nights_pc_2023 >= 2.5", "не меньше 2,5 ночёвок"),
+        ("suburb", "dist_capital_km <= 30 and not is_capital and not is_inner_city", "до 30 км по дорогам"),
+        ("capital", "is_capital", "административный центр субъекта"),
+        ("mining", "emp_sh_B_2023 >= 0.2 and urban_share_2023 < 0.5", None),  # правило не по шаблону — код
+        ("unknown_type", "is_capital", None),
+    ],
+)
+def test_rule_words(key, rule, words):
+    out = s5.rule_words(key, rule)
+    assert out is None if words is None else words in out
 
 
 # --- Параметры и текст ---------------------------------------------------------------------------
@@ -440,7 +470,7 @@ def test_suburb_headline_variants():
     low = s5._suburb_headline(0.5, 1e-8, 1.2, 0.01)
     assert low.ok and "ниже" in low.text
     same = s5._suburb_headline(1.05, 0.3, 1.2, 0.01, (2.1, 2.0))
-    assert same.ok and "почти как" in same.text and "2,10 и" in same.text.replace(NBSP, " ")
+    assert same.ok and "не выделяются" in same.text and "2,10 против 2,00" in same.text.replace(NBSP, " ")
     assert not s5._suburb_headline(float("nan"), float("nan"), 1.2, 0.01).ok
     for verdict in s5._SUBURB_TEXT:
         assert len(s5.typo(s5._suburb_text(verdict, 0, 12.345, (12.345, 12.345)))) <= 90
@@ -622,7 +652,7 @@ def test_recipient_defects_count_units_flag_and_raw_ratio():
 # --- Текст «Что видно»: слова по знаку чисел, числа — только ключами фактов ----------------------
 
 # Цифры вне {{ключей}} допустимы только в названиях: 5-НДФЛ, перцентили, номера сюжета, рисунков и таблиц.
-ALLOWED_DIGITS = re.compile(r"5-НДФЛ|10-й|90-й|С6|T1[12]|рис\.\s1[45]|этапе\s2")
+ALLOWED_DIGITS = re.compile(r"5-НДФЛ|10-й|90-й|С6|T1[12]|рис\.\s1[45]|этапе\s2|раздел[а-я]*\s2")
 
 
 def _no_bare_numbers(text):
@@ -648,7 +678,7 @@ def test_signature_text_compact_when_one_trait_leads_basket():
         ("summer", "dist", "дальше", 0.25, 0.25),
         ("other", "public", "бюджетники", -0.13, 0.13),
     ]
-    text = s5._signature_text(_sig(rows), 0.2, 0.3).replace(NBSP, " ")
+    text = " ".join(s5._signature_text(_sig(rows), 0.2, 0.3)).replace(NBSP, " ")
     assert "Где {{e5.lead_cafe_where}}, доля общепита в корзине выше" in text
     assert "доля продуктов — ниже" in text and "прирост доли маркетплейсов — ниже" in text
     assert "слабо связаны летний избыток и доля «Прочего»" in text
@@ -664,15 +694,17 @@ def test_signature_text_separate_clauses_and_mask_sign_flip():
         ("other", "public", "бюджетники", -0.13, 0.13),
     ]
     mask = pd.Series({"where": "выше доступность", "rho_all": -0.19, "rho_within": 0.30})
-    text = s5._signature_text(_sig(rows, mask), 0.2, 0.3).replace(NBSP, " ")
+    bullets = s5._signature_text(_sig(rows, mask), 0.2, 0.3)
+    assert len(bullets) == 2 and bullets[1].startswith("**Карта регионов маскирует место.**")
+    text = " ".join(bullets).replace(NBSP, " ")
     assert "где {{e5.lead_cafe_where}}" in text and "где {{e5.lead_food_where}}" in text
     assert "маркетплейсов" not in text
     assert "слабо связаны доля «Прочего»" in text and "летний" not in text
     assert "без учёта регионов траты ниже" in text and "внутри регионов — выше" in text
     same_sign = pd.Series({"where": "плотнее", "rho_all": 0.19, "rho_within": 0.59})
-    assert "маскирует связи места" in s5._signature_text(_sig(rows, same_sign), 0.2, 0.3)
+    assert "маскирует связи места" in " ".join(s5._signature_text(_sig(rows, same_sign), 0.2, 0.3))
     weak_mask = pd.Series({"where": "плотнее", "rho_all": 0.5, "rho_within": 0.55})
-    assert "Карта регионов" not in s5._signature_text(_sig(rows, weak_mask), 0.2, 0.3)
+    assert "Карта регионов" not in " ".join(s5._signature_text(_sig(rows, weak_mask), 0.2, 0.3))
 
 
 @pytest.mark.parametrize(
@@ -731,3 +763,252 @@ def test_new_facts_present_on_synthetic(finding):
     lo, hi = facts["e5.suburb_sens_min"].value, facts["e5.suburb_sens_max"].value
     assert lo <= facts["e5.suburb_ratio"].value <= hi
     assert facts["e5.n_recip_lt005_raw"].value >= facts["e5.n_recip_lt005"].value
+
+
+# --- Доля бюджетников — та же ось, что зарплата: частный ρ и заголовок F14 ----------------------------
+
+
+def test_partial_within_removes_control_axis():
+    # «Бюджетники» — зеркало зарплаты: связь с тратами есть, но при равной зарплате исчезает;
+    # «горожане» связаны с тратами и помимо зарплаты.
+    mo = _mo(n_regions=10, per_region=60, seed=3)
+    rng = np.random.default_rng(4)
+    wage = rng.normal(size=len(mo))
+    urban = rng.normal(size=len(mo))
+    mo = mo.assign(
+        wage=wage,
+        public=-wage + 0.3 * rng.normal(size=len(mo)),
+        urban=urban,
+        level=wage + urban + 0.3 * rng.normal(size=len(mo)),
+    )
+    out = s5.partial_within(mo, ["public", "urban", "wage"], "level", "wage").set_index("row")
+    assert abs(out.loc["public", "rho_partial"]) < 0.1 and out.loc["public", "rho_control"] < -0.8
+    assert out.loc["urban", "rho_partial"] > 0.5
+    assert np.isnan(out.loc["wage", "rho_partial"]) and out.loc["wage", "n_partial"] == 0
+
+
+def test_split_by_partial_drops_axis_traits_from_headline():
+    cells = pd.DataFrame(
+        {
+            "code": ["urban", "public", "old", "x"],
+            "where": ["больше горожан", "больше бюджетников", "больше пожилых", "x"],
+            "rho": [0.61, -0.52, -0.50, 0.3],
+            "partial": [0.49, -0.08, -0.35, np.nan],  # у «x» частный ρ не посчитан — не отбрасывается
+        }
+    )
+    eligible, axis = s5.split_by_partial(cells, 0.1)
+    assert eligible["code"].tolist() == ["urban", "old", "x"]
+    assert axis["code"] == "public"
+    head, chosen = s5.signature_headline(eligible, min_abs=0.2, max_len=90)
+    assert chosen["neg"]["code"] == "old" and "бюджетников" not in head.text
+    assert s5.split_by_partial(cells.iloc[[0, 2]], 0.1)[1] is None
+
+
+def test_f14_has_partial_column_and_facts(finding, ctx):
+    cells = pd.read_csv(ctx.out_dir / finding.figures[0].data_csv)
+    given = cells["rho_within_given_wage"]
+    level = cells["col_code"] == "level"
+    assert given[~level].isna().all() and given[level & (cells["row_code"] != "wage")].notna().all()
+    facts = finding.facts
+    for t in s5.PLACE_TRAITS:
+        assert (f"e5.partial_{t.code}_level_wage" in facts) == (t.code != "wage")
+    for k in (
+        "axis_where",
+        "axis_rho",
+        "axis_partial",
+        "axis_rho_control",
+        "sig_pos_partial",
+        "mask_rho_all_inner",
+    ):
+        assert f"e5.{k}" in facts, k
+    assert (
+        "равной" in finding.figures[0].check
+        and "без внутригородских территорий" in finding.figures[0].subtitle
+    )
+
+
+def test_display_names_add_type_to_single_adjectives():
+    ter = pd.DataFrame(
+        {
+            "territory_id": [1, 2, 3, 4, 5],
+            "name": [
+                "Карагинский муниципальный район",
+                "Тенькинский муниципальный округ",
+                "городской округ Светлогорский",
+                "Таймырский Долгано-Ненецкий муниципальный район",
+                "муниципальный округ № 78",
+            ],
+            "name_short": [
+                "Карагинский",
+                "Тенькинский",
+                "Светлогорский",
+                "Таймырский Долгано-Ненецкий",
+                "№ 78",
+            ],
+            "mo_type": ["mr", "mo", "go", "mr", "vgt"],
+        }
+    )
+    assert s5.display_names(ter).tolist() == [
+        "Карагинский район",
+        "Тенькинский округ",
+        "Светлогорский",
+        "Таймырский Долгано-Ненецкий",
+        "МО № 78",
+    ]
+
+
+def test_one_line_joins_hyphen_breaks():
+    assert s5.one_line("Доля\nмаркет-\nплейсов") == "Доля маркетплейсов"
+    assert s5.one_line("Занятые в строительстве,\nторговле, транспорте") == (
+        "Занятые в строительстве, торговле, транспорте"
+    )
+
+
+# --- С6: столицы, поправка на структуру, Московская область, линия «траты ~ зарплата» --------------
+
+
+def test_work_home_excludes_unknown_distance_and_counts_capitals():
+    wh = s5.work_home(_home_mo(), suburb_rule=SUBURB, recipients_ok=(0.05, 3.0))
+    # МО 12 без расстояния пригодно, но ни пригород, ни «остальное»; столица (МО 5) — среди остальных.
+    assert wh["n_usable"] == 11 and wh["n_dist_unknown"] == 1 and wh["other_n"] == 6
+    assert wh["capital_n"] == 1 and wh["capital_median"] == pytest.approx(1.0)
+    assert not wh["eligible"].iloc[11] and wh["usable"].iloc[11]
+
+
+def test_paired_by_region_separates_capital_gap_from_suburbs():
+    # В каждом регионе: столица 1, пригороды 2, прочие 2 — пригороды выше столицы, но и прочие тоже.
+    rows = []
+    for r in range(4):
+        rows += [(r, True, False, 1.0), (r, False, True, 2.0), (r, False, True, 2.0), (r, False, False, 2.0)]
+    rows.append((9, False, True, 5.0))  # регион без столицы и прочих — не в сравнении
+    d = pd.DataFrame(rows, columns=["region", "capital", "group", "v"])
+    out = s5.paired_by_region(d["v"], pd.Series(True, index=d.index), d["region"], d["capital"], d["group"])
+    assert out["n_regions"] == 4 and out["group_above"] == 4 and out["other_above"] == 4
+    assert out["group_to_capital"] == pytest.approx(2.0) and out["other_to_capital"] == pytest.approx(2.0)
+    assert out["group_to_other"] == pytest.approx(1.0)
+    empty = s5.paired_by_region(
+        d["v"], pd.Series(False, index=d.index), d["region"], d["capital"], d["group"]
+    )
+    assert empty["n_regions"] == 0 and np.isnan(empty["group_to_capital"])
+
+
+def test_region_residuals_remove_region_and_controls():
+    rng = np.random.default_rng(5)
+    region = np.repeat(np.arange(8), 25)
+    x = rng.normal(size=region.size)
+    y = np.repeat(rng.normal(size=8), 25) + 0.7 * x
+    assert np.allclose(s5.region_residuals(y, region, x.reshape(-1, 1)), 0.0, atol=1e-9)
+    # Без контролей — только центрирование по региону.
+    res = s5.region_residuals(y, region, np.empty((region.size, 0)))
+    assert np.allclose(pd.Series(res).groupby(region).mean(), 0.0, atol=1e-12)
+
+
+def test_adjusted_comparison_sees_effect_beyond_controls():
+    rng = np.random.default_rng(6)
+    n = 400
+    group = pd.Series(rng.random(n) < 0.3)
+    # Контроль у группы выше: сырое различие ×exp(0,8 · 0,5) ≈ 1,49, при равном контроле — нет различия.
+    mo = pd.DataFrame(
+        {"region_code": np.repeat(np.arange(8), n // 8), "ctrl": rng.normal(size=n) + 0.5 * group}
+    )
+    values = pd.Series(np.exp(0.8 * mo["ctrl"] + 0.05 * rng.normal(size=n)))
+    everyone = pd.Series(True, index=mo.index)
+    raw = s5.compare_groups(values, everyone, group)
+    out = s5.adjusted_comparison(mo, values, everyone, group, ["ctrl"])
+    assert raw["ratio"] > 1.3 and out["ratio"] == pytest.approx(1.0, abs=0.03) and out["n_all"] == n
+    # Собственный эффект группы ×1,3 сверх контроля виден.
+    out2 = s5.adjusted_comparison(mo, values * np.where(group, 1.3, 1.0), everyone, group, ["ctrl"])
+    assert out2["ratio"] == pytest.approx(1.3, rel=0.05) and out2["p"] < 1e-6
+    none = s5.adjusted_comparison(mo, values, ~everyone, group, ["ctrl"])
+    assert none["n_all"] == 0 and np.isnan(none["ratio"])
+
+
+def test_outer_center_check_uses_straight_distance_to_city():
+    mo = pd.DataFrame(
+        {
+            "territory_id": np.arange(1, 7),
+            "region_name": ["Город"] * 2 + ["Область"] * 4,
+            "x_aea": [0.0, 2000.0, 10_000.0, 30_000.0, 80_000.0, 120_000.0],
+            "y_aea": [0.0] * 6,
+            "pop_2023": [1.0, 1.0, 1, 1, 1, 1],
+            "spend_to_ndfl_2023": [np.nan, np.nan, 1.0, 1.2, 2.0, 2.2],
+        }
+    )
+    usable = mo["spend_to_ndfl_2023"].notna()
+    out = s5.outer_center_check(mo, usable, "Область", "Город", 50)
+    # Центр города — 1 км; ближние МО — 9 и 29 км, дальние — 79 и 119 км.
+    assert out["n"] == 4 and out["n_near"] == 2
+    assert (
+        out["near"] == pytest.approx(1.1)
+        and out["far"] == pytest.approx(2.1)
+        and out["rho"] == pytest.approx(1.0)
+    )
+    missing = s5.outer_center_check(mo, usable, "Нет такого", "Город", 50)
+    assert missing["n"] == 0 and np.isnan(missing["near"])
+
+
+def test_wage_line_check_finds_group_above_line():
+    rng = np.random.default_rng(7)
+    n = 300
+    group = pd.Series(rng.random(n) < 0.2)
+    wage = np.exp(rng.normal(10.5, 0.3, n))
+    level = np.exp(0.7 * np.log(wage) + 1.0 + 0.02 * rng.normal(size=n)) * np.where(group, 1.2, 1.0)
+    mo = pd.DataFrame({"wage_2023": wage, "level_2023": level, "workplace_based": False})
+    out = s5.wage_line_check(mo, pd.Series(True, index=mo.index), group, 30)
+    assert out["ratio"] == pytest.approx(1.2, rel=0.03) and out["p"] < 1e-6
+    assert out["top_n"] == 30 and out["top_k"] >= 25 and out["base_share"] == pytest.approx(group.mean())
+
+
+@pytest.mark.parametrize(
+    ("ratio", "p", "verdict"),
+    [
+        (1.3, 1e-5, "strong"),
+        (0.7, 1e-5, "strong"),
+        (1.15, 1e-5, "weak"),
+        (1.3, 0.2, "none"),
+        (np.nan, 0.1, "unknown"),
+    ],
+)
+def test_effect_verdict(ratio, p, verdict):
+    assert s5.effect_verdict(ratio, p, 1.2, 0.01) == verdict
+
+
+def test_s6_facts_on_synthetic(finding, ctx):
+    facts = finding.facts
+    for k in (
+        "suburb_ratio_adj",
+        "suburb_adj_p",
+        "suburb_to_capital_within",
+        "other_to_capital_within",
+        "suburb_to_other_within",
+        "n_regions_paired",
+        "capital_median",
+        "rho_ratio_recipients",
+        "rho_ratio_recipients_within",
+        "moscow_obl_near_ratio",
+        "moscow_obl_far_ratio",
+        "suburb_wage_ratio",
+        "suburb_wage_p",
+        "n_dist_unknown",
+        "suburb_low_names",
+        "n_zero_dist",
+    ):
+        assert f"e5.{k}" in facts, k
+    # В синтетике у пригородов получателей в 2,5 раза меньше, а доли пожилых и бюджетников с этим не связаны:
+    # поправка на структуру эффект не убирает.
+    assert facts["e5.suburb_ratio_adj"].value > 1.5 and facts["e5.suburb_adj_p"].value < 0.01
+    # Отношение по рангу обратно числу получателей на жителя.
+    assert facts["e5.rho_ratio_recipients"].value < -0.3
+    data = pd.read_csv(ctx.out_dir / finding.figures[1].data_csv)
+    assert data["is_capital"].any() and not (data["is_capital"] & data["is_suburb"]).any()
+    assert "больше 1 — норма" in finding.figures[1].subtitle.replace(NBSP, " ")
+
+
+def test_summary_is_bulleted_and_names_sample_of_masking(finding):
+    text = finding.summary_md.replace(NBSP, " ")
+    what, meaning = text.split("**Что это значит для сюжета.**")
+    bullets = [line for line in what.splitlines() if line.startswith("- **")]
+    assert len(bullets) >= 4
+    assert "Крайние МО — гипотезы" in what and "безналичные траты" in what and "по карте" not in text
+    if "{{e5.mask_rho_all}}" in text:
+        assert "за 2023 год" in text

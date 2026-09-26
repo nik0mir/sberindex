@@ -124,7 +124,7 @@ def test_finish_russifies_ticks_and_adds_text():
     assert labels and not any("." in s or "-" in s for s in labels)
     texts = [t.get_text() for t in fig.texts]
     assert any(t.startswith("Доля маркетплейсов") for t in texts)
-    assert any("СберИндекс (CC BY-SA 4.0); расчёт munnet. Рисунок 11" in t for t in texts)
+    assert any(f"СберИндекс (CC BY-SA 4.0); расчёт munnet. Рисунок{NBSP}11" in t for t in texts)
 
 
 def test_finish_wraps_long_title_on_half_figure():
@@ -132,6 +132,36 @@ def test_finish_wraps_long_title_on_half_figure():
     title = "Где тратят меньше, доля маркетплейсов растёт быстрее: +5,5 против +2,6 п. п."
     lines = style.wrap_text(fig, title, style.TITLE_PT, "bold")
     assert len(lines) >= 2 and " ".join(lines) == title
+
+
+def test_wrap_keeps_short_words_with_next_word():
+    fig, _ = style.new_figure("full")
+    title = "Свой ритм чаще на Севере: 29% таких МО севернее 60-й параллели, во всей выборке — 10%"
+    lines = style.wrap_text(fig, title, style.TITLE_PT, "bold")
+    assert len(lines) >= 2 and " ".join(lines) == title
+    for line in lines[:-1]:
+        last = line.split(" ")[-1].lower()
+        assert last not in {"во", "в", "на", "и", "а", "с", "к", "у", "о"}, lines
+    assert not any(line.startswith("—") for line in lines[1:])
+    # слово «во» у края строки переносится вместе с «всей»
+    narrow = style.wrap_text(fig, "параллели, во всей выборке", style.TITLE_PT, "bold", width_in=1.6)
+    assert (
+        not any(line.endswith(" во") for line in narrow) and " ".join(narrow) == "параллели, во всей выборке"
+    )
+
+
+def test_caption_keeps_figure_number_with_word():
+    fig, _ = style.new_figure("half")
+    style.finish(
+        fig,
+        "Заголовок",
+        "Подзаголовок",
+        style.join_sources(style.SOURCE_SBER, style.SOURCE_ROSSTAT, style.SOURCE_FNS),
+        14,
+    )
+    caption = next(t.get_text() for t in fig.texts if t.get_text().startswith("Источники"))
+    assert f"Рисунок{NBSP}14" in caption
+    assert not any(line.endswith("Рисунок") for line in caption.splitlines())
 
 
 def test_two_sources_are_plural():
@@ -172,6 +202,42 @@ def test_label_points_limit_and_no_overlap():
     for i in range(len(boxes)):
         for j in range(i + 1, len(boxes)):
             assert not boxes[i].overlaps(boxes[j])
+    assert not any(a.get_in_layout() for a in anns)  # подписи не сжимают поле графика
+
+
+def _marker_box(ax, x, y, renderer):
+    from matplotlib.transforms import Bbox
+
+    cx, cy = ax.transData.transform((x, y))
+    half = style.POINT_HALO_PT * ax.figure.dpi / 72
+    return Bbox.from_extents(cx - half, cy - half, cx + half, cy + half)
+
+
+def test_label_points_avoid_other_markers_and_obstacles():
+    fig, ax = style.new_figure("full")
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 10)
+    # вторая точка — там, где встала бы подпись первой (вправо-вверх)
+    obstacle = ax.text(5.0, 3.0, "пояснение в углу", fontsize=9)
+    anns = style.label_points(
+        ax,
+        [5.0, 5.35, 2.0],
+        [5.0, 5.25, 3.05],
+        ["Верхнеуслонский", "Свободненский", "Пригород"],
+        avoid=[obstacle],
+    )
+    style.finish(
+        fig, "Заголовок", "Подзаголовок, с длинной шапкой, чтобы поле графика сжалось", "СберИндекс", 5
+    )
+    fig.draw_without_rendering()
+    renderer = fig.canvas.get_renderer()
+    boxes = [a.get_window_extent(renderer=renderer) for a in anns]
+    markers = [_marker_box(ax, x, y, renderer) for x, y in ((5.0, 5.0), (5.35, 5.25), (2.0, 3.05))]
+    obstacle_box = obstacle.get_window_extent(renderer=renderer)
+    for i, box in enumerate(boxes):
+        assert not any(box.overlaps(m) for m in markers), anns[i].get_text()
+        assert not box.overlaps(obstacle_box)
+        assert all(not box.overlaps(b) for j, b in enumerate(boxes) if j != i)
 
 
 def test_new_figure_sizes():

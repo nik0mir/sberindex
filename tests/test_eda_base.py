@@ -8,6 +8,8 @@ from synth import make_section_context
 from munnet import style
 from munnet.eda.base import (
     Finding,
+    display_name,
+    display_names,
     load_finding,
     make_fact,
     save_finding,
@@ -108,6 +110,7 @@ def test_save_figure_writes_three_files_and_record(ctx):
     csv = (ctx.out_dir / rec.data_csv).read_bytes()
     assert not csv.startswith(b"\xef\xbb\xbf") and b"0.15" in csv  # без BOM, дробная точка
     assert ctx.figures == [rec] and rec.section == "e4"
+    assert rec.source == style.SOURCE_SBER  # строка источника рисунка — и в записи для отчёта
 
 
 @pytest.mark.parametrize(
@@ -161,6 +164,40 @@ def test_to_markdown_defaults():
     assert rows[0] == "| да | 0,12 | x\\|y |" and rows[1] == "| нет | — | — |"
 
 
+def test_to_markdown_empty_string_is_dash():
+    md = to_markdown(pd.DataFrame({"hint": ["", "много пожилых", "  "]}))
+    assert "|  |" not in md and md.splitlines()[2] == "| — |" and md.splitlines()[4] == "| — |"
+    assert to_markdown(pd.DataFrame({"x": [1]}), formats={"x": lambda v: ""}).splitlines()[2] == "| — |"
+
+
+def test_save_table_md_columns_keep_full_csv(ctx):
+    df = pd.DataFrame({"name": ["Арбат"], "flag_pop": [1], "share": [0.2]})
+    rec = ctx.save_table(
+        df, tid="T02", slug="context_coverage", title="Покрытие", md_columns=["share", "name"]
+    )
+    assert rec.markdown.splitlines()[0] == "| share | name |"
+    assert list(pd.read_csv(ctx.out_dir / rec.csv).columns) == ["name", "flag_pop", "share"]
+    with pytest.raises(ValueError, match="md_columns"):
+        ctx.save_table(df, tid="T04", slug="weighting", title="Веса", md_columns=["nope"])
+
+
+def test_display_names_add_district_noun():
+    assert display_name("Яльчикский", "mo") == "Яльчикский округ"
+    assert display_name("Булунский", "mr") == "Булунский район"
+    assert display_name("Эгвекинот", "go") == "Эгвекинот"
+    assert display_name("Павловский Посад", "go") == "Павловский Посад"
+    assert display_name(None, "mr") == "—"
+    frame = pd.DataFrame(
+        {
+            "name": ["Яльчикский муниципальный округ", "городской округ Анадырь"],
+            "name_short": ["Яльчикский", None],
+            "mo_type": ["mo", "go"],
+        },
+        index=[5, 7],
+    )
+    assert display_names(frame).to_dict() == {5: "Яльчикский округ", 7: "городской округ Анадырь"}
+
+
 def test_finding_checks_labels_and_placeholders(ctx):
     ctx.fact("mp_pp_median", 4.1, "pp")
     ind = pd.DataFrame({"territory_id": [1, 2], "basket_resid_pc1": [0.1, -0.2]})
@@ -199,3 +236,24 @@ def test_finding_round_trip(ctx, tmp_path):
     back = load_finding(path)
     assert back.facts == finding.facts and back.headline_errors == finding.headline_errors
     pd.testing.assert_frame_equal(back.indicators, finding.indicators)
+
+
+def test_load_finding_accepts_figures_without_source(ctx, tmp_path):
+    rec = ctx.save_figure(
+        _figure(),
+        fid="F13",
+        slug="growth_divergence",
+        title="Уровни трат расходятся",
+        subtitle="Номинал",
+        alt=ALT,
+        data=pd.DataFrame({"x": [1]}),
+        check="rho_growth_level ≥ 0,2",
+        source=style.join_sources(style.SOURCE_SBER, style.SOURCE_ROSSTAT),
+    )
+    assert rec.source.startswith(style.SOURCE_SBER) and style.SOURCE_ROSSTAT in rec.source
+    path = save_finding(ctx.finding(title="Рост", summary_md=""), tmp_path / "sections")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for fig in payload["figures"]:
+        fig.pop("source")  # JSON до появления поля
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    assert load_finding(path).figures[0].source == ""

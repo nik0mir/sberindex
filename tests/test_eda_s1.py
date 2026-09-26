@@ -287,6 +287,151 @@ def test_missing_outside_counts_only_regions_with_panel(frame):
     assert out.to_dict("list") == {"region_code": [3], "region_name": ["Восточная область"], "n_missing": [2]}
 
 
+def test_absent_capitals_only_in_regions_with_panel(frame):
+    """Столица без трат считается только в регионе с другими МО панели; регион, где хотя бы одно из
+    помеченных столицей МО в панели, не попадает; столица целиком выпавшего региона — не «лишняя»."""
+    names = s1.region_names(frame)
+    capitals = pd.DataFrame(
+        {
+            "region_code": [1, 2, 3, 1],
+            "territory_id": [1, 3, 7, 2],
+            "name": ["Центрград", "Южноград", "Восточноград", "Второй центр"],
+        }
+    )
+    out = s1.absent_capitals(frame, capitals, names)
+    assert out.to_dict("list") == {
+        "region_code": [3],
+        "region_name": ["Восточная область"],
+        "territory_id": [7],
+        "name": ["Восточноград"],
+    }
+    # у региона 3 столица в панели — регион без столицы уже не считается
+    both = pd.concat([capitals, pd.DataFrame({"region_code": [3], "territory_id": [5], "name": ["Второй"]})])
+    assert s1.absent_capitals(frame, both, names).empty
+
+
+def test_capitals_from_geo_and_missing_sources(tmp_path, frame):
+    assert s1.capitals_from_geo(frame) is None  # колонок столиц нет
+    geo = frame.assign(is_capital=[True, False, True, False, False, False, True], name_short="МО")
+    caps = s1.capitals_from_geo(geo)
+    assert caps.columns.tolist() == s1.CAPITAL_COLUMNS and caps["territory_id"].tolist() == [1, 3, 7]
+    # справочника границ на синтетике нет — источника столиц нет
+    assert s1.capitals_from_dictionary(make_config(tmp_path)) is None
+
+
+def test_capitals_from_dictionary_uses_panel_rule(tmp_path):
+    """Столица по справочнику — как ``is_capital`` этапа panel: при нескольких помеченных МО субъекта —
+    городской округ; имя — короткое имя последней версии; МО, упразднённое до лет панели, не столица."""
+    cfg = make_config(tmp_path)
+    path = tmp_path / "data" / "raw" / cfg["panel"]["dictionary"]
+    path.parent.mkdir(parents=True)
+    capital = "административный_центр_субъекта"
+    rows = [
+        # (id, регион, короткое имя, тип, статус, год с, год по)
+        (1, 1, "Столица", "городской округ", capital, 2018, 9999),
+        (2, 1, "Пригородный", "муниципальный район", capital, 2018, 9999),
+        (3, 2, "Центральный", "муниципальный район", capital, 2018, 2022),
+        (3, 2, "Центральный новый", "муниципальный район", capital, 2022, 9999),
+        (4, 3, "Старая столица", "городской округ", capital, 2018, 2020),
+        (5, 3, "Район", "муниципальный район", None, 2018, 9999),
+    ]
+    dic = pd.DataFrame(
+        rows,
+        columns=[
+            "territory_id",
+            "region_code",
+            "municipal_district_name_short",
+            "municipal_district_type",
+            "municipal_district_status",
+            "year_from",
+            "year_to",
+        ],
+    )
+    dic["oktmo"] = [
+        f"{r:02d}-{t:03d}-000-000" for r, t in zip(dic["region_code"], dic["territory_id"], strict=True)
+    ]
+    dic["shape"] = 1
+    dic["shape_linked_oktmo"] = None
+    dic.to_excel(path, index=False)
+    caps = s1.capitals_from_dictionary(cfg)
+    assert caps.to_dict("list") == {
+        "region_code": [1, 2],
+        "territory_id": [1, 3],
+        "name": ["Столица", "Центральный новый"],
+    }
+
+
+def test_all_incomplete_regions_keeps_regions_without_full_series():
+    regions = pd.DataFrame(
+        {
+            "region_name": ["Б", "А", "В"],
+            "n_mo": [22, 27, 2],
+            "n_full": [0, 19, 0],
+            "n_incomplete": [22, 8, 2],
+            "share_incomplete": [1.0, 8 / 27, 1.0],
+        }
+    )
+    assert s1.all_incomplete_regions(regions)["region_name"].tolist() == ["Б", "В"]
+
+
+def test_hidden_and_new_mo_notes():
+    ter = pd.DataFrame(
+        {
+            "territory_id": [1, 2, 3, 4, 5],
+            "lineage_role": ["none", "union_predecessor", "union_predecessor", "union_successor", "none"],
+        }
+    )
+    assert s1.hidden_note(ter, [1, 4, 5], 2024) == (
+        f"2{NBSP}МО, объединённые в{NBSP}2024 году, показаны преемниками"
+    )
+    assert s1.hidden_note(ter, [1, 3, 4, 5], 2024) == (
+        f"1{NBSP}МО, объединённое в{NBSP}2024 году, показано преемником"
+    )
+    assert s1.hidden_note(ter, [2, 3, 4], 2024) == f"2{NBSP}МО нет в границах 2024 года"
+    assert s1.hidden_note(ter, [1, 2, 3, 4, 5], 2024) == ""
+    slice23 = pd.DataFrame({"territory_id": [1, 2, 3, 5]})
+    slice24 = pd.DataFrame({"territory_id": [1, 4, 5]})
+    assert s1.new_mo_note(ter, slice23, slice24, 2023) == "ещё 1 МО появилось в 2024 году"
+    assert s1.new_mo_note(ter, slice23.iloc[:2], slice24, 2023) == "ещё 3 МО нет в справочнике 2023 года"
+    assert s1.new_mo_note(ter, ter, slice24, 2023) == ""
+
+
+@pytest.mark.parametrize(
+    ("shares", "lowest", "expected"),
+    [
+        (
+            {"population": 0.999, "wage": 0.999, "nights": 0.611},
+            "nights",
+            f"; население и зарплата — почти у{NBSP}всех, ночёвки — у{NBSP}61%",
+        ),
+        ({"population": 0.999, "wage": 0.93, "nights": 0.611}, "nights", f"; зарплата — у{NBSP}93%, ночёвки"),
+        (
+            {"population": 1.0, "wage": 1.0, "orgs": 0.995},
+            "orgs",
+            f"; население и зарплата — почти у{NBSP}всех",
+        ),
+        ({"population": 1.0, "wage": 0.5}, "wage", f"; зарплата — у{NBSP}50%"),
+    ],
+)
+def test_funnel_title_follows_data(shares, lowest, expected):
+    title = s1.funnel_title(0.921, shares, lowest, 0.99)
+    assert title.startswith(f"Траты за все 24{NBSP}месяца — у{NBSP}92% МО")
+    assert expected in title and len(title) <= 90
+    if lowest in ("orgs", "wage"):  # почти у всех или уже названный показатель — второй раз не называется
+        assert title.count(" — у") == 1 + (lowest == "wage")
+
+
+def test_plot_funnel_labels_years_and_total_note(frame):
+    ter = _territories(["full", "partial"], [24, 5], [12, 5], [12, 0])
+    steps = s1.funnel(frame, ter, 2023)
+    cov = s1.context_coverage(_context_long(), _unmatched(), n_mo=10)
+    with style.use():
+        fig = s1.plot_funnel(steps, cov, 10, [2023, 2024], total_note="ещё 2 МО появились в 2024 году")
+    texts = [t.get_text() for ax in fig.axes for t in ax.texts]
+    assert "2023 год" in texts and "2024 год" in texts
+    assert "все МО панели: 10 (ещё 2 МО появились в 2024 году)" in texts
+
+
 def test_funnel_counts_slice_spend_full(frame):
     ter = _territories(["full", "partial", "full"], [24, 5, 24], [12, 5, 12], [12, 0, 12])
     ter["territory_id"] = np.array([1, 2, 99], dtype="int32")  # МО 99 нет в срезе
@@ -608,8 +753,34 @@ def _summary(**kw):
         has_cov={"population": True, "wage": True, "ndfl_income": True},
         n_gap_regions=5,
         gap_indicator=s1.INDICATORS["wage"],
+        n_missing_outside=153,
+        n_absent_capitals=7,
+        n_whole_regions=4,
+        has_min=True,
     )
     return s1.summary_md(s, **{**base, **kw})
+
+
+def test_summary_is_bulleted_and_names_capitals_and_whole_regions():
+    text = _summary()
+    seen, means = text.split("**Что это значит для сюжета.**")
+    assert seen.startswith("**Что видно.**\n\n- **Покрытие.**")
+    heads = [line.split("**")[1] for line in seen.splitlines() if line.startswith("- **")]
+    assert heads == ["Покрытие.", "Неполные ряды.", "Кто выпадает.", "Контекст."]
+    assert "Среди них {{e1.n_absent_capitals}} столиц субъектов: {{e1.absent_capitals}}." in seen
+    assert f"в{NBSP}{{{{e1.n_all_incomplete_regions}}}} регионах неполные ряды" in seen
+    assert "{{e1.all_incomplete_regions}}" in seen and "{{e1.context_min_indicator}}" in seen
+    assert f"У{NBSP}{{{{e1.n_absent_capitals}}}} регионов с тратами столицы субъекта в данных нет" in means
+    assert "С2 «Ядра и периферия»" in means and "этапа `panel`" in means
+    # каждый пункт — не длиннее 110 слов, предложения — не длиннее 40 слов
+    for line in text.splitlines():
+        assert len(line.split()) <= 110, line[:60]
+        for sentence in line.split(". "):
+            assert len(sentence.split()) <= 40, sentence[:60]
+    quiet = _summary(n_absent_capitals=None, n_whole_regions=0, has_min=False, n_missing_outside=0)
+    assert "absent_capitals" not in quiet and "all_incomplete" not in quiet and "context_min" not in quiet
+    assert "Регионы без столицы" not in quiet and "n_missing_outside" not in quiet
+    assert "Регионы без столицы" not in _summary(n_absent_capitals=0)
 
 
 def test_summary_claims_follow_data():
@@ -693,9 +864,11 @@ def test_run_section_titles_and_tables(finding):
     ctx, f = finding
     f01, f02 = f.figures
     assert f01.title == f"Траты есть по 74{NBSP}МО 8{NBSP}регионов; 1{NBSP}регион юго-запада выпал"
-    assert f02.title.startswith(f"Полный ряд — у{NBSP}68{NBSP}МО, зарплата — у{NBSP}74")
+    # 68 из 74 МО с полным рядом — 92%; население и зарплата синтетики есть у всех МО
+    assert f02.title.startswith(f"Траты за все 24{NBSP}месяца — у{NBSP}92% МО; население и зарплата — почти")
     assert "Выпавшая область" in f01.alt
     t00, t01, t02 = f.tables
+    assert "этапа `panel`" in t00.title
     assert len(t00.markdown.splitlines()) == 2 + 3  # шапка, разделитель и все три числа синтетики
     assert (
         "Среднегодовое население 2023 года, чел., медиана" in t01.markdown
@@ -719,7 +892,47 @@ def test_run_section_map_counts_only_drawn_mo(finding, data):
     df = pd.read_csv(ctx.out_dir / f.figures[0].data_csv)
     drawn = int(df["in_panel"].sum())
     assert drawn < len(data.territories)  # предшественник объединения синтетики в границах 2024 года не виден
-    assert f"на карте {drawn} из {len(data.territories)}" in f.figures[0].subtitle.replace(NBSP, " ")
+    subtitle = f.figures[0].subtitle.replace(NBSP, " ")
+    assert f"на карте {drawn} из {len(data.territories)}" in subtitle
+    # подзаголовок объясняет разницу с текстом: невидимый предшественник показан преемником
+    assert subtitle.endswith("1 МО, объединённое в 2024 году, показано преемником")
+
+
+def test_run_section_new_facts_and_texts(finding):
+    ctx, f = finding
+    fact = {k.split(".", 1)[1]: v for k, v in f.facts.items()}
+    # на синтетике нет ни колонок столиц в полигонах, ни справочника границ
+    assert fact["n_absent_capitals"].value is None and fact["absent_capitals"].value == "нет данных"
+    assert "absent_capitals" not in f.summary_md
+    assert fact["inner_city_by_region"].value == "Москва — 1, Петербург — 1"
+    assert fact["context_min_share"].value == pytest.approx(fact["context_min_n"].value / 74)
+    assert f"«{{{{e1.context_min_indicator}}}}» — у{NBSP}{{{{e1.context_min_share}}}}" in f.summary_md
+    caveats = " ".join(f.caveats)
+    assert "по смыслу определения входят" in caveats and "по описанию набора" not in caveats
+    csv = pd.read_csv(ctx.out_dir / f.figures[1].data_csv)
+    assert set(csv["block"]) == {"funnel", "context"}
+
+
+def test_run_section_names_absent_capital(tmp_path, data):
+    """Столица субъекта без трат в регионе с другими МО панели — в фактах и в тексте раздела."""
+    geo = maps.load_geometry(data.geo_path)
+    ter = data.territories.set_index("territory_id")
+    region = int(ter.loc[ter["is_capital"].astype(bool), "region_code"].iloc[0])
+    extra = geo.loc[geo["region_code"] == region].iloc[[0]].copy()
+    extra["territory_id"] = np.int32(geo["territory_id"].max() + 1)
+    extra["in_panel"] = False
+    extra["geometry"] = extra.geometry.translate(xoff=60_000)
+    geo = pd.concat([geo, extra], ignore_index=True)
+    geo["is_capital"] = geo["territory_id"] == extra["territory_id"].iloc[0]
+    geo["name_short"] = "Столица"
+    path = tmp_path / "geo_capital.parquet"
+    gpd.GeoDataFrame(geo, geometry="geometry", crs=extra.crs).to_parquet(path)
+    _, f = _run(tmp_path, dataclasses.replace(data, geo_path=path))
+    assert f.facts["e1.n_absent_capitals"].value == 1 and f.facts["e1.absent_capitals"].value == "Столица"
+    assert f.facts["e1.n_missing_outside"].value == 1
+    assert "Среди них {{e1.n_absent_capitals}} столица субъекта: {{e1.absent_capitals}}." in f.summary_md
+    assert "**Регионы без столицы.**" in f.summary_md
+    assert f.headline_errors == []
 
 
 def test_run_section_gap_facts_present(finding):

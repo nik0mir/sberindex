@@ -76,18 +76,22 @@ BASKET_DEFAULTS: dict[str, Any] = {
     "level_groups": 5,  # пятые части МО по уровню трат 2023 года (F12)
     "label_n": 6,  # подписей МО на точечных графиках F10 и F13 (В.2: не больше 5–7)
     "label_box": [0.35, 0.12],  # размер подписи в долях размаха осей: подписанные точки не ближе
-    "trend_bins": 10,  # линия тренда на F10 и F13 — медиана по десятым частям уровня трат
+    "trend_bins": 10,  # линия тренда на F10 и F13 — медиана по 10 группам МО равной численности по тратам
     "display_quantiles": [0.0, 1.0],  # ось роста на F13; при [0,005; 0,995] хвосты рисуются у края
     "weak_rho": 0.1,  # |ρ| меньше — в тексте «связи почти нет» (как «незначимые» клетки F14)
+    "slow_spread": 0.1,  # SD лог-уровня выросло меньше чем на 10% — «разрыв растёт медленно» (текст и F13)
     "headline": {  # проверки заголовков (spec_final, В.5)
-        "pc1_rho_min": 0.6,  # F10: |ρ PC1 с лог-уровнем| не меньше
-        "mp_growth_ratio_min": 1.8,  # F11: доля декабря 2024 / доля января 2023 не меньше («вдвое»)
+        "pc1_rho_min": 0.6,  # F10: ρ PC1 с лог-уровнем не меньше (знак — общепит растёт с уровнем)
+        # F11: медиана годовых долей 2024 / 2023 не меньше. Январь 2023 → декабрь 2024 («вдвое»)
+        # сравнивает разные месяцы года, а у маркетплейсов декабрь — сезонный пик, поэтому заголовок —
+        # о годовых медианах.
+        "mp_annual_ratio_min": 1.2,
         "quintile_gap_pp_min": 1.0,  # F12: прирост нижней пятой части минус верхней, п. п., не меньше
         "growth_rho_min": 0.2,  # F13: ρ роста с уровнем в целом и внутри регионов не меньше
     },
 }
 
-# Группы МО равной численности (F12 — по уровню трат, линии тренда F10 и F13 — по десятым частям):
+# Группы МО равной численности (F12 — по уровню трат; линии тренда F10 и F13 — 10 групп, подпись числом):
 # формы, которые нужны текстам, — им. мн., род. ед., дат. мн., им. ед. Другое число групп текст назвать
 # не умеет, поэтому ``basket_params`` его не пропускает.
 GROUP_WORDS: dict[int, tuple[str, str, str, str]] = {
@@ -96,9 +100,41 @@ GROUP_WORDS: dict[int, tuple[str, str, str, str]] = {
     10: ("десятые части", "десятой части", "десятым частям", "десятая часть"),
 }
 
+# Короткие формы частей корзины для текстов и подписей: им., род., дат., вин., предл. падежи. Полные
+# названия («Общественное питание») — в ``style.LABELS``; в заголовках и подписях они тяжелы и не
+# склоняются («доля «Общественное питание»»).
+PART_FORMS: dict[str, tuple[str, str, str, str, str]] = {
+    "food": ("продукты", "продуктов", "продуктам", "продукты", "продуктах"),
+    "other": ("«Прочее»", "«Прочего»", "«Прочему»", "«Прочее»", "«Прочем»"),
+    "marketplace": ("маркетплейсы", "маркетплейсов", "маркетплейсам", "маркетплейсы", "маркетплейсах"),
+    "transport": ("транспорт", "транспорта", "транспорту", "транспорт", "транспорте"),
+    "health": ("здоровье", "здоровья", "здоровью", "здоровье", "здоровье"),
+    "cafe": ("общепит", "общепита", "общепиту", "общепит", "общепите"),
+}
+NOM, GEN, DAT, ACC, PREP = range(5)
+
+
+def part_word(part: str, case: int = NOM) -> str:
+    """Короткое название части корзины в падеже ``case`` (``NOM``…``PREP``): «общепита», «продуктам»."""
+    return PART_FORMS[part][case]
+
+
 _SINGLE_LETTER = re.compile(r"(^|[\s(«„])([ВвСсКкИиАаОоУуЯя]) ")
-# Сокращение названий регионов в подписях точек (порядок важен: сначала хвост «— Алания», «— Югра»).
+# «п. п.» после числа или поля факта ({{e4.ключ}} п. п.): пробел перед единицей — неразрывный.
+_PP_AFTER_NUMBER = re.compile(r"([\d}]) п\.[  ]п\.")
+# Сокращение названий регионов в подписях точек: сначала республики с устойчивым коротким названием
+# («Чувашская Республика — Чувашия» → «Чувашия», а не обрубок «Чувашская»), затем общие правила
+# (порядок важен: хвост «— Алания», «— Югра» снимается раньше, чем слово «Республика»).
+_REGION_NAMES: dict[str, str] = {
+    "Чувашская Республика": "Чувашия",
+    "Удмуртская Республика": "Удмуртия",
+    "Чеченская Республика": "Чечня",
+    "Кабардино-Балкарская Республика": "Кабардино-Балкария",
+    "Карачаево-Черкесская Республика": "Карачаево-Черкесия",
+    "Республика Саха (Якутия)": "Якутия",
+}
 _REGION_RULES: tuple[tuple[str, str], ...] = (
+    *((rf"^{re.escape(full)}(\s+—.*)?$", short) for full, short in _REGION_NAMES.items()),
     (r"\s+—.*$", ""),
     (r"^Республика\s+", ""),
     (r"\s+Республика$", ""),
@@ -137,13 +173,15 @@ def basket_params(cfg: Any) -> dict[str, Any]:
 
 
 def nbsp(text: str) -> str:
-    """Типографика ru-text: неразрывный пробел после однобуквенных слов (в, с, к, и, а, о, у, я)
-    и перед тире."""
+    """Типографика ru-text: неразрывный пробел после однобуквенных слов (в, с, к, и, а, о, у, я),
+    перед тире и в «п. п.» (и между числом и «п. п.»: «4,8 п. п.» не рвётся)."""
     previous = None
     while previous != text:  # «и в МО»: два однобуквенных подряд
         previous = text
         text = _SINGLE_LETTER.sub(lambda m: f"{m.group(1)}{m.group(2)}{style.NBSP}", text)
-    return text.replace(" — ", f"{style.NBSP}— ")
+    unit = f"п.{style.NBSP}п."
+    text = _PP_AFTER_NUMBER.sub(lambda m: f"{m.group(1)}{style.NBSP}{unit}", text)
+    return text.replace("п. п.", unit).replace(" — ", f"{style.NBSP}— ")
 
 
 # --- Корзина: доли, CLR, PCA ---------------------------------------------------------------------
@@ -166,16 +204,21 @@ def part_frame(frame: pd.DataFrame, prefix: str, year: int) -> pd.DataFrame:
 
 
 def basket_summary(shares: pd.DataFrame, clr: pd.DataFrame) -> pd.DataFrame:
-    """По частям корзины: медиана и квартили доли по МО, дисперсия CLR; сортировка по медиане доли (убывание).
+    """По частям корзины: медиана и квартили доли по МО, их отношение, дисперсия CLR; сортировка по медиане
+    доли (убывание).
 
-    Индекс — код части, колонки: ``label``, ``median``, ``q25``, ``q75``, ``clr_var`` (дисперсия с ddof = 1).
+    Индекс — код части, колонки: ``label``, ``median``, ``q25``, ``q75``, ``ratio`` = q75 / q25 (во сколько
+    раз граница верхней четверти МО по доле выше границы нижней — правый край полосы F09 к левому; мера
+    разброса без логарифмов и CLR), ``clr_var`` (дисперсия с ddof = 1).
     """
+    q25, q75 = shares.quantile(0.25), shares.quantile(0.75)
     out = pd.DataFrame(
         {
             "label": [style.LABELS[p] for p in shares.columns],
             "median": shares.median(),
-            "q25": shares.quantile(0.25),
-            "q75": shares.quantile(0.75),
+            "q25": q25,
+            "q75": q75,
+            "ratio": q75 / q25,
             "clr_var": clr[shares.columns].var(ddof=1),
         },
         index=shares.columns,
@@ -325,6 +368,7 @@ class BasketResult:
     rho_pc1_level: float  # ρ Спирмена счёта PC1 сырых CLR 2024 года с log_level_2024
     level: pd.Series  # level_2024 выборки (₽) — ось X рисунка F10
     n: int
+    clr_var_prev: pd.Series  # дисперсия CLR долей 2023 года по частям — год рядом в пояснении факта
 
 
 PC1 = f"{PC_COLUMNS_PREFIX}1"
@@ -363,6 +407,7 @@ def basket_analysis(mo: pd.DataFrame, n_components: int = 3) -> BasketResult:
         rho_pc1_level=float(rho_pc1),
         level=sample.loc[raw.scores.index, f"level_{Y1}"],
         n=len(sample),
+        clr_var_prev=clr23.var(ddof=1),
     )
 
 
@@ -484,48 +529,111 @@ def step_test(national: pd.DataFrame) -> tuple[float, str]:
     return float(jumps.max()), f"{MONTHS_FULL_RU[month - 2]} → {MONTHS_FULL_RU[month - 1]}"
 
 
+def shown_pct(share: float) -> float:
+    """Доля в процентах, округлённая до десятых так же, как её пишет ``style.fmt_pct``: 0,13054 → 13,1."""
+    return float(f"{PP * float(share):.1f}")
+
+
 def quintile_gap(mo: pd.DataFrame, groups: int = 5) -> pd.DataFrame:
     """Доля маркетплейсов 2023 → 2024 по группам МО равной численности по ``log_level_2023``
     (группа 1 — тратят меньше всех).
 
-    Только МО с долями обоих лет (12 месяцев в каждом году). Колонки: ``group``, ``n``, ``level_min``,
-    ``level_max`` (₽, уровень 2023 года), ``share_2023``, ``share_2024`` (медианы долей), ``dpp`` — разность
-    медиан, п. п. (её и показывают «гантели»).
+    Только МО с долями обоих лет (12 месяцев в каждом году). Колонки: ``group``, ``n``, ``n_inner`` (из них
+    внутригородских территорий Москвы и Петербурга; 0, если в ``mo`` нет ``is_inner_city``), ``level_min``,
+    ``level_max`` (₽, уровень 2023 года), ``share_2023``, ``share_2024`` (медианы долей), ``dpp`` — прирост
+    медианной доли, п. п., из концов, округлённых до десятых процента, как их показывают «гантели» и текст
+    (13,1% − 10,5% = +2,6, а не +2,5 из точных медиан), ``dpp_exact`` — разность точных медиан, ``dpp_mo`` —
+    медиана приростов доли самих МО группы (другое определение: типичный прирост МО, а не прирост типичной
+    доли).
     """
     cols = ["log_level_2023", f"level_{Y0}", f"sh_{MP}_{Y0}", f"sh_{MP}_{Y1}"]
     frame = mo.dropna(subset=cols)
     group = pd.qcut(frame["log_level_2023"], groups, labels=False) + 1
+    inner = (
+        frame["is_inner_city"].astype("boolean").fillna(False).astype(int)
+        if "is_inner_city" in frame
+        else pd.Series(0, index=frame.index)
+    )
+    gain = PP * (frame[f"sh_{MP}_{Y1}"] - frame[f"sh_{MP}_{Y0}"])
     g = frame.groupby(group)
     out = pd.DataFrame(
         {
             "n": g.size(),
+            "n_inner": inner.groupby(group).sum().astype(int),
             "level_min": g[f"level_{Y0}"].min(),
             "level_max": g[f"level_{Y0}"].max(),
             "share_2023": g[f"sh_{MP}_{Y0}"].median(),
             "share_2024": g[f"sh_{MP}_{Y1}"].median(),
+            "dpp_mo": gain.groupby(group).median(),
         }
     )
-    out["dpp"] = PP * (out["share_2024"] - out["share_2023"])
+    out["dpp_exact"] = PP * (out["share_2024"] - out["share_2023"])
+    ends = zip(out["share_2023"], out["share_2024"], strict=True)
+    out["dpp"] = [round(shown_pct(b) - shown_pct(a), 1) for a, b in ends]
     out.index.name = "group"
     return out.reset_index()
 
 
+# Необязательные колонки ``mo`` для проверок С5: внутригородские территории и контроли частной связи.
+MP_OPTIONAL: tuple[str, ...] = ("is_inner_city", f"log_density_{Y0}", f"pop_{Y0}")
+
+
 def marketplace_frame(panel_wide: pd.DataFrame, mo: pd.DataFrame) -> pd.DataFrame:
-    """МО с долями маркетплейсов обоих лет: прирост, уровень, регион, траты на маркетплейсах в рублях,
-    начальные доли и приросты на раздельных месяцах; индекс — ``territory_id``."""
+    """МО с долями маркетплейсов обоих лет: прирост, уровень, регион, траты на маркетплейсах и все траты
+    в рублях (среднемесячные), начальные доли и приросты на раздельных месяцах в двух шкалах; индекс —
+    ``territory_id``.
+
+    Прирост на раздельных месяцах: ``gain_<tag>`` — в п. п., ``lgain_<tag>`` — разность логарифмов доли
+    (относительный прирост); ``tag`` = odd — начальная доля по нечётным месяцам 2023 года, прирост по чётным;
+    even — наоборот. Колонки ``MP_OPTIONAL`` переносятся, если они есть в ``mo``.
+    """
     cols = ["mp_pp_change", "log_level_2023", f"sh_{MP}_{Y0}", f"sh_{MP}_{Y1}"]
     frame = mo.dropna(subset=cols).set_index("territory_id")
-    frame = frame[[*cols, "region_code"]].copy()
+    frame = frame[[*cols, "region_code", *(c for c in MP_OPTIONAL if c in frame)]].copy()
     ids = frame.index
     levels = annual_levels(panel_wide).reindex(ids)
     frame["rub_2023"], frame["rub_2024"] = levels[f"{MP}_{Y0}"], levels[f"{MP}_{Y1}"]
+    frame["all_2023"], frame["all_2024"] = levels[f"all_{Y0}"], levels[f"all_{Y1}"]
     frame["rub_growth"] = frame["rub_2024"] / frame["rub_2023"] - 1.0
     frame["rub_incr"] = frame["rub_2024"] - frame["rub_2023"]
     for tag, init_m, gain_m in (("odd", ODD_MONTHS, EVEN_MONTHS), ("even", EVEN_MONTHS, ODD_MONTHS)):
         frame[f"init_{tag}"] = month_share(panel_wide, MP, Y0, init_m).reindex(ids)
-        gain = month_share(panel_wide, MP, Y1, gain_m) - month_share(panel_wide, MP, Y0, gain_m)
-        frame[f"gain_{tag}"] = PP * gain.reindex(ids)
+        before, after = month_share(panel_wide, MP, Y0, gain_m), month_share(panel_wide, MP, Y1, gain_m)
+        frame[f"gain_{tag}"] = PP * (after - before).reindex(ids)
+        frame[f"lgain_{tag}"] = np.log(after / before).reindex(ids)
     return frame
+
+
+def fixed_denominator_gain(frame: pd.DataFrame) -> pd.Series:
+    """Прирост доли маркетплейсов, п. п., если бы все траты МО росли с медианной по МО скоростью.
+
+    Числитель — фактические траты на маркетплейсах 2024 года, знаменатель — траты 2023 года, умноженные на
+    медианный рост всех трат (в логарифмах). Сравнение с фактическим приростом показывает, какую часть связи
+    прироста доли с уровнем трат даёт знаменатель: у МО с высокими тратами все траты растут быстрее, и доля
+    маркетплейсов в них растёт медленнее даже при одинаковом росте самих маркетплейсов.
+    """
+    growth_all = np.log(frame["all_2024"] / frame["all_2023"]).median()
+    return PP * (frame["rub_2024"] / (frame["all_2023"] * np.exp(growth_all)) - frame[f"sh_{MP}_{Y0}"])
+
+
+def partial_level_within(frame: pd.DataFrame, target: str) -> float:
+    """Частный ρ ``target`` с ``log_level_2023`` внутри регионов при контроле плотности и ln численности
+    населения 2023 года (``stats.partial_spearman``); NaN, если этих колонок нет."""
+    need = [f"log_density_{Y0}", f"pop_{Y0}"]
+    if any(c not in frame for c in need):
+        return float("nan")
+    controls = pd.DataFrame(
+        {"log_density": frame[need[0]].to_numpy(), "log_pop": np.log(frame[need[1]]).to_numpy()}
+    )
+    return stats.partial_spearman(frame[target], frame["log_level_2023"], controls, frame["region_code"])[0]
+
+
+def base_ratio(frame: pd.DataFrame, column: str, groups: int) -> float:
+    """Во сколько раз медиана ``column`` у группы МО с самыми высокими тратами 2023 года больше, чем у группы
+    с самыми низкими (группы равной численности по ``log_level_2023``)."""
+    group = pd.qcut(frame["log_level_2023"], groups, labels=False)
+    med = frame[column].groupby(group).median()
+    return float(med.iloc[-1] / med.iloc[0])
 
 
 def _iqr(x: pd.Series) -> float:
@@ -533,35 +641,49 @@ def _iqr(x: pd.Series) -> float:
 
 
 def marketplace_checks(
-    panel_wide: pd.DataFrame, mo: pd.DataFrame, national: pd.DataFrame, halves: pd.DataFrame | None = None
+    panel_wide: pd.DataFrame,
+    mo: pd.DataFrame,
+    national: pd.DataFrame,
+    halves: pd.DataFrame | None = None,
+    groups: int = 5,
 ) -> dict[str, float | int | str]:
     """Проверки сюжета С5 (T09): связь прироста доли с уровнем в целом и внутри регионов, с начальной долей на
-    раздельных месяцах, согласованность полугодий, разброс долей в двух шкалах, рубли, η² региона, ступенька.
+    раздельных месяцах в двух шкалах, согласованность полугодий, разброс долей в двух шкалах, рубли, η²
+    региона, ступенька, тривиальные объяснения связи с уровнем (знаменатель, размер и плотность).
 
     Прирост — ``mo.mp_pp_change`` (п. п., годовые доли); уровень — ``log_level_2023``. Начальная доля по
-    нечётным месяцам 2023 года, прирост — по чётным (``rho_mp_pp_initial``); наоборот — ``…_rev``; без
-    разделения (смещено регрессией к среднему) — ``…_naive``.
+    нечётным месяцам 2023 года, прирост — по чётным (``rho_mp_pp_initial``, в логарифмах —
+    ``rho_mp_log_initial``); наоборот — ``…_rev``; без разделения (смещено регрессией к среднему) —
+    ``…_naive``. ``groups`` — число групп МО по уровню для ``mp_rub_base_ratio``.
     """
     f = marketplace_frame(panel_wide, mo)
     halves = half_year_growth(panel_wide) if halves is None else halves
     h = halves.reindex(f.index)
     rho = lambda a, b: stats.spearman(a, b)[0]  # noqa: E731 — короткая запись ниже
+    within = lambda a: stats.spearman_within(a, f["log_level_2023"], f["region_code"])[0]  # noqa: E731
     mp = mp_series(national)
     res = mp_series(national, "resident_share")
     step_max, step_month = step_test(national)
+    log_gain = np.log(f[f"sh_{MP}_{Y1}"] / f[f"sh_{MP}_{Y0}"])
     return {
         "n": int(len(f)),
         "mp_pp_median": float(f["mp_pp_change"].median()),
         "mp_pp_q25": float(f["mp_pp_change"].quantile(0.25)),
         "mp_pp_q75": float(f["mp_pp_change"].quantile(0.75)),
         "rho_mp_pp_level": rho(f["mp_pp_change"], f["log_level_2023"]),
-        "rho_mp_pp_level_within": stats.spearman_within(
-            f["mp_pp_change"], f["log_level_2023"], f["region_code"]
-        )[0],
+        "rho_mp_pp_level_within": within(f["mp_pp_change"]),
+        "rho_mp_pp_level_within_fixed": within(fixed_denominator_gain(f)),
+        "rho_mp_pp_level_partial": partial_level_within(f, "mp_pp_change"),
+        "rho_mp_log_level": rho(log_gain, f["log_level_2023"]),
+        "rho_mp_log_level_within": within(log_gain),
         "eta2_mp_pp": stats.eta2(f["mp_pp_change"], f["region_code"]),
         "rho_mp_pp_initial": rho(f["gain_odd"], f["init_odd"]),
         "rho_mp_pp_initial_rev": rho(f["gain_even"], f["init_even"]),
         "rho_mp_pp_initial_naive": rho(f["mp_pp_change"], f[f"sh_{MP}_{Y0}"]),
+        "rho_mp_log_initial": rho(f["lgain_odd"], f["init_odd"]),
+        "rho_mp_log_initial_rev": rho(f["lgain_even"], f["init_even"]),
+        "rho_mp_log_initial_naive": rho(log_gain, f[f"sh_{MP}_{Y0}"]),
+        "mp_rub_base_ratio": base_ratio(f, "rub_2023", groups),
         "mp_split_half": rho(h["mp_pp_h1"], h["mp_pp_h2"]),
         "mp_iqr_2023": PP * _iqr(f[f"sh_{MP}_{Y0}"]),
         "mp_iqr_2024": PP * _iqr(f[f"sh_{MP}_{Y1}"]),
@@ -576,6 +698,7 @@ def marketplace_checks(
         "mp_share_dec23": float(mp.get(f"{Y0}-12", np.nan)),
         "mp_share_dec24": float(mp.get(f"{Y1}-12", np.nan)),
         "mp_resident_jan23": float(res.get(f"{Y0}-01", np.nan)),
+        "mp_resident_dec23": float(res.get(f"{Y0}-12", np.nan)),
         "mp_resident_dec24": float(res.get(f"{Y1}-12", np.nan)),
         "mp_step_max_pp": step_max,
         "mp_step_month": step_month,
@@ -592,10 +715,13 @@ def growth_table(
 
     Колонки: ``code``, ``label``, ``growth_median``, ``growth_p10``, ``growth_p90`` (рост среднемесячных трат
     категории), ``half_consistency`` (ρ роста января–июня и июля–декабря), ``sd_log_2023``, ``sd_log_2024``
-    (SD ln среднемесячных трат категории — разброс уровней в лог-шкале), ``n``.
+    (стандартное отклонение ln среднемесячных трат категории — разброс уровней в лог-шкале),
+    ``rub_incr_rho`` (ρ прибавки трат категории в рублях с ``log_level_2023``: у МО с высокими тратами база
+    выше, поэтому и прибавка в рублях больше при одинаковом росте в процентах), ``n``.
     """
     ids = mo.loc[mo["series_status"].astype(str) == "full", "territory_id"]
     levels = annual_levels(panel_wide).reindex(ids)
+    level0 = mo.set_index("territory_id")["log_level_2023"].reindex(ids)
     halves = (half_year_growth(panel_wide) if halves is None else halves).reindex(ids)
     rows = []
     for c in CATEGORY_CODES:
@@ -611,29 +737,46 @@ def growth_table(
                 "half_consistency": stats.spearman(halves[f"growth_h1_{c}"], halves[f"growth_h2_{c}"])[0],
                 "sd_log_2023": float(np.log(a).std(ddof=1)),
                 "sd_log_2024": float(np.log(b).std(ddof=1)),
+                "rub_incr_rho": stats.spearman((b - a).to_numpy(), level0.to_numpy())[0],
                 "n": int(len(growth)),
             }
         )
     return pd.DataFrame(rows)
 
 
+def split_growth_level(
+    panel_wide: pd.DataFrame, ids: pd.Index, level_months: Sequence[int], growth_months: Sequence[int]
+) -> float:
+    """ρ роста всех трат за ``growth_months`` (2024 к 2023) с ln средних трат ``level_months`` 2023 года."""
+    level = month_sums(panel_wide, ["v_all"], Y0, level_months)["v_all"] / len(level_months)
+    before = month_sums(panel_wide, ["v_all"], Y0, growth_months)["v_all"]
+    after = month_sums(panel_wide, ["v_all"], Y1, growth_months)["v_all"]
+    return stats.spearman((after / before - 1.0).reindex(ids), np.log(level).reindex(ids))[0]
+
+
 def growth_vs_level(panel_wide: pd.DataFrame, mo: pd.DataFrame) -> dict[str, float | int]:
-    """ρ номинального роста (``mo.growth``) с ``log_level_2023``: в целом, внутри регионов и на раздельных
-    месяцах (уровень — ln средних трат нечётных месяцев 2023 года, рост — по чётным месяцам), чтобы общий
-    шум уровня 2023 года в обеих величинах не создавал ложной связи (регрессия к среднему)."""
+    """ρ номинального роста (``mo.growth``) с ``log_level_2023``: в целом, внутри регионов, без
+    внутригородских территорий Москвы и Петербурга и на раздельных месяцах.
+
+    Раздельные месяцы — чтобы общий шум уровня 2023 года в обеих величинах не создавал ложной связи
+    (регрессия к среднему): ``…_split`` — уровень по нечётным месяцам 2023 года, рост — по чётным;
+    ``…_split_rev`` — наоборот. Оценка зависит от того, какие месяцы взяты под рост, поэтому нужны обе.
+    """
     f = mo.dropna(subset=["growth", "log_level_2023"]).set_index("territory_id")
-    odd = month_sums(panel_wide, ["v_all"], Y0, ODD_MONTHS)["v_all"] / len(ODD_MONTHS)
-    even0 = month_sums(panel_wide, ["v_all"], Y0, EVEN_MONTHS)["v_all"]
-    even1 = month_sums(panel_wide, ["v_all"], Y1, EVEN_MONTHS)["v_all"]
-    split_level = np.log(odd).reindex(f.index)
-    split_growth = (even1 / even0 - 1.0).reindex(f.index)
     rho, n = stats.spearman(f["growth"], f["log_level_2023"])
+    if "is_inner_city" in f:
+        outer = f.loc[~f["is_inner_city"].astype("boolean").fillna(False).astype(bool)]
+        no_inner = stats.spearman(outer["growth"], outer["log_level_2023"])[0]
+    else:
+        no_inner = float("nan")
     return {
         "rho_growth_level": rho,
         "rho_growth_level_within": stats.spearman_within(f["growth"], f["log_level_2023"], f["region_code"])[
             0
         ],
-        "rho_growth_level_split": stats.spearman(split_growth, split_level)[0],
+        "rho_growth_level_split": split_growth_level(panel_wide, f.index, ODD_MONTHS, EVEN_MONTHS),
+        "rho_growth_level_split_rev": split_growth_level(panel_wide, f.index, EVEN_MONTHS, ODD_MONTHS),
+        "rho_growth_level_no_inner": no_inner,
         "n": int(n),
     }
 
@@ -967,7 +1110,7 @@ def _trend_label(ax: Any, trend: pd.DataFrame, bins: int) -> Any:
     """Подпись медианной линии у её правого конца; возвращает текст — препятствие для подписей точек."""
     last = trend.iloc[-1]
     return ax.annotate(
-        f"медиана по {GROUP_WORDS[bins][2]}",
+        f"медиана по {bins} группам МО по тратам",
         (np.exp(last["x"]), last["y"]),
         xytext=(-4, 10),
         textcoords="offset points",
@@ -979,9 +1122,17 @@ def _trend_label(ax: Any, trend: pd.DataFrame, bins: int) -> Any:
     )
 
 
+def fmt_times(x: float) -> str:
+    """Отношение для подписи: 3,025 → «в 3,0 раза»."""
+    return f"в{style.NBSP}{style.fmt_num(x, 1)}{style.NBSP}раза"
+
+
 def _fig_basket(res: BasketResult):
-    """F09: медиана и межквартильный размах доли каждой части (слева), дисперсия CLR (справа,
-    столбцы от нуля)."""
+    """F09: медиана и межквартильный размах доли каждой части (слева); справа — во сколько раз граница
+    верхней четверти МО по доле выше границы нижней (правый край полосы к левому, столбцы от нуля).
+
+    Дисперсия CLR — в T08 и тексте: на графике её читает только статистик, а отношение квартилей видно
+    и без логарифмов."""
     summary = res.summary
     fig, (ax, ax_var) = style.new_figure("full", 1, 2, sharey=True, gridspec_kw={"width_ratios": [3, 1]})
     y = np.arange(len(summary))[::-1]
@@ -1001,15 +1152,15 @@ def _fig_basket(res: BasketResult):
     ax.set_yticks(y, list(summary["label"]))
     ax.set_xlim(0, float(summary["q75"].max()) * 1.15)
     ax.xaxis.set_major_formatter(style.ru_formatter("pct"))
-    ax.set_xlabel("Доля в тратах 2024 г.: точка — медиана по МО, полоса — половина МО")
+    ax.set_xlabel(f"Доля в тратах, {Y1}")
     ax.grid(axis="x")
     ax.grid(axis="y", visible=False)
-    top = summary["clr_var"].idxmax()
-    ax_var.barh(y, summary["clr_var"], color=[style.PALETTE[p] for p in summary.index], height=0.6)
+    top = summary["ratio"].idxmax()
+    ax_var.barh(y, summary["ratio"], color=[style.PALETTE[p] for p in summary.index], height=0.6)
     for yi, (part, row) in zip(y, summary.iterrows(), strict=True):
         ax_var.annotate(
-            style.fmt_num(row["clr_var"], CLR_VAR_DECIMALS),
-            (row["clr_var"], yi),
+            fmt_times(row["ratio"]),
+            (row["ratio"], yi),
             xytext=(4, 0),
             textcoords="offset points",
             va="center",
@@ -1017,8 +1168,8 @@ def _fig_basket(res: BasketResult):
             fontweight="bold" if part == top else "normal",
             color=style.TEXT,
         )
-    ax_var.set_xlim(0, float(summary["clr_var"].max()) * 1.4)
-    ax_var.set_xlabel("Дисперсия CLR")
+    ax_var.set_xlim(0, float(summary["ratio"].max()) * 1.6)
+    ax_var.set_xlabel("Правый край полосы\nк левому")
     ax_var.tick_params(axis="y", length=0)
     ax_var.grid(axis="y", visible=False)
     ax_var.set_xticks([])
@@ -1027,25 +1178,25 @@ def _fig_basket(res: BasketResult):
 
 
 def _fig_basket_vs_level(
-    level: pd.Series, pc1: pd.Series, names: pd.Series, p: Mapping[str, Any], top_label: str
+    level: pd.Series, pc1: pd.Series, names: pd.Series, p: Mapping[str, Any], top: str
 ) -> tuple[Any, Callable[[], list]]:
     """F10: PC1 сырых CLR против уровня трат 2024 года (лог-ось в рублях), медианная линия и подписи.
 
     Возвращает фигуру и отложенный шаг подписей точек (его выполняет ``_save`` после раскладки шапки).
 
-    ``top_label`` — часть с наибольшей нагрузкой PC1: она положительна по соглашению о знаке, поэтому вверху
-    оси — МО, где доля этой части выше; это написано в углу поля графика."""
+    ``top`` — код части с наибольшей нагрузкой PC1: она положительна по соглашению о знаке, поэтому вверху
+    оси — МО, где доля этой части выше; так подписана ось и написано в углу поля графика."""
     fig, ax = style.new_figure("full")
     ax.scatter(level, pc1, s=7, color=style.CONTEXT, alpha=0.8, linewidths=0, zorder=2)
     trend = _binned_median(np.log(level), pc1, int(p["trend_bins"]))
     ax.plot(np.exp(trend["x"]), trend["y"], color=style.ACCENT, linewidth=1.6, zorder=3)
     style.log_rub_axis(ax, "x", ticks=_rub_ticks(level))
-    ax.set_xlabel("Траты на жителя в месяц, 2024 г. (шкала логарифмическая)")
-    ax.set_ylabel("PC1 сырых CLR")
+    ax.set_xlabel(f"Траты на жителя в месяц, {Y1} год (шкала логарифмическая)")
+    ax.set_ylabel(f"Сдвиг корзины к {part_word(top, DAT)}\n(главная компонента, CLR)")
     hint = ax.text(
         0.01,
         0.98,
-        f"выше — больше доля «{top_label}»",
+        f"выше — больше доля {part_word(top, GEN)}",
         transform=ax.transAxes,
         va="top",
         fontsize=style.POINT_LABEL_PT,
@@ -1061,15 +1212,32 @@ def _fig_basket_vs_level(
     return fig, lambda: label_points_clear(ax, level.loc[idx], pc1.loc[idx], texts, avoid=avoid, max_labels=n)
 
 
-def _fig_mp_trend(trend: pd.DataFrame):
-    """F11: медиана долей маркетплейсов по МО месяца с полосой межквартильного размаха и доля
-    в тратах жителей."""
+def _fig_mp_trend(trend: pd.DataFrame, annual: Mapping[int, float]):
+    """F11: медиана долей маркетплейсов по МО месяца с полосой межквартильного размаха, доля в тратах
+    жителей и медиана годовых долей МО каждого года (``annual``: год → доля) — отрезок под своим годом."""
     fig, ax = style.new_figure("full")
     color = style.PALETTE[MP]
     t = trend["t"].to_numpy()
     ax.fill_between(t, trend["q25"], trend["q75"], color=color, alpha=0.15, linewidth=0)
     ax.plot(t, trend["median_share"], color=color, linewidth=2.2)
     ax.plot(t, trend["resident_share"], color=style.ACCENT, linewidth=1.4, linestyle="--")
+    years = trend["date"].astype(str).str[:4].astype(int).to_numpy()
+    for year, share in annual.items():
+        span = t[years == year]
+        if not len(span) or not np.isfinite(share):
+            continue
+        # Отрезок кончается на последнем месяце года: правее стоят подписи концов линий, и их нельзя
+        # принять за подпись отрезка.
+        ax.hlines(share, span.min() - 0.4, span.max(), color=style.TEXT2, linewidth=1.0, linestyle=":")
+        ax.annotate(
+            f"медиана за {year} год: {style.fmt_pct(share)}",
+            (span.min() - 0.4, share),
+            xytext=(0, 3),
+            textcoords="offset points",
+            va="bottom",
+            fontsize=style.POINT_LABEL_PT,
+            color=style.TEXT2,
+        )
     style.month_axis(ax, len(t), start=int(t.min()), first_year=Y0)
     ax.yaxis.set_major_formatter(style.ru_formatter("pct"))
     ax.set_ylim(0, float(trend["q75"].max()) * 1.12)
@@ -1077,7 +1245,7 @@ def _fig_mp_trend(trend: pd.DataFrame):
     end = trend.iloc[-1]
     for value, text, col, dy in (
         (end["median_share"], f"типичное МО {style.fmt_pct(end['median_share'])}", color, 6),
-        (end["resident_share"], f"все жители {style.fmt_pct(end['resident_share'])}", style.ACCENT, -10),
+        (end["resident_share"], f"все жители {style.fmt_pct(end['resident_share'])}", style.ACCENT, 0),
     ):
         ax.annotate(
             text,
@@ -1089,7 +1257,7 @@ def _fig_mp_trend(trend: pd.DataFrame):
             color=col,
         )
     ax.annotate(
-        "половина МО",
+        "средние 50% МО",
         (t.max(), end["q75"]),
         xytext=(6, 4),
         textcoords="offset points",
@@ -1128,8 +1296,9 @@ def start_phrase(gap: pd.DataFrame, texts: tuple[str, str]) -> str:
     return f"{word} ({texts[0]} и {texts[1]})"
 
 
-def _fig_mp_gap(gap: pd.DataFrame):
-    """F12: «гантели» доли маркетплейсов 2023 → 2024 по группам уровня трат, подпись прироста в п. п."""
+def _fig_mp_gap(gap: pd.DataFrame, note: str = ""):
+    """F12: «гантели» доли маркетплейсов 2023 → 2024 по группам уровня трат, подпись прироста в п. п.
+    (из округлённых концов, как они подписаны); ``note`` — пояснение в правом нижнем углу поля."""
     fig, ax = style.new_figure("full")
     color = style.PALETTE[MP]
     y = np.arange(len(gap))[::-1]  # первая группа (тратят меньше) — сверху
@@ -1173,10 +1342,21 @@ def _fig_mp_gap(gap: pd.DataFrame):
     hi = float(gap[["share_2023", "share_2024"]].max().max())
     pad = (hi - lo) * 0.35
     ax.set_xlim(max(0.0, lo - pad), hi + pad * 1.4)
-    ax.set_ylim(-0.6, len(gap) - 0.2)
+    ax.set_ylim(-1.2 if note else -0.6, len(gap) - 0.2)
+    if note:
+        ax.text(
+            0.99,
+            0.02,
+            note,
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=style.POINT_LABEL_PT,
+            color=style.TEXT2,
+        )
     ax.xaxis.set_major_formatter(style.ru_formatter("pct"))
     ax.set_xlabel("Медиана доли маркетплейсов в тратах МО")
-    ax.set_ylabel("Траты на жителя, 2023 г.")
+    ax.set_ylabel(f"Траты на жителя в месяц, {Y0} год")
     ax.grid(axis="x")
     ax.grid(axis="y", visible=False)
     return fig
@@ -1203,7 +1383,7 @@ def _fig_growth(
     style.log_rub_axis(ax, "x", ticks=_rub_ticks(level))
     ax.set_ylim(lo - 0.04 * span, hi + 0.04 * span)
     ax.yaxis.set_major_formatter(style.ru_formatter("pct"))
-    ax.set_xlabel("Траты на жителя в месяц, 2023 г. (шкала логарифмическая)")
+    ax.set_xlabel(f"Траты на жителя в месяц, {Y0} год (шкала логарифмическая)")
     ax.set_ylabel("Рост трат 2024/2023, номинал")
     median = float(growth.median())
     ax.axhline(median, color=style.TEXT2, linewidth=0.8, linestyle=":", zorder=1)
@@ -1254,52 +1434,71 @@ def _fig_nominal_real(frame: pd.DataFrame):
 # --- Раздел --------------------------------------------------------------------------------------
 
 
-def _weak(rho: float, threshold: float) -> bool:
-    return bool(np.isfinite(rho) and abs(rho) < threshold)
-
-
 # Текст раздела: {{e4.ключ}} — числа из фактов (подставляет отчёт), $слот — формулировка, выбранная по данным.
-# Одиночные переводы строк склеиваются в пробел, пустая строка — граница абзаца.
+# Строка шаблона, которая начинается с «- », открывает пункт списка, следующие строки до пустой
+# продолжают его; строка из одного слота ($имя) остаётся отдельной: слот сам даёт готовые пункты
+# или ничего (``DROP``).
+# Пустая строка — граница блока. Правило «одна мысль — один пункт».
 SUMMARY_TEMPLATE = """
-**Что видно.** Корзина типичного МО в 2024 году (медианы долей по {{e4.n_basket}} МО с полными годами):
-продовольствие {{e4.share_median_food}}, «Прочее» {{e4.share_median_other}}, маркетплейсы
-{{e4.share_median_marketplace}}, транспорт {{e4.share_median_transport}}, здоровье {{e4.share_median_health}},
-общепит {{e4.share_median_cafe}}. Сильнее всего МО различаются долей общепита: дисперсия CLR (логарифма доли
-относительно среднего геометрического всех шести долей) у общепита {{e4.clr_var_cafe}}, у продовольствия
-{{e4.clr_var_food}}. Первая главная компонента CLR несёт {{e4.pc1_var}} дисперсии, сильнее всего нагружена на
-{{e4.pc1_top_part}} ({{e4.pc1_top_load}}) и $pc1_link: ρ = {{e4.rho_pc1_level}}. Уровень трат объясняет
-{{e4.r2_clr_level}} дисперсии CLR, регион {{e4.r2_clr_region}}, оба вместе {{e4.r2_clr_both}}; после
-очистки от них остаётся {{e4.residual_share}}. $res_axis: на неё приходится {{e4.residual_pc1_var}}
-дисперсии остатка, $stability.
+**Что видно.** Корзина:
 
-Медианная доля маркетплейсов выросла с {{e4.mp_share_jan23}} в январе 2023 года до {{e4.mp_share_dec24}}
-в декабре 2024-го, а декабрь к декабрю — с {{e4.mp_share_dec23}}. Доля в тратах всех жителей (траты МО,
-взвешенные населением) выросла с {{e4.mp_resident_jan23}} до {{e4.mp_resident_dec24}}. Медиана годовых долей
-{{e4.mp_share_2023}} в 2023 году и {{e4.mp_share_2024}} в 2024-м, типичный прирост за год {{e4.mp_pp_median}}
-(у половины МО от {{e4.mp_pp_q25}} до {{e4.mp_pp_q75}}). В процентных пунктах доля растёт $pp_dir: ρ прироста
-с уровнем трат {{e4.rho_mp_pp_level}}, внутри регионов {{e4.rho_mp_pp_level_within}}. У $group МО
-с самыми низкими тратами прирост {{e4.dq1_pp}}, с самыми высокими {{e4.dq5_pp}} при стартовых долях
-{{e4.q1_share_2023}} и {{e4.q5_share_2023}}. При этом $catch_up (ρ = {{e4.rho_mp_pp_initial}}
-на раздельных месяцах и {{e4.rho_mp_pp_initial_naive}} без разделения). $rub
-Разброс долей в процентных пунктах $iqr_dir (межквартильный размах {{e4.mp_iqr_2023}} → {{e4.mp_iqr_2024}}
-п. п.)$joint в логарифмах $sd_dir (SD ln доли {{e4.mp_sd_log_2023}} → {{e4.mp_sd_log_2024}}). Прирост доли
-за январь–июнь и за июль–декабрь $split (ρ = {{e4.mp_split_half}}); η² региона для прироста
+- В 2024 году у типичного МО (медианы долей по {{e4.n_basket}} МО с полными годами) продукты занимают
+{{e4.share_median_food}} трат, «Прочее» {{e4.share_median_other}}, маркетплейсы
+{{e4.share_median_marketplace}}, транспорт {{e4.share_median_transport}}, здоровье
+{{e4.share_median_health}}, общепит {{e4.share_median_cafe}}.
+- $ratio
+- $pc1
+- Уровень трат объясняет {{e4.r2_clr_level}} дисперсии CLR, регион {{e4.r2_clr_region}}, оба вместе
+{{e4.r2_clr_both}}; после очистки от них остаётся {{e4.residual_share}}.
+- $res_axis: на неё приходится {{e4.residual_pc1_var}} дисперсии остатка, $stability.
+
+Маркетплейсы:
+
+- Медиана годовых долей маркетплейсов по МО выросла с {{e4.mp_share_2023}} в 2023 году до {{e4.mp_share_2024}}
+в 2024-м, декабрь к декабрю — с {{e4.mp_share_dec23}} до {{e4.mp_share_dec24}}. Доля в тратах всех жителей
+(траты МО, взвешенные населением) декабрь к декабрю выросла с {{e4.mp_resident_dec23}} до
+{{e4.mp_resident_dec24}}.
+- Типичный прирост доли за год {{e4.mp_pp_median}} (у средней половины МО — от {{e4.mp_pp_q25}} до
+{{e4.mp_pp_q75}}).
+- В п. п. доля растёт $pp_dir: ρ прироста с уровнем трат {{e4.rho_mp_pp_level}}, внутри регионов
+{{e4.rho_mp_pp_level_within}}. Медианная доля у $group МО с самыми низкими тратами выросла
+с {{e4.q1_share_2023}} до {{e4.q1_share_2024}} ({{e4.dq1_pp}}), у $group с самыми высокими —
+с {{e4.q5_share_2023}} до {{e4.q5_share_2024}} ({{e4.dq5_pp}}).
+$robust
+- $catch_up
+- $spread
+- $rub
+- Прирост доли за январь–июнь и за июль–декабрь $split (ρ = {{e4.mp_split_half}}); η² региона для прироста
 {{e4.eta2_mp_pp}}. $step
 
-Номинальный рост трат 2024/2023 в типичном МО {{e4.growth_median}} (10-й и 90-й перцентили {{e4.growth_p10}}
-и {{e4.growth_p90}}); по категориям: маркетплейсы {{e4.growth_marketplace}}, общепит {{e4.growth_cafe}},
-продовольствие {{e4.growth_food}}, здоровье {{e4.growth_health}}, транспорт {{e4.growth_transport}}, «Прочее»
-{{e4.growth_other}}. $real $growth_rel $half
+Рост трат:
 
-**Что это значит для сюжета.** С4 (состав корзины): $s4_lead, поэтому признаками узлов годятся CLR,
-очищенные от лог-уровня и региона (показатель сводки — счёт очищенной PC1); $s4. С5 (сдвиг к маркетплейсам):
-$s5. С3 (устойчивость потребления): $s3.
+- Номинальный рост трат 2024/2023 в типичном МО {{e4.growth_median}} (10-й и 90-й перцентили {{e4.growth_p10}}
+и {{e4.growth_p90}}); по категориям: маркетплейсы {{e4.growth_marketplace}}, общепит {{e4.growth_cafe}},
+продукты {{e4.growth_food}}, здоровье {{e4.growth_health}}, транспорт {{e4.growth_transport}}, «Прочее»
+{{e4.growth_other}}. $real
+- $growth_rel
+- $half
+
+**Что это значит для сюжета.**
+
+- **С4 «Состав корзины» — $s4_verdict.** $s4
+- **С5 «Сдвиг к маркетплейсам» — $s5_verdict.** $s5
+- **С3 «Устойчивость потребления» — $s3_verdict.** $s3
 """
+DROP = "\x00"  # значение слота-строки, которой в тексте нет: строка удаляется после подстановки
+PH = "{{" + SECTION_ID + ".%s}}"  # поле факта раздела в тексте: PH % "ключ"
+CODE_BY_LABEL: dict[str, str] = {label.lower(): code for code, label in style.LABELS.items()}
 
 
 def _ge(value: Any, threshold: float) -> bool:
     """value ≥ threshold; пропуск (None, NaN) — False."""
     return value is not None and bool(np.isfinite(value)) and value >= threshold
+
+
+def _finite(value: Any) -> bool:
+    """Есть ли число (не None и не NaN)."""
+    return value is not None and bool(np.isfinite(value))
 
 
 def _grew(before: Any, after: Any) -> bool:
@@ -1319,100 +1518,253 @@ def _sign(rho: Any, weak: float) -> int:
     return 1 if rho > 0 else -1
 
 
+MIXED = 2  # знак связи на двух вариантах раздельных месяцев разный: вывод зависит от выбора месяцев
+
+
+def _split_sign(v: Mapping[str, Any], key: str, weak: float) -> int:
+    """Общий знак ``key`` и ``key_rev`` (два варианта раздельных месяцев): +1, −1, 0 или ``MIXED``."""
+    first = _sign(v[key], weak)
+    rev = v.get(f"{key}_rev")
+    second = first if rev is None else _sign(rev, weak)
+    return first if first == second else MIXED
+
+
 def _by_sign(rho: Any, weak: float, pos: str, neg: str, zero: str) -> str:
     """Формулировка по знаку связи: ``pos`` при ρ > 0, ``neg`` при ρ < 0, ``zero`` при слабой связи."""
     return {1: pos, -1: neg, 0: zero}[_sign(rho, weak)]
 
 
 def _paragraphs(template: str) -> str:
-    """Склеивает строки шаблона: одиночный перевод строки — пробел, пустая строка — граница абзаца."""
-    blocks = [
-        " ".join(line.strip() for line in b.strip().splitlines()) for b in template.strip().split("\n\n")
-    ]
+    """Склеивает строки шаблона: пустая строка — граница блока; строка с «- » — новый пункт списка, строка из
+    одного слота (``$имя``) — отдельная строка, прочие строки продолжают предыдущую через пробел."""
+    blocks = []
+    for block in template.strip().split("\n\n"):
+        lines: list[str] = []
+        for raw in block.strip().splitlines():
+            line = raw.strip()
+            if not lines or line.startswith("- ") or re.fullmatch(r"\$\w+", line):
+                lines.append(line)
+            else:
+                lines[-1] += " " + line
+        blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
 def _basket_slots(v: Mapping[str, Any], p: Mapping[str, Any], rej: Mapping[str, float]) -> dict[str, str]:
-    """Слоты текста про корзину: связь PC1 с уровнем, ось остатка, её устойчивость, вывод для С4."""
-    ph = "{{" + SECTION_ID + ".%s}}"
+    """Слоты текста про корзину: разброс долей, первая главная компонента, ось остатка, вывод для С4."""
+    ratio_top = str(v["share_ratio_argmax"])
+    clr_top = str(v["clr_var_argmax"])
+    clr_text = (
+        f"Дисперсия CLR (логарифма доли относительно среднего геометрического всех шести долей) у "
+        f"{part_word(clr_top, GEN)} {PH % f'clr_var_{clr_top}'}"
+        + (f", у продуктов {PH % 'clr_var_food'}." if clr_top != "food" else ".")
+    )
+    ratio = (
+        f"Сильнее всего МО различаются долей {part_word(ratio_top, GEN)}: у МО на 75-м перцентиле она "
+        f"в {PH % 'share_ratio_top'} раза выше, чем на 25-м, у остальных частей — в "
+        f"{PH % 'share_ratio_rest_min'}–{PH % 'share_ratio_rest_max'} раза. {clr_text}"
+    )
+    top = CODE_BY_LABEL[str(v["pc1_top_part"]).lower()]
+    loads = {part: v[f"pc1_load_{part}"] for part in PARTS if _finite(v.get(f"pc1_load_{part}"))}
+    negative = sorted((q for q in loads if loads[q] < 0), key=lambda q: loads[q])[:2]
+    load_list = ", ".join(
+        [f"{part_word(top, GEN)} {PH % f'pc1_load_{top}'}"]
+        + [f"{part_word(q, GEN)} {PH % f'pc1_load_{q}'}" for q in negative]
+    )
     rho_pc1 = v["rho_pc1_level"]
     pc1_close = rho_pc1 is not None and _ge(abs(rho_pc1), p["headline"]["pc1_rho_min"])
-    same_top = str(v["residual_pc1_top"]).lower() == str(v["pc1_top_part"]).lower()
-    load = ph % "residual_pc1_top_load"
+    pc1 = (
+        f"Первая главная компонента CLR — сдвиг корзины к {part_word(top, DAT)} (нагрузка {load_list}). "
+        f"Она несёт {PH % 'pc1_var'} дисперсии и "
+        f"{'почти повторяет уровень трат' if pc1_close else 'связана с уровнем трат слабее'}: ρ = "
+        f"{PH % 'rho_pc1_level'}."
+    )
+    clean_top = CODE_BY_LABEL[str(v["residual_pc1_top"]).lower()]
     res_axis = (
-        f"Главная ось остатка {'снова ' if same_top else ''}держится на части «{ph % 'residual_pc1_top'}» "
-        f"(нагрузка {load})"
+        f"Главная ось остатка {'снова ' if clean_top == top else ''}держится на {part_word(clean_top, PREP)} "
+        f"(нагрузка {PH % 'residual_pc1_top_load'})"
     )
     stable = _ge(v["residual_pc1_stability"], rej["s4_residual_stability_min"])
     enough = _ge(v["residual_share"], rej["s4_residual_share_min"])
-    stab = ph % "residual_pc1_stability"
+    stab = PH % "residual_pc1_stability"
+    cafe = ", доля которого, вероятно, зависит от присутствия сетевых кафе" if clean_top == "cafe" else ""
+    features = (
+        "Признаки узлов — CLR, очищенные от уровня трат и региона (в сводке — значение очищенной первой "
+        "главной компоненты)."
+    )
+    left = f"после очистки от них остаётся {PH % 'residual_share'} различий при пороге критерия отказа "
     if stable and enough:
+        verdict = "критерии отказа выполнены"
         s4 = (
-            "очищенной структуры остаётся достаточно, и её главная ось устойчива между годами: "
-            "критерии отказа выполнены"
+            f"Уровень трат и регион объясняют лишь часть различий корзин: {left}{PH % 'residual_share_min'}. "
+            f"Очищенная ось устойчива между годами (ρ = {stab}) и держится на {part_word(clean_top, PREP)}"
+            f"{cafe}. {features}"
         )
     elif stable:
+        verdict = "слой"
         s4 = (
-            "главная ось очищенной структуры устойчива между годами, но после очистки различий остаётся "
-            "мало: критерий отказа по доле остатка не выполнен, корзина годится как слой"
+            f"Сырая корзина во многом повторяет уровень трат и регион: {left}{PH % 'residual_share_min'}. "
+            f"Очищенная ось устойчива между годами (ρ = {stab}) и держится на {part_word(clean_top, PREP)}"
+            f"{cafe}. {features}"
         )
     else:
-        s4 = "очищенная структура неустойчива между годами: критерий отказа по устойчивости не выполнен"
-    if str(v["residual_pc1_top"]).lower() == style.LABELS["cafe"].lower():
-        s4 += "; ось остатка держится на общепите, а его доля, вероятно, зависит от присутствия сетевых кафе"
+        verdict = "критерий отказа не выполнен"
+        s4 = f"Очищенная от уровня трат и региона структура неустойчива между годами (ρ = {stab})."
     return {
-        "pc1_link": "почти повторяет уровень трат" if pc1_close else "связана с уровнем трат слабее",
+        "ratio": ratio,
+        "pc1": pc1,
         "res_axis": res_axis,
         "stability": (
-            f"её счёт в 2023 и 2024 годах согласован (ρ = {stab})"
+            f"её значения в 2023 и 2024 годах согласованы (ρ = {stab})"
             if stable
-            else f"но её счёт в 2023 и 2024 годах согласован слабо (ρ = {stab})"
+            else f"но её значения в 2023 и 2024 годах согласованы слабо (ρ = {stab})"
         ),
-        "s4_lead": (
-            "уровень трат и регион объясняют лишь часть различий корзин"
-            if enough
-            else "сырая корзина во многом повторяет уровень трат и регион"
-        ),
+        "s4_verdict": verdict,
         "s4": s4,
     }
+
+
+def _catch_up_text(v: Mapping[str, Any], weak: float) -> tuple[str, int, int]:
+    """Пункт о догонянии в двух шкалах (Б.1, п. 10) и знаки связи прироста со стартовой долей на раздельных
+    месяцах: в п. п. и в логарифмах (+1, −1, 0 или ``MIXED``)."""
+    pp_s = _split_sign(v, "rho_mp_pp_initial", weak)
+    log_s = _split_sign(v, "rho_mp_log_initial", weak)
+    pp_nums = f"ρ = {PH % 'rho_mp_pp_initial'} и {PH % 'rho_mp_pp_initial_rev'} на раздельных месяцах"
+    log_nums = f"{PH % 'rho_mp_log_initial'} и {PH % 'rho_mp_log_initial_rev'} на раздельных месяцах"
+    pp_text = {
+        0: f"В п. п. догоняния нет: прибавка почти не зависит от стартовой доли ({pp_nums}).",
+        -1: f"В п. п. есть догоняние: где доля была ниже, прибавка больше ({pp_nums}).",
+        1: f"В п. п. прибавка больше там, где доля и так была выше ({pp_nums}).",
+        MIXED: f"В п. п. связь прибавки со стартовой долей зависит от выбора месяцев ({pp_nums}).",
+    }[pp_s]
+    lead = "Поэтому в" if pp_s == 0 else "В"
+    log_text = {
+        -1: f"{lead} относительном выражении МО с малой долей растут быстрее: ρ разности логарифмов доли "
+        f"со стартовой долей {log_nums}.",
+        0: f"В относительном выражении связи со стартовой долей почти нет: ρ = {log_nums}.",
+        1: f"В относительном выражении доля растёт быстрее там, где она и так выше: ρ = {log_nums}.",
+        MIXED: f"В относительном выражении связь со стартовой долей зависит от выбора месяцев: "
+        f"ρ = {log_nums}.",
+    }[log_s]
+    return f"{pp_text} {log_text}", pp_s, log_s
+
+
+def _catch_up_wording(pp_s: int, log_s: int) -> str:
+    """Часть формулировки С5 о догонянии: в двух шкалах, если они расходятся."""
+    if pp_s == 0 and log_s == -1:
+        return "в п. п. догоняния по доле нет, в относительном выражении есть"
+    if pp_s == 0 and log_s == 0:
+        return "догоняния по доле нет ни в п. п., ни в относительном выражении"
+    if pp_s == -1:
+        return "есть догоняние по доле"
+    if pp_s == 1:
+        return "доля растёт быстрее там, где она и так выше"
+    return "догоняние по доле зависит от шкалы и выбора месяцев"
+
+
+def _robust_items(v: Mapping[str, Any], p: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    """Пункты о тривиальных объяснениях связи прироста доли с уровнем трат (знаменатель, районы Москвы и
+    Петербурга, размер и плотность МО) и короткие названия рисков, которые подтвердились."""
+    weak, words = p["weak_rho"], GROUP_WORDS[int(p["level_groups"])]
+    items, risks = [], []
+    within, fixed = v["rho_mp_pp_level_within"], v.get("rho_mp_pp_level_within_fixed")
+    if _finite(within) and _finite(fixed):
+        if abs(fixed) < abs(within) and _sign(v["rho_growth_level_within"], weak) > 0:
+            items.append(
+                "Часть связи с уровнем даёт знаменатель: все траты растут быстрее там, где они выше (ρ роста "
+                f"с уровнем внутри регионов {PH % 'rho_growth_level_within'}). Если бы все траты МО росли "
+                "с медианной скоростью, ρ прироста доли с уровнем внутри регионов был бы "
+                f"{PH % 'rho_mp_pp_level_within_fixed'}, а не {PH % 'rho_mp_pp_level_within'}."
+            )
+            risks.append("знаменатель")
+        else:
+            items.append(
+                "Знаменатель связь не объясняет: при медианном росте всех трат у каждого МО ρ прироста доли "
+                f"с уровнем внутри регионов {PH % 'rho_mp_pp_level_within_fixed'}."
+            )
+    n_inner, dq1, dq5 = v.get("q5_n_inner"), v.get("dq1_pp_no_inner"), v.get("dq5_pp_no_inner")
+    if n_inner and _finite(dq1) and _finite(dq5):
+        gap, gap_no = v["dq1_pp"] - v["dq5_pp"], dq1 - dq5
+        if gap_no >= gap:
+            verdict = "разрыв не меньше"
+        elif gap_no >= p["headline"]["quintile_gap_pp_min"]:
+            verdict = "разрыв меньше, но остаётся"
+        else:
+            verdict = "разрыв почти исчезает"
+        items.append(
+            f"В {words[1]} МО с самыми высокими тратами {PH % 'q5_n_inner'} из {PH % 'q5_n'} — районы Москвы "
+            f"и Петербурга. Без них (МО заново разделены на {words[0]}) прирост медианной доли у нижней "
+            f"{words[1]} {PH % 'dq1_pp_no_inner'}, у верхней {PH % 'dq5_pp_no_inner'}: {verdict}."
+        )
+        risks.append("районы Москвы и Петербурга в верхней группе")
+    partial = v.get("rho_mp_pp_level_partial")
+    if _finite(partial):
+        holds = _sign(partial, weak) == _sign(within, weak) != 0
+        items.append(
+            "При контроле плотности и численности населения связь внутри регионов "
+            f"{'остаётся' if holds else 'почти исчезает'}: частный ρ = {PH % 'rho_mp_pp_level_partial'}."
+        )
+    return items, risks
+
+
+def _rub_text(v: Mapping[str, Any], p: Mapping[str, Any]) -> tuple[str, bool]:
+    """Пункт о тратах на маркетплейсах в рублях и признак «в рублях разрыв растёт»."""
+    weak, group = p["weak_rho"], GROUP_WORDS[int(p["level_groups"])][1]
+    pct_sign = _sign(v["rho_mp_rub_growth_level"], weak)
+    incr_sign = _sign(v["rho_mp_rub_incr_level"], weak)
+    widens = incr_sign > 0 and _sign(v["rho_mp_pp_level"], weak) < 0
+    pct_where = {
+        1: "быстрее там, где тратят больше",
+        -1: "быстрее там, где тратят меньше",
+        0: "почти одинаково при любом уровне трат",
+    }[pct_sign]
+    incr = PH % "rho_mp_rub_incr_level"
+    text = (
+        f"Рост трат на маркетплейсах в рублях в медиане {PH % 'mp_rub_growth_median'} (номинал). "
+        f"В процентах эти траты растут {pct_where} (ρ с уровнем трат {PH % 'rho_mp_rub_growth_level'})"
+    )
+    if incr_sign > 0:
+        gap = (
+            "разрыв в рублях всё же растёт"
+            if pct_sign < 0
+            else "прибавка в рублях тоже больше у МО с высокими тратами"
+        )
+        text += (
+            f"; {gap} (ρ прибавки с уровнем {incr}), потому что база выше: в 2023 году у {group} МО "
+            f"с самыми высокими тратами траты на маркетплейсах в {PH % 'mp_rub_base_ratio'} раза больше, "
+            f"чем у {group} с самыми низкими."
+        )
+        if _sign(v.get("rub_incr_rho_min"), weak) > 0:
+            text += (
+                " Так во всех категориях: ρ прибавки в рублях с уровнем трат — от "
+                f"{PH % 'rub_incr_rho_min'} до {PH % 'rub_incr_rho_max'}."
+            )
+    elif incr_sign < 0:
+        text += f"; прибавка в рублях больше у МО с низкими тратами (ρ = {incr})."
+    else:
+        text += f"; прибавка в рублях почти не связана с уровнем трат (ρ = {incr})."
+    return text, widens
 
 
 def _marketplace_slots(
     v: Mapping[str, Any], p: Mapping[str, Any], rej: Mapping[str, float]
 ) -> dict[str, str]:
-    """Слоты текста про маркетплейсы: направление прироста, догоняние, рубли, разброс, ступенька, вывод
-    для С5."""
-    ph = "{{" + SECTION_ID + ".%s}}"
+    """Слоты текста про маркетплейсы: направление прироста, объяснения связи с уровнем, догоняние в двух
+    шкалах, разброс, рубли, ступенька, вывод для С5."""
     weak = p["weak_rho"]
-    pp_sign = _sign(v["rho_mp_pp_level"], weak)
-    incr_sign = _sign(v["rho_mp_rub_incr_level"], weak)
-    no_catch_up = _sign(v["rho_mp_pp_initial"], weak) == 0
-    differs = pp_sign != 0 and incr_sign != 0 and pp_sign != incr_sign
-    pct_dir = _by_sign(
-        v["rho_mp_rub_growth_level"],
-        weak,
-        "выше у МО с высоким уровнем трат",
-        "выше у МО с низким уровнем трат",
-        "почти не связан с уровнем трат",
-    )
-    incr_dir = _by_sign(
-        v["rho_mp_rub_incr_level"],
-        weak,
-        "больше у МО с высоким уровнем трат",
-        "больше у МО с низким уровнем трат",
-        "почти не связана с уровнем трат",
-    )
-    rub = (
-        f"{'В рублях картина другая' if differs else 'В рублях'}: рост трат на маркетплейсах в медиане "
-        f"{ph % 'mp_rub_growth_median'}, в процентах он {pct_dir} (ρ с уровнем трат "
-        f"{ph % 'rho_mp_rub_growth_level'}), {'но' if differs else 'а'} прибавка в рублях {incr_dir} "
-        f"(ρ = {ph % 'rho_mp_rub_incr_level'})."
-    )
+    catch_up, pp_s, log_s = _catch_up_text(v, weak)
+    robust, risks = _robust_items(v, p)
+    rub, widens = _rub_text(v, p)
     iqr_dir = _direction(v["mp_iqr_2023"], v["mp_iqr_2024"], "растёт", "сжимается")
     sd_dir = _direction(v["mp_sd_log_2023"], v["mp_sd_log_2024"], "растёт", "сжимается")
+    spread = (
+        f"Разброс долей в п. п. {iqr_dir} (межквартильный размах {PH % 'mp_iqr_2023'} → {PH % 'mp_iqr_2024'} "
+        f"п. п.){', а' if iqr_dir != sd_dir else ' и'} в логарифмах {sd_dir} (стандартное отклонение "
+        f"логарифма доли {PH % 'mp_sd_log_2023'} → {PH % 'mp_sd_log_2024'})."
+    )
     split_ok = _ge(v["mp_split_half"], rej["s5_split_half_min"])
     step_ok = v["mp_step_max_pp"] is not None and v["mp_step_max_pp"] <= p["step_test_pp"]
-    step_nums = f"{ph % 'mp_step_max_pp'} п. п. ({ph % 'mp_step_month'})"
+    step_nums = f"{PH % 'mp_step_max_pp'} п. п. ({PH % 'mp_step_month'})"
     step = (
         "Скачка, похожего на смену границ категорий, нет: наибольшее изменение годового прироста доли между "
         f"соседними месяцами {step_nums}."
@@ -1421,7 +1773,7 @@ def _marketplace_slots(
         "границы категорий."
     )
     within = v["rho_mp_pp_level_within"]
-    within_ok = within is not None and bool(np.isfinite(within)) and abs(within) >= rej["s5_rho_within_min"]
+    within_ok = _finite(within) and abs(within) >= rej["s5_rho_within_min"]
     pp_where = _by_sign(
         v["rho_mp_pp_level"],
         weak,
@@ -1430,33 +1782,30 @@ def _marketplace_slots(
         "почти одинаково при любом уровне трат",
     )
     if split_ok and within_ok and step_ok:
-        wording = [f"доля онлайна растёт {pp_where}"]
-        if no_catch_up:
-            wording.append("догоняния по доле нет")
-        if differs and incr_sign > 0:
+        wording = [f"доля маркетплейсов растёт {pp_where}", _catch_up_wording(pp_s, log_s)]
+        if widens:
             wording.append("в рублях разрыв растёт")
+        risk_list = f"часть связи с уровнем дают {' и '.join(risks)}; " if risks else ""
+        verdict = "критерии отказа выполнены"
         s5 = (
-            "критерии отказа выполнены; сигнал устойчивый, но относительный: признаки узла — прирост доли "
-            f"в п. п. и в рублях вместе; формулировка — «{', '.join(wording)}»"
+            "Сигнал устойчивый, но относительный: признаки узла — прирост доли в п. п. и прирост в рублях "
+            f"вместе. Формулировка: «{'; '.join(wording)}». Риски: {risk_list}доля наличных по МО "
+            "неизвестна. Гипотеза, в данных не проверить: часть покупок на маркетплейсах могла уйти на карты "
+            "банков самих площадок, и неравномерно между МО."
         )
     else:
-        s5 = "не все критерии отказа выполнены (полугодия, связь внутри регионов, ступенька), скорее слой"
+        verdict = "скорее слой"
+        s5 = "Не все критерии отказа выполнены (полугодия, связь внутри регионов, ступенька)."
     return {
         "group": GROUP_WORDS[int(p["level_groups"])][1],
         "pp_dir": pp_where,
-        "catch_up": _by_sign(
-            v["rho_mp_pp_initial"],
-            weak,
-            "прирост выше там, где доля и так была выше",
-            "там, где доля была ниже, она растёт быстрее: есть догоняние по доле",
-            "догоняния по доле нет: прирост почти не связан с начальной долей",
-        ),
+        "robust": "\n".join(f"- {item}" for item in robust) if robust else DROP,
+        "catch_up": catch_up,
+        "spread": spread,
         "rub": rub,
-        "iqr_dir": iqr_dir,
-        "sd_dir": sd_dir,
-        "joint": ", а" if iqr_dir != sd_dir else " и",
         "split": "согласован" if split_ok else "согласован слабо",
         "step": step,
+        "s5_verdict": verdict,
         "s5": s5,
     }
 
@@ -1464,50 +1813,63 @@ def _marketplace_slots(
 def _growth_slots(
     v: Mapping[str, Any], p: Mapping[str, Any], rej: Mapping[str, float], cpi_used: bool
 ) -> dict[str, str]:
-    """Слоты текста про рост: реал, расхождение уровней, согласованность полугодий, вывод для С3."""
-    ph = "{{" + SECTION_ID + ".%s}}"
+    """Слоты текста про рост: реал, разрыв уровней, согласованность полугодий, вывод для С3."""
     sign = _sign(v["rho_growth_level"], p["weak_rho"])
     sd_up = _grew(v["sd_loglevel_2023"], v["sd_loglevel_2024"])
+    slow = sd_up and slow_spread(v["sd_loglevel_2023"], v["sd_loglevel_2024"], p["slow_spread"])
     relation = _by_sign(
         v["rho_growth_level"],
         p["weak_rho"],
-        "рост выше там, где тратили больше",
-        "рост выше там, где тратили меньше",
-        "рост почти не связан с уровнем трат",
+        "номинальный рост выше там, где тратили больше",
+        "номинальный рост выше там, где тратили меньше",
+        "номинальный рост почти не связан с уровнем трат",
+    )
+    no_inner = (
+        f", без районов Москвы и Петербурга {PH % 'rho_growth_level_no_inner'}"
+        if _finite(v.get("rho_growth_level_no_inner"))
+        else ""
+    )
+    nums = (
+        f"(ρ = {PH % 'rho_growth_level'}, внутри регионов {PH % 'rho_growth_level_within'}, на раздельных "
+        f"месяцах {PH % 'rho_growth_level_split'} и {PH % 'rho_growth_level_split_rev'}{no_inner})"
+    )
+    sd = (
+        f"стандартное отклонение логарифма уровня трат {'выросло' if sd_up else 'снизилось'} с "
+        f"{PH % 'sd_loglevel_2023'} до {PH % 'sd_loglevel_2024'}"
     )
     if sign > 0 and sd_up:
-        lead = "Уровни трат расходятся: "
+        text = f"Разрыв в уровнях трат растёт{' медленно' if slow else ''}: {relation} {nums}, а {sd}."
     elif sign < 0 and not sd_up:
-        lead = "Уровни трат сближаются: "
+        text = f"Уровни трат сближаются: {relation} {nums}, а {sd}."
     else:
-        lead = ""
-    text = (
-        f"{relation} (ρ = {ph % 'rho_growth_level'}, внутри регионов {ph % 'rho_growth_level_within'}, "
-        f"на раздельных месяцах {ph % 'rho_growth_level_split'}), {'и' if lead else 'а'} разброс "
-        f"лог-уровня (SD) {'вырос' if sd_up else 'снизился'} с {ph % 'sd_loglevel_2023'} до "
-        f"{ph % 'sd_loglevel_2024'}."
-    )
+        text = f"{relation[:1].upper()}{relation[1:]} {nums}, а {sd}."
     s3_ok = _ge(v["growth_half_consistency"], rej["s3_half_consistency_min"])
-    half = ph % "growth_half_consistency"
+    half = PH % "growth_half_consistency"
     return {
         "real": (
-            f"С поправкой на цены (ИПЦ, {ph % 'cpi_source'}) медианный рост {ph % 'real_growth_median'}."
+            f"С поправкой на цены (ИПЦ, {PH % 'cpi_source'}) медианный рост {PH % 'real_growth_median'}."
             if cpi_used
             else "Реальный рост не считается: ИПЦ в конфиге не задан, МО сравниваются только между собой."
         ),
-        "growth_rel": lead + text if lead else text[:1].upper() + text[1:],
+        "growth_rel": text,
         "half": (
             f"Рост отдельных МО за январь–июнь и за июль–декабрь согласован: ρ = {half}."
             if s3_ok
             else f"Но рост отдельных МО за январь–июнь и за июль–декабрь согласован слабо: ρ = {half}."
         ),
+        "s3_verdict": "критерий отказа выполнен" if s3_ok else "контекст",
         "s3": (
-            "рост по полугодиям согласован, критерий отказа выполнен"
+            f"Рост МО за январь–июнь и за июль–декабрь согласован (ρ = {half})."
             if s3_ok
-            else "рост МО по полугодиям согласован слабо, критерий отказа не выполнен: рост годится только "
-            "как контекст"
+            else f"Рост МО за январь–июнь и за июль–декабрь согласован слабо (ρ = {half}), критерий "
+            "отказа не выполнен: рост годится только как контекст."
         ),
     }
+
+
+def slow_spread(before: float, after: float, limit: float) -> bool:
+    """Разброс уровней растёт медленно: относительный рост стандартного отклонения меньше ``limit``."""
+    return _finite(before) and _finite(after) and before > 0 and after / before - 1.0 < limit
 
 
 def _summary_slots(
@@ -1530,24 +1892,29 @@ def _summary_md(f: dict[str, Fact], p: Mapping[str, Any], rej: Mapping[str, floa
     """
     values = {k.split(".", 1)[1]: fact.value for k, fact in f.items()}
     text = Template(_paragraphs(SUMMARY_TEMPLATE)).substitute(_summary_slots(values, p, rej, cpi_used))
+    text = "\n".join(line for line in text.split("\n") if line != DROP)
     return nbsp(text)
 
 
 CAVEATS: tuple[str, ...] = (
     "Рост — номинальный, в текущих ценах: общая инфляция в нём не снята. МО сравниваются по относительному "
-    "росту и ранговым связям, в которых общий рост цен сокращается.",
+    "росту и рангам, а на них одинаковый для всех МО рост цен не влияет. Различия инфляции между регионами "
+    "это не снимает: часть регионального разброса роста может быть ценовой (гипотеза: региональный ИПЦ не "
+    "загружен).",
+    "Доля маркетплейсов — доля в безналичных тратах по картам. Где доля наличных выше, знаменатель занижен, "
+    "а направление смещения прироста доли неизвестно: без данных о наличных это не проверить.",
     "Траты привязаны к жителям МО: траты приезжих в курортных МО не видны, а траты жителей вне своего МО "
     "(поездки, онлайн) по смыслу входят, но модель привязки СберИндекс не раскрывает.",
-    "«Прочее» — остаток «Все категории» минус пять категорий: в нём иные траты; по описанию набора авиа- и "
-    "ж/д билеты не входят в «Транспорт» и, вероятно, попадают сюда.",
-    "Январь 2023 → декабрь 2024 сравнивает разные месяцы года: сезонность доли маркетплейсов в этом "
-    "отношении не снята. Сопоставимы по сезону декабрь к декабрю ({{e4.mp_share_dec23}} → "
+    "«Прочее» — разность между «Все категории» и суммой пяти категорий, то есть иные траты; по описанию "
+    "набора авиа- и ж/д билеты не входят в «Транспорт» и, вероятно, попадают сюда.",
+    "Январь 2023 → декабрь 2024 сравнивает разные месяцы года, а у маркетплейсов декабрь — сезонный пик: "
+    "в таком сравнении сезонность не снята. Сопоставимы по сезону декабрь к декабрю ({{e4.mp_share_dec23}} → "
     "{{e4.mp_share_dec24}}) и годовые медианы ({{e4.mp_share_2023}} → {{e4.mp_share_2024}}).",
     "Сдвиг к маркетплейсам может частично быть переклассификацией продавцов: тест ступеньки ловит только "
     "резкий скачок, плавную переклассификацию он не видит.",
-    "Знак главной компоненты условен (наибольшая по модулю нагрузка положительна): ρ PC1 с уровнем "
-    "читается по модулю.",
-    "«Внутри регионов» — ранги всей выборки, центрированные по региону (Б.1, п. 9). На самих значениях, "
+    "Знак главной компоненты условен (наибольшая по модулю нагрузка положительна), поэтому её связь "
+    "с уровнем трат читается по модулю.",
+    "«Внутри регионов» — ранги всей выборки, центрированные по региону. На самих значениях, "
     "центрированных по региону, связи немного слабее; оба числа есть в пояснениях фактов (facts.json).",
 )
 
@@ -1627,24 +1994,42 @@ def reserve_layout(fig: Any, title: str, subtitle: str, source: str, number: int
         text.remove()
 
 
-def _basket_facts(fact: FactWriter, basket: BasketResult) -> None:
-    """Факты корзины: доли, дисперсии CLR, PCA сырых и очищенных CLR, R², устойчивость."""
+def _basket_facts(fact: FactWriter, basket: BasketResult, residual_min: float) -> None:
+    """Факты корзины: доли, их разброс (квартили и дисперсии CLR), PCA сырых и очищенных CLR, R²,
+    устойчивость; ``residual_min`` — порог критерия отказа С4 по доле остатка (для текста)."""
     summ = basket.summary
     sample_note = f"МО с 12 месяцами в {Y0} и {Y1} годах; доли {Y1} года, медиана по МО без весов"
     fact("n_basket", basket.n, "int", "МО с 12 месяцами в обоих годах — выборка сюжета С4")
     for part in PARTS:
         fact(f"share_median_{part}", summ.loc[part, "median"], "pct", sample_note)
     for part in PARTS:
+        prev = make_fact("prev", basket.clr_var_prev[part], "num3").text
         fact(
             f"clr_var_{part}",
             summ.loc[part, "clr_var"],
             "num3",
-            f"дисперсия CLR доли {Y1} года по МО, ddof = 1",
+            f"дисперсия CLR доли за {Y1} год по МО, ddof = 1; за {Y0} год — {prev}",
         )
     argmax = str(summ["clr_var"].idxmax())
     fact("clr_var_argmax", argmax, "str", "код части с наибольшей дисперсией CLR")
     fact("clr_var_argmax_label", style.LABELS[argmax].lower(), "str", "та же часть по-русски")
+    ratio_note = f"75-й перцентиль доли {Y1} года по МО, делённый на 25-й (правый край полосы F09 к левому)"
+    for part in PARTS:
+        fact(f"share_ratio_{part}", summ.loc[part, "ratio"], "num1", ratio_note)
+    ratio_top = str(summ["ratio"].idxmax())
+    rest = summ["ratio"].drop(ratio_top)
+    fact("share_ratio_argmax", ratio_top, "str", "код части с наибольшим отношением 75-го перцентиля к 25-му")
+    fact("share_ratio_top", summ.loc[ratio_top, "ratio"], "num1", f"{ratio_note}: наибольшее по частям")
+    fact("share_ratio_rest_min", rest.min(), "num1", f"{ratio_note}: наименьшее у остальных частей")
+    fact("share_ratio_rest_max", rest.max(), "num1", f"{ratio_note}: наибольшее у остальных частей")
     fact("pc1_var", basket.raw.explained[PC1], "pct", f"доля дисперсии сырых CLR {Y1} года у PC1")
+    for part in PARTS:
+        fact(
+            f"pc1_load_{part}",
+            basket.raw.loadings.loc[part, PC1],
+            "num2",
+            "нагрузка части на PC1 сырых CLR (знак оси условен: наибольшая по модулю нагрузка положительна)",
+        )
     fact(
         "rho_pc1_level",
         basket.rho_pc1_level,
@@ -1669,6 +2054,12 @@ def _basket_facts(fact: FactWriter, basket: BasketResult) -> None:
         basket.clean.residual_share,
         "pct",
         "1 − r2_clr_both: доля дисперсии CLR после очистки",
+    )
+    fact(
+        "residual_share_min",
+        residual_min,
+        "pct",
+        "порог критерия отказа С4 по доле остатка (eda.rejection.s4_residual_share_min)",
     )
     fact("residual_pc1_var", basket.clean.explained[PC1], "pct", "доля дисперсии остатков у очищенной PC1")
     clean_top = str(basket.clean.loadings[PC1].abs().idxmax())
@@ -1699,8 +2090,12 @@ def _basket_facts(fact: FactWriter, basket: BasketResult) -> None:
     )
 
 
-def _marketplace_facts(fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFrame) -> None:
-    """Факты маркетплейсов: динамика долей, связь прироста с уровнем и начальной долей, рубли, ступенька."""
+def _marketplace_facts(
+    fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFrame, gap_no_inner: pd.DataFrame | None
+) -> None:
+    """Факты маркетплейсов: динамика долей, связь прироста с уровнем и начальной долей в двух шкалах,
+    объяснения связи с уровнем, рубли, ступенька, группы МО по уровню (с районами Москвы и Петербурга и без
+    них — ``gap_no_inner``, если в ``mo`` есть ``is_inner_city``)."""
     words = GROUP_WORDS[len(gap)]
     n = int(mpc["n"])
     note = f"МО с долями обоих лет (n = {n}); прирост — годовая доля {Y1} минус годовая доля {Y0}"
@@ -1739,6 +2134,12 @@ def _marketplace_facts(fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFra
         f"доля в тратах всех жителей, январь 2023: {resident}",
     )
     fact(
+        "mp_resident_dec23",
+        mpc["mp_resident_dec23"],
+        "pct",
+        f"доля в тратах всех жителей, декабрь 2023 (декабрь к декабрю — без сезонности): {resident}",
+    )
+    fact(
         "mp_resident_dec24",
         mpc["mp_resident_dec24"],
         "pct",
@@ -1754,6 +2155,32 @@ def _marketplace_facts(fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFra
         mpc["rho_mp_pp_level_within"],
         "rho",
         "то же внутри регионов: ранги всей выборки, центрированные по региону (stats.spearman_within)",
+    )
+    fact(
+        "rho_mp_pp_level_within_fixed",
+        mpc["rho_mp_pp_level_within_fixed"],
+        "rho",
+        "то же внутри регионов, если все траты каждого МО росли бы с медианной по МО скоростью "
+        "(fixed_denominator_gain): связь без эффекта знаменателя",
+    )
+    fact(
+        "rho_mp_pp_level_partial",
+        mpc["rho_mp_pp_level_partial"],
+        "rho",
+        f"частный ρ mp_pp_change с log_level_{Y0} внутри регионов при контроле log_density_{Y0} и "
+        f"ln pop_{Y0} (stats.partial_spearman)",
+    )
+    fact(
+        "rho_mp_log_level",
+        mpc["rho_mp_log_level"],
+        "rho",
+        f"ρ относительного прироста доли ln(доля {Y1} / доля {Y0}) с log_level_{Y0}",
+    )
+    fact(
+        "rho_mp_log_level_within",
+        mpc["rho_mp_log_level_within"],
+        "rho",
+        "то же внутри регионов (stats.spearman_within)",
     )
     fact(
         "rho_mp_pp_initial",
@@ -1777,6 +2204,26 @@ def _marketplace_facts(fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFra
         "без разделения месяцев: смещено регрессией к среднему",
     )
     fact(
+        "rho_mp_log_initial",
+        mpc["rho_mp_log_initial"],
+        "rho",
+        f"ρ относительного прироста доли (разность логарифмов доли по чётным месяцам {Y1} и {Y0}) "
+        f"с начальной долей по нечётным месяцам {Y0}: догоняние во второй шкале (Б.1, п. 10) без регрессии "
+        "к среднему",
+    )
+    fact(
+        "rho_mp_log_initial_rev",
+        mpc["rho_mp_log_initial_rev"],
+        "rho",
+        "то же: начало — чётные месяцы, прирост — нечётные",
+    )
+    fact(
+        "rho_mp_log_initial_naive",
+        mpc["rho_mp_log_initial_naive"],
+        "rho",
+        "то же без разделения месяцев: смещено регрессией к среднему",
+    )
+    fact(
         "mp_split_half",
         mpc["mp_split_half"],
         "rho",
@@ -1784,8 +2231,8 @@ def _marketplace_facts(fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFra
     )
     fact("mp_iqr_2023", mpc["mp_iqr_2023"], "num1", f"межквартильный размах годовой доли {Y0}, п. п.")
     fact("mp_iqr_2024", mpc["mp_iqr_2024"], "num1", f"межквартильный размах годовой доли {Y1}, п. п.")
-    fact("mp_sd_log_2023", mpc["mp_sd_log_2023"], "num3", f"SD ln годовой доли {Y0}")
-    fact("mp_sd_log_2024", mpc["mp_sd_log_2024"], "num3", f"SD ln годовой доли {Y1}")
+    fact("mp_sd_log_2023", mpc["mp_sd_log_2023"], "num3", f"стандартное отклонение ln годовой доли {Y0}")
+    fact("mp_sd_log_2024", mpc["mp_sd_log_2024"], "num3", f"стандартное отклонение ln годовой доли {Y1}")
     fact(
         "mp_rub_growth_median",
         mpc["mp_rub_growth_median"],
@@ -1793,13 +2240,23 @@ def _marketplace_facts(fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFra
         "медианный рост трат на маркетплейсах в ₽, номинал",
     )
     fact(
-        "rho_mp_rub_growth_level", mpc["rho_mp_rub_growth_level"], "rho", f"ρ роста в рублях с log_level_{Y0}"
+        "rho_mp_rub_growth_level",
+        mpc["rho_mp_rub_growth_level"],
+        "rho",
+        f"ρ роста в рублях (номинал) с log_level_{Y0}",
     )
     fact(
         "rho_mp_rub_incr_level",
         mpc["rho_mp_rub_incr_level"],
         "rho",
-        f"ρ прибавки в ₽ в месяц с log_level_{Y0}",
+        f"ρ прибавки в ₽ в месяц (номинал) с log_level_{Y0}",
+    )
+    fact(
+        "mp_rub_base_ratio",
+        mpc["mp_rub_base_ratio"],
+        "num1",
+        f"медиана трат на маркетплейсах {Y0} года (₽ в месяц) у {words[1]} МО с самыми высокими тратами, "
+        f"делённая на медиану у {words[1]} с самыми низкими (группы по log_level_{Y0})",
     )
     fact("eta2_mp_pp", mpc["eta2_mp_pp"], "num2", "η² региона для mp_pp_change")
     fact(
@@ -1824,22 +2281,50 @@ def _marketplace_facts(fact: FactWriter, mpc: Mapping[str, Any], gap: pd.DataFra
             key,
             row["dpp"],
             "pp",
-            f"разность медиан долей {Y1} и {Y0} в {where} {words[1]}; {rounding_note(row)}",
+            f"прирост медианной доли {Y0} → {Y1} в {where} {words[1]} МО по log_level_{Y0}: "
+            f"{rounding_note(row)}",
+        )
+        fact(
+            f"{key}_mo",
+            row["dpp_mo"],
+            "pp",
+            f"медиана приростов доли самих МО в {where} {words[1]} (типичный прирост МО, а не прирост "
+            "медианной доли)",
+        )
+    fact("q5_n", int(last["n"]), "int", f"МО в верхней {words[1]} по log_level_{Y0}")
+    fact(
+        "q5_n_inner",
+        int(last["n_inner"]),
+        "int",
+        "из них внутригородских территорий Москвы и Петербурга (is_inner_city)",
+    )
+    if gap_no_inner is None:
+        return
+    for key, row, where in (
+        ("dq1_pp_no_inner", gap_no_inner.iloc[0], "нижняя"),
+        ("dq5_pp_no_inner", gap_no_inner.iloc[-1], "верхняя"),
+    ):
+        fact(
+            key,
+            row["dpp"],
+            "pp",
+            f"то же без внутригородских территорий Москвы и Петербурга (МО заново разделены на {words[0]}), "
+            f"{where} {words[3]}: {rounding_note(row)}",
         )
 
 
 def rounding_note(row: Mapping[str, float]) -> str:
-    """Почему разность медиан долей может разойтись на 0,1 п. п. с разностью долей, написанных рядом.
+    """Как получен прирост медианной доли: из концов, округлённых до десятых процента, — так он сходится
+    с долями, написанными рядом на рисунке и в тексте; точная разность медиан — тоже в пояснении.
 
-    Разность считается по точным медианам, а доли в тексте округлены до десятых процента: 13,05% − 10,51%
-    = +2,55 п. п. пишется «+2,5», хотя из «13,1%» и «10,5%» выходит «+2,6».
+    Пример: 13,05% − 10,51% = +2,55 п. п. точно, а из «13,1%» и «10,5%» выходит «+2,6» — пишется +2,6.
     """
     a, b = PP * row[f"share_{Y1}"], PP * row[f"share_{Y0}"]
     exact = style.fmt_pp(a - b, 2)
-    rounded = style.fmt_pp(round(a, 1) - round(b, 1), 1)
+    rounded = style.fmt_pp(shown_pct(row[f"share_{Y1}"]) - shown_pct(row[f"share_{Y0}"]), 1)
     return (
-        f"точно {style.fmt_num(a, 2)}% − {style.fmt_num(b, 2)}% = {exact}; из долей, округлённых до десятых, "
-        f"{rounded}"
+        f"точно {style.fmt_num(a, 2)}% − {style.fmt_num(b, 2)}% = {exact}; из долей, округлённых до десятых "
+        f"(как на рисунке), {rounded}"
     )
 
 
@@ -1865,15 +2350,29 @@ def _growth_facts(
         "rho_growth_level_split",
         gvl["rho_growth_level_split"],
         "rho",
-        f"уровень — нечётные месяцы {Y0}, рост — чётные: без общего шума уровня {Y0}",
+        f"уровень — нечётные месяцы {Y0}, рост — чётные: без общего шума уровня {Y0}. Оценка зависит от "
+        "того, какие месяцы взяты под рост: обратное разделение — rho_growth_level_split_rev",
     )
+    fact(
+        "rho_growth_level_split_rev",
+        gvl["rho_growth_level_split_rev"],
+        "rho",
+        f"то же: уровень — чётные месяцы {Y0}, рост — нечётные",
+    )
+    fact(
+        "rho_growth_level_no_inner",
+        gvl["rho_growth_level_no_inner"],
+        "rho",
+        "ρ growth с уровнем без внутригородских территорий Москвы и Петербурга",
+    )
+    rub = gt.set_index("code")["rub_incr_rho"]
+    rub_note = f"ρ прибавки трат в ₽ (номинал) с log_level_{Y0} по категориям T10"
+    fact("rub_incr_rho_min", rub.min(), "rho", f"{rub_note}: наименьший ({rub.idxmin()})")
+    fact("rub_incr_rho_max", rub.max(), "rho", f"{rub_note}: наибольший ({rub.idxmax()})")
     total = gt.set_index("code").loc["all"]
-    fact(
-        "sd_loglevel_2023", total["sd_log_2023"], "num3", f"SD ln среднемесячных трат {Y0}, МО с полным рядом"
-    )
-    fact(
-        "sd_loglevel_2024", total["sd_log_2024"], "num3", f"SD ln среднемесячных трат {Y1}, МО с полным рядом"
-    )
+    sd_note = "стандартное отклонение ln среднемесячных трат"
+    fact("sd_loglevel_2023", total["sd_log_2023"], "num3", f"{sd_note} {Y0}, МО с полным рядом")
+    fact("sd_loglevel_2024", total["sd_log_2024"], "num3", f"{sd_note} {Y1}, МО с полным рядом")
     fact(
         "growth_half_consistency",
         total["half_consistency"],
@@ -1896,7 +2395,7 @@ def _basket_figures(
 ) -> None:
     """F09 и F10."""
     hl, summ = p["headline"], basket.summary
-    argmax = str(summ["clr_var"].idxmax())
+    argmax, ratio_top = str(summ["clr_var"].idxmax()), str(summ["ratio"].idxmax())
     food = style.fmt_pct(summ.loc["food", "median"])
     n = style.fmt_num(basket.n)
     _save(
@@ -1906,26 +2405,29 @@ def _basket_figures(
         slug="basket",
         title=ctx.headline(
             f"Продовольствие — {food} трат, но сильнее всего МО различаются долей общепита",
-            argmax == "cafe",
-            f"F09 basket: наибольшая дисперсия CLR у {argmax!r}",
+            argmax == "cafe" and ratio_top == "cafe",
+            f"F09 basket: наибольшая дисперсия CLR у {argmax!r}, наибольшее отношение квартилей "
+            f"у {ratio_top!r}",
         ),
         subtitle=(
-            f"Доли шести частей трат {Y1} г.: медиана и половина МО; справа — дисперсия CLR "
-            f"(разброс логарифма доли); n = {n}"
+            f"Доли шести частей трат, {Y1}: точка — медиана по МО, полоса — средние 50% МО (от 25-го до "
+            f"75-го перцентиля); n = {n}"
         ),
         alt=(
             f"В типичном МО продовольствие занимает {food} трат, а сильнее всего МО различаются долей "
-            f"общепита: дисперсия CLR {_fv(ctx, 'clr_var_cafe').text} при {_fv(ctx, 'clr_var_food').text} "
-            "у продовольствия"
+            f"общепита: у МО на 75-м перцентиле она {fmt_times(summ.loc['cafe', 'ratio'])} выше, чем "
+            f"на 25-м, у продовольствия — {fmt_times(summ.loc['food', 'ratio'])}"
         ),
         data=summ.reset_index(names="part"),
-        check="clr_var_argmax == 'cafe'",
+        check="clr_var_argmax == 'cafe' and share_ratio_argmax == 'cafe'",
     )
     rho = basket.rho_pc1_level
     rho_text = _fv(ctx, "rho_pc1_level").text
-    top = str(basket.raw.loadings[PC1].abs().idxmax())
+    loads = basket.raw.loadings[PC1]
+    top = str(loads.abs().idxmax())
     pc1 = basket.raw.scores[PC1]
-    fig10, place10 = _fig_basket_vs_level(basket.level, pc1, names, p, style.LABELS[top])
+    fig10, place10 = _fig_basket_vs_level(basket.level, pc1, names, p, top)
+    claim = bool(np.isfinite(rho) and rho >= hl["pc1_rho_min"] and loads["cafe"] > 0 and loads["food"] < 0)
     _save(
         ctx,
         fig10,
@@ -1933,18 +2435,18 @@ def _basket_figures(
         fid="F10",
         slug="basket_vs_level",
         title=ctx.headline(
-            f"Главная ось состава корзины почти повторяет уровень трат: ρ = {rho_text}",
-            bool(np.isfinite(rho) and abs(rho) >= hl["pc1_rho_min"]),
-            f"F10 basket_vs_level: |ρ| = {style.fmt_rho(abs(rho))}, порог {hl['pc1_rho_min']}",
+            f"Чем выше траты, тем больше в корзине общепита и меньше продуктов: ρ = {rho_text}",
+            claim,
+            f"F10 basket_vs_level: ρ = {style.fmt_rho(rho)} (порог {hl['pc1_rho_min']}), нагрузки PC1: "
+            f"общепит {style.fmt_num(loads['cafe'], 2)}, продукты {style.fmt_num(loads['food'], 2)}",
         ),
         subtitle=(
-            f"PC1 сырых CLR {Y1} г.: {_fv(ctx, 'pc1_var').text} дисперсии, нагрузка «{style.LABELS[top]}» "
-            f"{style.fmt_num(basket.raw.loadings.loc[top, PC1], 2)}; n = {n}"
+            f"Главная компонента долей шести частей трат (CLR), {Y1}: {_fv(ctx, 'pc1_var').text} различий "
+            f"между МО, главный вклад — {part_word(top)}; n = {n}"
         ),
         alt=(
-            "Счёт первой главной компоненты долей трат почти повторяет уровень трат МО: "
-            f"ρ = {rho_text}, главная "
-            f"нагрузка — {style.LABELS[top].lower()}"
+            "Чем выше траты жителя МО, тем сильнее корзина сдвинута к общепиту и от продуктов: первая "
+            f"главная компонента долей трат связана с уровнем трат, ρ = {rho_text}"
         ),
         data=pd.DataFrame(
             {
@@ -1954,7 +2456,7 @@ def _basket_figures(
                 "pc1": pc1.to_numpy(),
             }
         ),
-        check=f"abs(rho_pc1_level) >= {hl['pc1_rho_min']}",
+        check=f"rho_pc1_level >= {hl['pc1_rho_min']} and pc1_load_cafe > 0 and pc1_load_food < 0",
     )
 
 
@@ -1962,54 +2464,60 @@ def _marketplace_figures(
     ctx: SectionContext,
     mpc: Mapping[str, Any],
     gap: pd.DataFrame,
+    gap_no_inner: pd.DataFrame | None,
     trend: pd.DataFrame,
     p: Mapping[str, Any],
     rej: Mapping[str, float],
 ) -> None:
     """F11 и F12."""
     hl = p["headline"]
-    jan, dec = _fv(ctx, "mp_share_jan23").text, _fv(ctx, "mp_share_dec24").text
-    ratio = _fv(ctx, "mp_share_ratio").value
+    y0, y1 = _fv(ctx, "mp_share_2023"), _fv(ctx, "mp_share_2024")
+    dec23, dec24 = _fv(ctx, "mp_share_dec23").text, _fv(ctx, "mp_share_dec24").text
+    annual_ok = _finite(y0.value) and _finite(y1.value) and y1.value >= hl["mp_annual_ratio_min"] * y0.value
+    annual_ratio = y1.value / y0.value if _finite(y0.value) and y0.value else float("nan")
     _save(
         ctx,
-        _fig_mp_trend(trend),
+        _fig_mp_trend(trend, {Y0: y0.value, Y1: y1.value}),
         fid="F11",
         slug="marketplace_trend",
         title=ctx.headline(
-            "Доля маркетплейсов в типичном МО за два года выросла вдвое: "
-            f"{jan}{style.NBSP}→{style.NBSP}{dec}",
-            ratio is not None and ratio >= hl["mp_growth_ratio_min"],
-            f"F11 marketplace_trend: декабрь 2024 / январь 2023 = {style.fmt_num(ratio, 2)}, "
-            f"порог {hl['mp_growth_ratio_min']}",
+            f"Доля маркетплейсов в типичном МО за год выросла с {y0.text} до {y1.text}",
+            annual_ok,
+            f"F11 marketplace_trend: медиана годовых долей {Y1} / {Y0} = {style.fmt_num(annual_ratio, 2)}, "
+            f"порог {hl['mp_annual_ratio_min']}",
         ),
         subtitle=(
-            "Типичное МО — медиана долей по МО месяца, полоса — половина МО; пунктир — доля в тратах всех "
-            "жителей (веса — население)"
+            "Медиана долей МО месяца, полоса — средние 50% МО, пунктир — доля в тратах всех жителей; "
+            f"декабрь к декабрю {dec23}{style.NBSP}→{style.NBSP}{dec24}"
         ),
         alt=(
-            f"Медианная доля маркетплейсов в тратах МО выросла с {jan} в январе 2023 года до {dec} "
-            "в декабре 2024 года"
+            f"Медиана годовых долей маркетплейсов в тратах МО выросла с {y0.text} в {Y0} году до {y1.text} "
+            f"в {Y1}-м, декабрь к декабрю — с {dec23} до {dec24}"
         ),
         data=trend,
-        check=f"mp_share_dec24 >= {hl['mp_growth_ratio_min']} * mp_share_jan23",
+        check=f"mp_share_2024 >= {hl['mp_annual_ratio_min']} * mp_share_2023",
     )
     first, last = gap.iloc[0], gap.iloc[-1]
     diff = float(first["dpp"] - last["dpp"])
     within = mpc["rho_mp_pp_level_within"]
     ok = diff >= hl["quintile_gap_pp_min"] and within <= -rej["s5_rho_within_min"]
-    dq1 = style.fmt_num(first["dpp"], 1, sign=True)
-    dq5 = style.fmt_num(last["dpp"], 1, sign=True)
-    start = start_phrase(gap, (_fv(ctx, "q1_share_2023").text, _fv(ctx, "q5_share_2023").text))
-    rub = _by_sign(
-        mpc["rho_mp_rub_incr_level"],
-        p["weak_rho"],
-        "в рублях прибавка выше у МО с высокими тратами",
-        "в рублях прибавка выше у МО с низкими тратами",
-        "прибавка в рублях почти не связана с тратами",
-    )
+    dq1, dq5 = style.fmt_num(first["dpp"], 1, sign=True), style.fmt_num(last["dpp"], 1, sign=True)
+    words = GROUP_WORDS[len(gap)]
+    texts = (_fv(ctx, "q1_share_2023").text, _fv(ctx, "q5_share_2023").text)
+    start = start_phrase(gap, texts).split(" (")[0]  # стартовые доли подписаны на рисунке
+    inner = int(last["n_inner"])
+    subtitle = f"{words[0].capitalize()} МО по тратам {Y0} года; {start}"
+    if inner:
+        subtitle += f"; в верхней {inner} из {int(last['n'])} МО — районы Москвы и Петербурга"
+    note = ""
+    if inner and gap_no_inner is not None:
+        a, b = gap_no_inner.iloc[0]["dpp"], gap_no_inner.iloc[-1]["dpp"]
+        note = f"без районов Москвы и Петербурга: {style.fmt_num(a, 1, sign=True)} против {style.fmt_pp(b)}"
+    q1 = (_fv(ctx, "q1_share_2023").text, _fv(ctx, "q1_share_2024").text, _fv(ctx, "dq1_pp").text)
+    q5 = (_fv(ctx, "q5_share_2023").text, _fv(ctx, "q5_share_2024").text, _fv(ctx, "dq5_pp").text)
     _save(
         ctx,
-        _fig_mp_gap(gap),
+        _fig_mp_gap(gap, note),
         fid="F12",
         slug="marketplace_gap",
         title=ctx.headline(
@@ -2020,14 +2528,10 @@ def _marketplace_figures(
             f"(порог {hl['quintile_gap_pp_min']}), "
             f"ρ внутри регионов {style.fmt_rho(within)} (порог −{rej['s5_rho_within_min']})",
         ),
-        subtitle=(
-            f"{GROUP_WORDS[len(gap)][0].capitalize()} МО по тратам {Y0} г.; {start}; {rub}; "
-            f"n = {style.fmt_num(mpc['n'])}"
-        ),
+        subtitle=f"{subtitle}; n = {style.fmt_num(mpc['n'])}",
         alt=(
-            f"Прирост доли маркетплейсов за год у МО с низкими тратами {_fv(ctx, 'dq1_pp').text}, у МО "
-            f"с высокими {_fv(ctx, 'dq5_pp').text} при стартовых долях {_fv(ctx, 'q1_share_2023').text} и "
-            f"{_fv(ctx, 'q5_share_2023').text}"
+            f"Медианная доля маркетплейсов у МО с самыми низкими тратами выросла с {q1[0]} до {q1[1]} "
+            f"({q1[2]}), у МО с самыми высокими — с {q5[0]} до {q5[1]} ({q5[2]})"
         ),
         data=gap,
         check=(
@@ -2050,12 +2554,19 @@ def _growth_figures(
     hl = p["headline"]
     full = mo.loc[mo["series_status"].astype(str) == "full"]
     frame = full.set_index("territory_id")[[f"level_{Y0}", "growth", "region_code"]].dropna()
-    rho, within, split = (
-        gvl["rho_growth_level"],
-        gvl["rho_growth_level_within"],
-        gvl["rho_growth_level_split"],
+    rho, within = gvl["rho_growth_level"], gvl["rho_growth_level_within"]
+    sd0, sd1 = _fv(ctx, "sd_loglevel_2023").value, _fv(ctx, "sd_loglevel_2024").value
+    slow = _grew(sd0, sd1) and slow_spread(sd0, sd1, p["slow_spread"])
+    ok = bool(np.isfinite(rho) and rho >= hl["growth_rho_min"] and within >= hl["growth_rho_min"] and slow)
+    split = (
+        f"{style.fmt_rho(gvl['rho_growth_level_split'], sign=True)} и "
+        f"{style.fmt_rho(gvl['rho_growth_level_split_rev'], sign=True)}"
     )
-    ok = bool(np.isfinite(rho) and rho >= hl["growth_rho_min"] and within >= hl["growth_rho_min"])
+    no_inner = gvl["rho_growth_level_no_inner"]
+    no_inner_text = (
+        f", без Москвы и Петербурга {style.fmt_rho(no_inner, sign=True)}" if _finite(no_inner) else ""
+    )
+    spread = f"{style.fmt_num(sd0, 3)} → {style.fmt_num(sd1, 3)}"
     fig13, place13 = _fig_growth(frame, names, p)
     _save(
         ctx,
@@ -2064,25 +2575,27 @@ def _growth_figures(
         fid="F13",
         slug="growth_divergence",
         title=ctx.headline(
-            "Уровни трат расходятся: где тратили больше, там выше и номинальный рост "
-            f"(ρ = {style.fmt_rho(rho, sign=True)})",
+            f"Где тратили больше, номинальный рост чуть выше: ρ = {style.fmt_rho(rho, sign=True)}, разрыв "
+            "растёт медленно",
             ok,
             f"F13 growth_divergence: ρ = {style.fmt_rho(rho)}, внутри регионов {style.fmt_rho(within)}, "
-            f"порог {hl['growth_rho_min']}",
+            f"порог {hl['growth_rho_min']}; SD лог-уровня {spread}, допустимый рост до {p['slow_spread']}",
         ),
         subtitle=(
-            f"Рост {Y1}/{Y0}, номинал; ρ внутри регионов {style.fmt_rho(within, sign=True)}, на раздельных "
-            f"месяцах {style.fmt_rho(split, sign=True)}; n = {style.fmt_num(len(frame))}"
+            f"Рост — номинал; ρ внутри регионов {style.fmt_rho(within, sign=True)}, на раздельных месяцах "
+            f"{split}{no_inner_text}; n = {style.fmt_num(len(frame))}"
         ),
         alt=(
-            f"Номинальный рост трат выше в МО, где траты в {Y0} году были выше: "
+            f"Номинальный рост трат чуть выше в МО, где траты в {Y0} году были выше: "
             f"ρ = {_fv(ctx, 'rho_growth_level').text}, "
-            f"внутри регионов {_fv(ctx, 'rho_growth_level_within').text}"
+            f"внутри регионов {_fv(ctx, 'rho_growth_level_within').text}; "
+            "разброс уровней растёт медленно"
         ),
         data=frame.assign(name=names.reindex(frame.index)).reset_index(),
         check=(
             f"rho_growth_level >= {hl['growth_rho_min']} and "
-            f"rho_growth_level_within >= {hl['growth_rho_min']}"
+            f"rho_growth_level_within >= {hl['growth_rho_min']} and "
+            f"0 < sd_loglevel_2024 / sd_loglevel_2023 - 1 < {p['slow_spread']}"
         ),
     )
     if cpi is None:
@@ -2132,8 +2645,8 @@ def _tables(
         tid="T08",
         slug="basket_pca",
         title=(
-            "Состав корзины: дисперсия CLR, нагрузки главных компонент сырых CLR, R² уровня и региона, "
-            "нагрузка очищенной PC1; в последней строке — доли дисперсии"
+            "Состав корзины: дисперсия CLR, нагрузки главных компонент сырых CLR, R² уровня трат и региона, "
+            "нагрузка первой главной компоненты очищенных CLR; в последней строке — доли дисперсии"
         ),
         md_formats={
             "median_share_2024": style.fmt_pct,
@@ -2156,17 +2669,31 @@ def _tables(
         _checks_table(ctx.facts, mpc, int(mpc["n"]), step_pp),
         tid="T09",
         slug="marketplace_checks",
-        title="Проверки сдвига к маркетплейсам: связь с уровнем, догоняние, устойчивость, рубли, ступенька",
-        md_formats={"value": _num(3)},
+        title=(
+            "Проверки сдвига к маркетплейсам: связь с уровнем, догоняние в двух шкалах, устойчивость, рубли, "
+            "ступенька. Доля маркетплейсов — доля в безналичных тратах: где доля наличных выше, знаменатель "
+            "занижен, а направление смещения прироста неизвестно, без данных о наличных это не проверить"
+        ),
+        md_formats={"value": _fmt_value},
         md_labels={"label": "Проверка", "text": "Значение", "n": "МО", "key": "Факт", "value": "Число"},
     )
     formats = {c: (lambda x: style.fmt_pct(x, 1, sign=True)) for c in gt.columns if c.startswith("growth_")}
-    formats.update({"half_consistency": style.fmt_rho, "sd_log_2023": _num(3), "sd_log_2024": _num(3)})
+    formats.update(
+        {
+            "half_consistency": style.fmt_rho,
+            "sd_log_2023": _num(3),
+            "sd_log_2024": _num(3),
+            "rub_incr_rho": style.fmt_rho,
+        }
+    )
     ctx.save_table(
         gt,
         tid="T10",
         slug="growth_noise",
-        title=f"Рост трат {Y1}/{Y0} по категориям (номинал), согласованность полугодий и разброс уровней",
+        title=(
+            f"Рост трат {Y1}/{Y0} по категориям (номинал), согласованность полугодий, разброс уровней "
+            "и связь прибавки в рублях с уровнем трат"
+        ),
         md_formats=formats,
         md_labels={
             "code": "Код",
@@ -2175,8 +2702,9 @@ def _tables(
             "growth_p10": "10-й перцентиль",
             "growth_p90": "90-й перцентиль",
             "half_consistency": "ρ полугодий",
-            "sd_log_2023": f"SD ln {Y0}",
-            "sd_log_2024": f"SD ln {Y1}",
+            "sd_log_2023": f"Ст. откл. логарифма {Y0}",
+            "sd_log_2024": f"Ст. откл. логарифма {Y1}",
+            "rub_incr_rho": "ρ прибавки в ₽ с уровнем",
             "n": "МО",
             "growth_real_median": "Реальный рост",
         },
@@ -2194,20 +2722,24 @@ def run_section(ctx: SectionContext) -> Finding:
 
     basket = basket_analysis(mo, n_components=int(p["n_components"]))
     halves = half_year_growth(wide)
-    mpc = marketplace_checks(wide, mo, national, halves)
-    gap = quintile_gap(mo, int(p["level_groups"]))
+    groups = int(p["level_groups"])
+    mpc = marketplace_checks(wide, mo, national, halves, groups)
+    gap = quintile_gap(mo, groups)
+    gap_no_inner = None
+    if "is_inner_city" in mo and mo["is_inner_city"].astype("boolean").fillna(False).any():
+        gap_no_inner = quintile_gap(mo.loc[~mo["is_inner_city"].astype("boolean").fillna(False)], groups)
     gt = growth_table(wide, mo, halves)
     if cpi is not None:
         gt["growth_real_median"] = real_growth(gt["growth_median"], cpi.annual)
     gvl = growth_vs_level(wide, mo)
 
     fact = fact_writer(ctx, reference_variants(wide, mo))
-    _basket_facts(fact, basket)
-    _marketplace_facts(fact, mpc, gap)
+    _basket_facts(fact, basket, float(rej["s4_residual_share_min"]))
+    _marketplace_facts(fact, mpc, gap, gap_no_inner)
     _growth_facts(fact, mo, gt, gvl, cpi)
     names = point_names(ctx.data.territories)
     _basket_figures(ctx, basket, names, p)
-    _marketplace_figures(ctx, mpc, gap, _mp_trend_frame(wide, national), p, rej)
+    _marketplace_figures(ctx, mpc, gap, gap_no_inner, _mp_trend_frame(wide, national), p, rej)
     _growth_figures(ctx, mo, gvl, wide, names, p, cpi)
     _tables(ctx, basket, mpc, gt, p["step_test_pp"])
 
@@ -2220,7 +2752,10 @@ def run_section(ctx: SectionContext) -> Finding:
         summary_md=_summary_md(ctx.facts, p, rej, cpi is not None),
         indicators=indicators,
         indicator_labels={
-            "basket_resid_pc1": f"Корзина без уровня и региона: счёт очищенной PC1 CLR долей {Y1} г."
+            "basket_resid_pc1": (
+                "Корзина без уровня трат и региона: значение первой главной компоненты очищенных долей "
+                f"(CLR), {Y1}"
+            )
         },
         caveats=[nbsp(c) for c in CAVEATS],
     )
@@ -2249,42 +2784,104 @@ def _mp_trend_frame(wide: pd.DataFrame, national: pd.DataFrame) -> pd.DataFrame:
 
 
 def _checks_table(facts: dict[str, Fact], mpc: Mapping[str, Any], n: int, step_pp: float) -> pd.DataFrame:
-    """T09: строка на проверку сюжета С5 — ключ факта, подпись, число, готовый текст, число МО."""
+    """T09: строка на проверку сюжета С5 — ключ главного факта, подпись, его число, готовый текст (там, где
+    проверка — пара чисел, в тексте оба), число МО. Не больше 15 строк: столько показывает отчёт (В.5)."""
+
+    def t(key: str) -> str:
+        fact = facts.get(f"{SECTION_ID}.{key}")
+        return fact.text if fact is not None else style.NA_TEXT
+
+    step = facts[f"{SECTION_ID}.mp_step_max_pp"]
+    step_ok = step.value is not None and step.value <= step_pp
+    step_flag = "скачка нет" if step_ok else "проверить границы категорий"
     rows = [
-        ("mp_pp_median", "Прирост доли за год, медиана"),
-        ("rho_mp_pp_level", f"ρ прироста доли с уровнем трат {Y0}"),
-        ("rho_mp_pp_level_within", "то же внутри регионов"),
-        ("eta2_mp_pp", "η² региона для прироста доли"),
-        ("rho_mp_pp_initial", "ρ прироста с начальной долей: начало — нечётные месяцы, прирост — чётные"),
-        ("rho_mp_pp_initial_rev", "то же: начало — чётные месяцы, прирост — нечётные"),
-        ("rho_mp_pp_initial_naive", "то же без разделения месяцев (смещено регрессией к среднему)"),
-        ("mp_split_half", "ρ прироста за январь–июнь и за июль–декабрь"),
-        ("mp_iqr_2024", f"Межквартильный размах доли, п. п.: {Y0} → {Y1}"),
-        ("mp_sd_log_2024", f"SD ln доли: {Y0} → {Y1}"),
-        ("mp_rub_growth_median", "Рост трат на маркетплейсах в рублях, медиана"),
-        ("rho_mp_rub_growth_level", "ρ роста в рублях с уровнем трат"),
-        ("rho_mp_rub_incr_level", "ρ прибавки в рублях с уровнем трат"),
-        ("mp_step_max_pp", "Тест ступеньки: наибольший скачок годового прироста, п. п."),
+        (
+            "mp_pp_median",
+            "Прирост доли за год, медиана",
+            f"{t('mp_pp_median')} (средние 50% МО — от {t('mp_pp_q25')} до {t('mp_pp_q75')})",
+        ),
+        (
+            "rho_mp_pp_level",
+            f"ρ прироста доли (п. п.) с уровнем трат {Y0}: в целом и внутри регионов",
+            f"{t('rho_mp_pp_level')} и {t('rho_mp_pp_level_within')}",
+        ),
+        (
+            "rho_mp_pp_level_within_fixed",
+            "То же внутри регионов: если бы все траты МО росли с медианной скоростью (без эффекта "
+            "знаменателя); частный ρ при контроле плотности и численности населения",
+            f"{t('rho_mp_pp_level_within_fixed')}; {t('rho_mp_pp_level_partial')}",
+        ),
+        (
+            "rho_mp_log_level",
+            "ρ относительного прироста доли (разность логарифмов) с уровнем трат: в целом и внутри регионов",
+            f"{t('rho_mp_log_level')} и {t('rho_mp_log_level_within')}",
+        ),
+        ("eta2_mp_pp", "η² региона для прироста доли", t("eta2_mp_pp")),
+        (
+            "dq1_pp",
+            "Прирост медианной доли у нижней и верхней пятых частей МО по тратам (медиана приростов МО)",
+            f"{t('dq1_pp')} и {t('dq5_pp')} ({t('dq1_pp_mo')} и {t('dq5_pp_mo')})",
+        ),
+        (
+            "q5_n_inner",
+            "Районов Москвы и Петербурга в верхней пятой части; прирост медианной доли без них",
+            f"{t('q5_n_inner')} из {t('q5_n')}; {t('dq1_pp_no_inner')} и {t('dq5_pp_no_inner')}",
+        ),
+        (
+            "rho_mp_pp_initial",
+            "ρ прироста доли (п. п.) с начальной долей на раздельных месяцах: начало — нечётные месяцы, "
+            "начало — чётные; без разделения (смещено регрессией к среднему)",
+            f"{t('rho_mp_pp_initial')} и {t('rho_mp_pp_initial_rev')}; {t('rho_mp_pp_initial_naive')}",
+        ),
+        (
+            "rho_mp_log_initial",
+            "То же для относительного прироста доли (разность логарифмов)",
+            f"{t('rho_mp_log_initial')} и {t('rho_mp_log_initial_rev')}; {t('rho_mp_log_initial_naive')}",
+        ),
+        ("mp_split_half", "ρ прироста за январь–июнь и за июль–декабрь", t("mp_split_half")),
+        (
+            "mp_iqr_2024",
+            f"Межквартильный размах доли, п. п.: {Y0} → {Y1}",
+            f"{t('mp_iqr_2023')} → {t('mp_iqr_2024')}",
+        ),
+        (
+            "mp_sd_log_2024",
+            f"Стандартное отклонение логарифма доли: {Y0} → {Y1}",
+            f"{t('mp_sd_log_2023')} → {t('mp_sd_log_2024')}",
+        ),
+        (
+            "mp_rub_growth_median",
+            "Рост трат на маркетплейсах в рублях (номинал): медиана; ρ с уровнем трат",
+            f"{t('mp_rub_growth_median')}; {t('rho_mp_rub_growth_level')}",
+        ),
+        (
+            "rho_mp_rub_incr_level",
+            "ρ прибавки в рублях (номинал) с уровнем трат: маркетплейсы; все категории T10; во сколько раз "
+            f"траты на маркетплейсах {Y0} года у верхней пятой части МО по тратам больше, чем у нижней",
+            f"{t('rho_mp_rub_incr_level')}; от {t('rub_incr_rho_min')} до {t('rub_incr_rho_max')}; "
+            f"в {t('mp_rub_base_ratio')} раза",
+        ),
+        (
+            "mp_step_max_pp",
+            "Тест ступеньки: наибольший скачок годового прироста, п. п.",
+            f"{step.text} ({mpc['mp_step_month']}): {step_flag}",
+        ),
     ]
-    out = []
-    for key, label in rows:
-        f = facts[f"{SECTION_ID}.{key}"]
-        text = f.text
-        if key == "mp_iqr_2024":
-            text = f"{facts[f'{SECTION_ID}.mp_iqr_2023'].text} → {f.text}"
-        elif key == "mp_sd_log_2024":
-            text = f"{facts[f'{SECTION_ID}.mp_sd_log_2023'].text} → {f.text}"
-        elif key == "mp_step_max_pp":
-            flag = (
-                "проверить границы категорий"
-                if not (f.value is not None and f.value <= step_pp)
-                else "скачка нет"
-            )
-            text = f"{f.text} ({mpc['mp_step_month']}): {flag}"
-        elif key == "mp_pp_median":
-            q25, q75 = facts[f"{SECTION_ID}.mp_pp_q25"].text, facts[f"{SECTION_ID}.mp_pp_q75"].text
-            text = f"{f.text} (половина МО — от {q25} до {q75})"
-        out.append(
-            {"label": label, "text": nbsp(text), "n": n, "key": f"{SECTION_ID}.{key}", "value": f.value}
-        )
-    return pd.DataFrame(out)
+    out = [
+        {
+            "label": label,
+            "text": nbsp(text),
+            "n": n,
+            "key": f"{SECTION_ID}.{key}",
+            "value": facts[f"{SECTION_ID}.{key}"].value if f"{SECTION_ID}.{key}" in facts else np.nan,
+        }
+        for key, label, text in rows
+    ]
+    table = pd.DataFrame(out)
+    table["value"] = pd.Series([row["value"] for row in out], dtype=object)  # 237 — целое, а не 237,000
+    return table
+
+
+def _fmt_value(x: Any) -> str:
+    """Число T09: целые (число МО) — без дробной части, остальные — три знака."""
+    return style.fmt_num(x, 0 if isinstance(x, int | np.integer) else 3)

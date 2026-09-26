@@ -48,6 +48,20 @@ def test_eta2_extremes():
     assert stats.eta2(rng(1).normal(size=500), groups) < 0.05
 
 
+def test_eta2_adj_removes_small_sample_bias():
+    groups = np.repeat(np.arange(76), 28)  # как 76 регионов и ≈ 2100 МО
+    n, k = groups.size, 76
+    raw = [stats.eta2(rng(20 + i).normal(size=n), groups) for i in range(20)]
+    adj = [stats.eta2_adj(rng(20 + i).normal(size=n), groups) for i in range(20)]
+    assert np.mean(raw) == pytest.approx((k - 1) / (n - 1), abs=0.01)  # сырая доля на шуме ≈ 0,036
+    assert abs(np.mean(adj)) < 0.01
+    assert stats.eta2_adj(groups * 1.0, groups) == pytest.approx(1.0)
+    x = rng(3).normal(size=n) + 0.5 * groups
+    e = stats.eta2(x, groups)
+    assert stats.eta2_adj(x, groups) == pytest.approx(1 - (1 - e) * (n - 1) / (n - k))
+    assert stats.adjusted_r2(0.5, 10, 9) != stats.adjusted_r2(0.5, 10, 9)  # n ≤ p + 1 — не определён
+
+
 def test_spearman_drops_missing_pairs():
     x = [1.0, 2.0, 3.0, np.nan, 5.0]
     y = [2.0, 4.0, 6.0, 8.0, np.nan]

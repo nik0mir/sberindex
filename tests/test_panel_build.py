@@ -24,6 +24,7 @@ from munnet.contracts import (
     CONTEXT_ANNUAL,
     CONTEXT_LONG,
     GEO_COLUMNS,
+    GEO_OPTIONAL,
     OKVED_SHARES,
     PANEL_LONG,
     PANEL_WIDE,
@@ -223,6 +224,29 @@ def test_run_writes_all_outputs_by_contract(built):
     assert geo["territory_id"].dtype == np.int32 and (geo.geom_type == "MultiPolygon").all()
     for name in ("bdmo_rows", "ndfl_rows"):
         assert (Path(built["paths"]["interim"]) / f"{name}.parquet").exists()
+
+
+def test_run_outputs_follow_consumer_contracts(built):
+    """Стыки с разведкой: подписи регионов карты, формат потерь, контрольных чисел и флагов контекста."""
+    processed = Path(built["paths"]["processed"])
+    panel_out = Path(built["paths"]["outputs"]) / "panel"
+    geo = gpd.read_parquet(processed / "territories_geo.parquet")
+    assert set(GEO_OPTIONAL) <= set(geo.columns) and geo["region_name"].notna().all()
+    names = geo.set_index("territory_id")["region_name"]
+    assert names[22] == "Рязанская область" and not geo.set_index("territory_id").loc[22, "in_panel"]
+    ter = read_table(processed / "territories.parquet", TERRITORIES)
+    assert list(ter["mo_type"].cat.categories) == ["mr", "mo", "go", "vgt"]
+    assert ter["successor_id"].dtype == "Int32" and ter["point_lon"].notna().all()
+    un = pd.read_csv(panel_out / "unmatched.csv", dtype={"oktmo": str})
+    assert list(un.columns[:4]) == ["territory_id", "year", "indicator", "reason"]
+    assert un["reason"].notna().all()
+    report = json.loads((panel_out / "controls.json").read_text(encoding="utf-8"))
+    assert all(set(v) == {"expected", "actual", "kind", "ok"} for v in report.values())
+    assert {v["kind"] for v in report.values()} == {"hard", "soft", "info"}
+    cl = pd.read_parquet(processed / "context_long.parquet", columns=["oktmo_used", "flag"])
+    assert cl["oktmo_used"].str.fullmatch(r"\d{8}").all()
+    assert cl["flag"].notna().all() and cl["flag"].str.fullmatch(r"([a-z_]+(;[a-z_]+)*)?").all()
+    assert (cl["flag"] == "").any() and (cl["flag"] != "").any()
 
 
 def test_run_controls_match_synthetic_world(built):

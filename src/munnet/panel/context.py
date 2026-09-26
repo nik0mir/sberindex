@@ -59,6 +59,9 @@ INCOME_STABLE = (0.5, 2.0)
 RECIPIENTS_JUMP_FLAG = "recipients_jump"
 # Значения с этими флагами остаются в context_long для аудита, но не входят в context_annual.
 EXCLUDED_FLAGS = (UNION_MERGED, RECIPIENTS_JUMP_FLAG)
+# Лишняя колонка context_annual (схема разрешает лишние): ndfl_ok оценён по соседнему году панели, потому что
+# число получателей своего года снято как дефект (recipients_jump).
+NDFL_OK_NEIGHBOUR = "ndfl_ok_neighbour"
 
 # Показатель context.indicators (итог) -> колонка context_annual.
 ANNUAL_TOTALS = {
@@ -302,6 +305,36 @@ def _pivot(long: pd.DataFrame, indicator: str, dim: str = TOTAL_DIM) -> pd.Serie
     return sel.set_index(["territory_id", "year"])["value"]
 
 
+def _jump_mask(long: pd.DataFrame, index: pd.MultiIndex) -> pd.Series:
+    """МО-годы ``index``, у которых число получателей 5-НДФЛ снято флагом ``recipients_jump``."""
+    if "flag" not in long:
+        return pd.Series(False, index=index)
+    rec = long[(long["indicator"] == NDFL_RECIPIENTS) & (long["dim"] == TOTAL_DIM)]
+    rec = rec[_has_flag(rec["flag"], [RECIPIENTS_JUMP_FLAG])]
+    keys = set(zip(rec["territory_id"].astype(int), rec["year"].astype(int), strict=True))
+    hit = [(int(t), int(y)) in keys for t, y in index]
+    return pd.Series(hit, index=index, dtype=bool)
+
+
+def _neighbour_ratio_ok(ratio: pd.Series, lo: float, hi: float) -> pd.Series:
+    """Отношение получателей к жителям в соседних годах той же таблицы (Y − 1, Y + 1) в ``[lo; hi]``.
+
+    ``ratio`` — ``recipients_to_pop`` с индексом (``territory_id``, ``year``) по годам панели: соседи берутся
+    только из них. Истина, если известен хотя бы один сосед и все известные соседи в интервале.
+    """
+    tid = ratio.index.get_level_values(0)
+    year = ratio.index.get_level_values(1)
+    near = pd.concat(
+        [
+            pd.Series(ratio.reindex(pd.MultiIndex.from_arrays([tid, year + d])).to_numpy(), index=ratio.index)
+            for d in (-1, 1)
+        ],
+        axis=1,
+    )
+    inside = ((near >= lo) & (near <= hi)) | near.isna()
+    return near.notna().any(axis=1) & inside.all(axis=1)
+
+
 def _employment(
     long: pd.DataFrame, cfg_context: dict, index: pd.MultiIndex, tol: float
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
@@ -381,13 +414,22 @@ def build_annual(
     дефект получателей 5-НДФЛ) в годовую таблицу не входят. Доход на получателя пуст, если получателей
     меньше нижней границы ``context.ndfl.recipients_ratio_ok`` от числа жителей: так выглядит и тот же
     дефект источника, а не только учёт по месту работы (Л3).
+
+    ``ndfl_ok`` у МО-года, где число получателей снято как дефект ``recipients_jump``, а доход в порядке,
+    оценивается по ``recipients_to_pop`` соседнего года панели (``_neighbour_ratio_ok``); такие строки
+    отмечены лишней колонкой ``ndfl_ok_neighbour``, ``recipients_to_pop`` и доход на получателя у них пусты.
+    Отступление от А.4 (там пропуск отношения → ``ndfl_ok`` = false): на реальных данных статус «в
+    интервале» 2023 и 2024 годов совпадает у 98,8% МО с отношением в обоих годах (без внутригородских), а
+    все 33 МО с дефектом 2023 года в 2024 году в интервале. 2022 год соседом не служит: там единицы вместо
+    тысяч массово и без скачка.
     """
     cx = cfg["context"]
-    if "flag" in long:
-        long = long[~_has_flag(long["flag"], EXCLUDED_FLAGS)]
     years = [int(y) for y in cfg["panel"]["years"]]
     ids = territories["territory_id"].astype("int32").to_numpy()
     index = pd.MultiIndex.from_product([np.sort(ids), years], names=["territory_id", "year"])
+    jumped = _jump_mask(long, index)
+    if "flag" in long:
+        long = long[~_has_flag(long["flag"], EXCLUDED_FLAGS)]
     ann = pd.DataFrame(index=index)
 
     pop = long[(long["indicator"] == POPULATION) & (long["dim"] == TOTAL_DIM)].set_index(
@@ -433,10 +475,13 @@ def build_annual(
     avg = ann["pop_avg"]
     for pc_col, src in PER_CAPITA_KRUB.items():
         ann[pc_col] = (ann[src] * KRUB_TO_RUB / avg / MONTHS_PER_YEAR).where(~workplace)
-    ann["recipients_to_pop"] = ann["ndfl_recipients"] / avg
+    ratio = ann["ndfl_recipients"] / avg
+    ann["recipients_to_pop"] = ratio
     lo, hi = cx["ndfl"]["recipients_ratio_ok"]
-    ndfl_ok = (ann["recipients_to_pop"] >= lo) & (ann["recipients_to_pop"] <= hi) & ~workplace
-    ann["ndfl_ok"] = ndfl_ok.fillna(False).astype(bool)
+    own = ((ratio >= lo) & (ratio <= hi)).fillna(False).astype(bool)
+    by_neighbour = jumped & ratio.isna() & ann["ndfl_income_rub"].notna() & _neighbour_ratio_ok(ratio, lo, hi)
+    by_neighbour = (by_neighbour & ~workplace).astype(bool)
+    ann["ndfl_ok"] = ((own | by_neighbour) & ~workplace).astype(bool)
     ann["ndfl_income_pc"] = (ann["ndfl_income_rub"] / avg / MONTHS_PER_YEAR).where(ann["ndfl_ok"])
     few = (ann["recipients_to_pop"] < lo).fillna(False).astype(bool)  # единицы получателей
     per_recipient = ann["ndfl_income_rub"] / ann["ndfl_recipients"] / MONTHS_PER_YEAR
@@ -448,6 +493,12 @@ def build_annual(
     ann["nights_pc"] = ann["nights"] / avg
     ann["workplace_based"] = workplace.astype(bool)
     ann = ann.join(emp)
+    ann[NDFL_OK_NEIGHBOUR] = by_neighbour
+    if by_neighbour.any():
+        log.info(
+            "5-НДФЛ: ndfl_ok по соседнему году (получатели своего года — дефект) у %d МО-лет",
+            int(by_neighbour.sum()),
+        )
 
     out = ann.reset_index()
     out["territory_id"] = out["territory_id"].astype("int32")
@@ -543,8 +594,9 @@ def build_context_full(cfg: Config, dic: pd.DataFrame, territories: pd.DataFrame
     long["territory_id"] = long["territory_id"].astype("int32")
     long["year"] = long["year"].astype("int16")
     long["indicator"] = pd.Categorical(long["indicator"], categories=list(matched))
-    for col in ("dim", "unit", "source_code", "period_used", "oktmo_used", "method", "flag"):
+    for col in ("dim", "unit", "source_code", "period_used", "oktmo_used", "method"):
         long[col] = long[col].astype("str")
+    long["flag"] = long["flag"].fillna("").astype("str")  # без флагов — пустая строка, не пропуск
     long = long.sort_values(["territory_id", "year", "indicator", "dim"], kind="mergesort").reset_index(
         drop=True
     )
@@ -562,6 +614,9 @@ def build_context_full(cfg: Config, dic: pd.DataFrame, territories: pd.DataFrame
     info = {"bdmo_stable_pairs": len(pairs), "ndfl_stable_pairs": len(ndfl["pairs"])}
     for flag in EXCLUDED_FLAGS:  # значения МО панели в context_long, не вошедшие в context_annual
         info[f"values_{flag}"] = int(_has_flag(long["flag"], [flag]).sum())
+    for year, g in annual.groupby("year"):
+        info[f"ndfl_ok_{int(year)}"] = int(g["ndfl_ok"].sum())
+        info[f"{NDFL_OK_NEIGHBOUR}_{int(year)}"] = int(g[NDFL_OK_NEIGHBOUR].sum())
     return ContextResult(
         context_long=long,
         context_annual=annual,

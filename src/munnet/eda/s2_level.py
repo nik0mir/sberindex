@@ -1,17 +1,17 @@
 """Раздел разведки E2 «Сколько тратят и от чего это зависит» (spec_final, Б.3: Q4–Q6; Б.4; В.5).
 
-Уровень трат — оценка СберИндекса средних безналичных потребительских трат жителя МО в месяц (₽, номинал),
+Уровень трат — оценка СберИндекса средних безналичных потребительских расходов жителя МО в месяц (₽, номинал),
 среднее за 12 месяцев года (``EdaData.mo``, Б.2). Траты привязаны к жителям МО: траты приезжих в МО не видны,
-а траты жителей вне своего МО (поездки, онлайн) по смыслу входят, но как именно — модель СберИндекса не
-раскрывает.
+а траты жителей вне своего МО (поездки, онлайн) по смыслу входят, но как именно — СберИндекс не раскрывает.
 
 Выходы:
 
 - F03 ``level_distribution`` — распределение уровня года в лог-шкале с тремя отметками: медиана МО («типичное
   МО»), среднее МО и среднее по жителям («типичный житель», веса — среднегодовое население);
-- F04 ``level_map`` — картограмма уровня к медиане МО того же месяца (квантильные классы), η² региона;
-- F05 ``level_vs_wage`` — траты против зарплаты Росстата в лог-лог шкале, ρ Спирмена в целом и внутри
-  регионов, подписи МО с крупнейшими остатками от робастной линии;
+- F04 ``level_map`` — картограмма уровня к типичному МО страны (квантильные классы с долей жителей в легенде),
+  η² региона;
+- F05 ``level_vs_wage`` — траты против зарплаты Росстата в лог-лог шкале, ρ Спирмена со всеми МО и без
+  внутригородских территорий, подписи МО с крупнейшими остатками от линии, устойчивой к выбросам;
 - T03 ``level_extremes`` — МО сверху и снизу по уровню к медиане страны: регион, отношение к медиане региона,
   робастный z внутри типа МО, подсказка из контекста (признаки с |z| выше порога), пояснение из
   ``eda.annotations``;
@@ -19,12 +19,14 @@
 
 Расчёты для сюжета С2 «Ядра и периферия»: ρ уровня с индексом доступности рынков (со всеми МО, без
 внутригородских территорий, без них и Севера, внутри регионов), частный ρ при контроле зарплаты внутри
-регионов — критерий отказа С2 — с бутстреп-интервалом и проверкой без внутригородских территорий, ρ
-с расстоянием до столицы региона внутри регионов.
+регионов — критерий отказа С2 — с бутстреп-интервалом и проверками: без внутригородских территорий, при
+двух других определениях «внутри регионов» (``partial_rank_corr``) и при контроле размера МО (численности
+населения); ρ с расстоянием до столицы региона внутри регионов.
 
-Числа — чистыми функциями (``level_summary``, ``place_groups``, ``level_drivers``, ``partial_rho_ci``,
-``wage_fit``, ``residual_labels``, ``context_hints``, ``extremes``, ``weighting_table``, ``map_classes``),
-словесные выводы без чисел — тоже (``c2_verdict``, ``access_split``: фраза меняется вместе с данными),
+Числа — чистыми функциями (``level_summary``, ``place_groups``, ``level_drivers``, ``partial_rank_corr``,
+``partial_rho_ci``, ``wage_fit``, ``residual_labels``, ``context_hints``, ``extremes``, ``weighting_table``,
+``map_classes``), словесные выводы без чисел — тоже (``c2_verdict``, ``definitions_note``, ``size_note``,
+``access_split``: фраза меняется вместе с данными),
 раскладка подписей F05 — ``column_limits`` и ``column_order``; рисование — только через ``style`` и
 ``maps``. Параметры — ``eda.level`` конфига поверх ``DEFAULTS``; случайность (бутстреп) — только ``ctx.rng``.
 """
@@ -97,7 +99,12 @@ HINT_FEATURES: dict[str, tuple[str, str, str]] = {
     f"emp_sh_A_{_Y}": ("id", "много занятых в сельском хозяйстве", "мало занятых в сельском хозяйстве"),
     f"emp_sh_B_{_Y}": ("id", "много занятых в добыче", "мало занятых в добыче"),
     f"emp_sh_public_{_Y}": ("id", "много занятых в бюджетной сфере", "мало занятых в бюджетной сфере"),
-    f"nights_pc_{_Y}": ("log1p", "много ночёвок приезжих", "мало ночёвок приезжих"),
+    # Ночёвки в коллективных средствах размещения на жителя описывают место: траты приезжих не видны.
+    f"nights_pc_{_Y}": (
+        "log1p",
+        "много ночёвок в гостиницах на жителя",
+        "мало ночёвок в гостиницах на жителя",
+    ),
     f"log_density_{_Y}": ("id", "высокая плотность населения", "низкая плотность населения"),
     "market_access": ("id", "высокая доступность рынков", "низкая доступность рынков"),
     "dist_capital_km": ("log1p", "далеко от столицы региона", "близко к столице региона"),
@@ -170,7 +177,7 @@ def level_summary(
     mo: pd.DataFrame, *, year: int = YEARS[-1], base_year: int = BASE_YEAR, wage_year: int = CONTEXT_YEAR
 ) -> dict[str, float]:
     """Сколько тратят: медиана, среднее и среднее по жителям уровня двух лет, перцентили, η² региона, медианы
-    по типам МО, доля трат в зарплате.
+    по типам МО, доля трат в зарплате (без МО с ``workplace_based``).
 
     Уровень года — ``level_<год>`` (только МО с 12 месяцами года). «Типичное МО» — медиана по МО без весов,
     «типичный житель» — среднее с весами ``year_weights`` (МО без населения в него не входят). η² региона
@@ -196,7 +203,9 @@ def level_summary(
     inner = _flag(mo, "is_inner_city")
     out["eta2_region_level"] = stats.eta2(log_level, region)
     out["eta2_region_level_no_inner"] = stats.eta2(log_level[~inner], region[~inner])
-    s2w = _col(mo, f"spend_to_wage_{wage_year}")
+    # Доля трат в зарплате — без МО, где зарплата считается по месту работодателя (``workplace_based``:
+    # внутригородские территории), как ``e5.spend_to_wage_median``: иначе два числа отчёта о разных выборках.
+    s2w = _col(mo, f"spend_to_wage_{wage_year}").mask(_flag(mo, "workplace_based"))
     out["spend_to_wage_median"] = _median(s2w)
     out["n_spend_to_wage"] = int(s2w.notna().sum())
     mo_type = mo["mo_type"].astype(str)
@@ -242,43 +251,155 @@ def access_split(rho_all: float, rho_no_inner: float, rho_rest: float) -> str:
     return ""
 
 
-def c2_verdict(est: float, lo: float, hi: float, est_no_inner: float, threshold: float) -> str:
-    """Словесный вывод о критерии отказа С2 (|частный ρ| ≥ порога) по оценке, бутстреп-интервалу и
-    проверке без внутригородских территорий. Без чисел: числа текста — только из фактов.
+def _join_ru(items: Sequence[str]) -> str:
+    """«а», «а и б», «а, б и в»."""
+    items = [str(i) for i in items]
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " и\u00a0" + items[-1]
 
-    Интервал переводится в модуль по знаку оценки. Весь интервал выше порога — «выполняется уверенно»,
-    весь ниже — «не выполняется», иначе — «на границе» (с оговоркой, если без внутригородских территорий
-    оценка по другую сторону порога).
+
+def c2_verdict(
+    est: float, lo: float, hi: float, threshold: float, checks: Sequence[tuple[float, str]] = ()
+) -> str:
+    """Словесный вывод о критерии отказа С2 (|частный ρ| ≥ порога) по оценке, бутстреп-интервалу
+    и проверкам устойчивости. Без чисел: числа текста — только из фактов.
+
+    ``checks`` — пары (оценка проверки, подпись «без внутригородских территорий», «при контроле размера МО»…).
+    Интервал переводится в модуль по знаку оценки. Весь интервал по одну сторону порога и все проверки
+    там же — «выполняется уверенно» или «не выполняется»; иначе вывод перечисляет проверки по другую
+    сторону порога и называет критерий неустойчивым.
     """
     if not all(np.isfinite([est, lo, hi, threshold])):
         return "критерий не посчитан: не хватает данных"
-    a = abs(est)
+    above = abs(est) >= threshold
     lo_m, hi_m = (lo, hi) if est >= 0 else (-hi, -lo)
     if lo_m >= threshold:
-        return "весь интервал бутстрепа выше порога, критерий выполняется уверенно"
-    if hi_m < threshold:
-        return "весь интервал бутстрепа ниже порога, критерий не выполняется"
-    text = f"оценка {'выше' if a >= threshold else 'ниже'} порога, но интервал бутстрепа накрывает порог"
-    if np.isfinite(est_no_inner) and (abs(est_no_inner) >= threshold) != (a >= threshold):
-        text += ", а без внутригородских территорий оценка по другую сторону порога"
-    return text + ". Критерий на самой границе, и решение о сюжете не стоит строить на одном этом числе"
+        text = "весь интервал бутстрепа выше порога"
+    elif hi_m < threshold:
+        text = "весь интервал бутстрепа ниже порога"
+    else:
+        text = f"оценка {'выше' if above else 'ниже'} порога, но интервал бутстрепа накрывает порог"
+    flipped = [label for value, label in checks if np.isfinite(value) and (abs(value) >= threshold) != above]
+    if flipped:
+        text += f"; {'ниже' if above else 'выше'} порога — {_join_ru(flipped)}"
+    if not flipped and lo_m >= threshold:
+        return text + ", критерий выполняется уверенно"
+    if not flipped and hi_m < threshold:
+        return text + ", критерий не выполняется"
+    return text + ". Критерий неустойчив, и\u00a0решение о\u00a0сюжете не стоит строить на одном этом числе"
+
+
+# Числительные для ``definitions_note``: сколько определений «внутри регионов» из трёх проходят порог.
+_DEFINITIONS_PASSED: dict[int, str] = {
+    0: "ни при одном определении «внутри регионов» из трёх",
+    1: "только при одном определении «внутри регионов» из трёх",
+    2: "при двух определениях «внутри регионов» из трёх",
+    3: "при всех трёх определениях «внутри регионов»",
+}
+
+
+def definitions_note(values: Sequence[float], threshold: float) -> str:
+    """При скольких из трёх определений «внутри регионов» |частный ρ| ≥ порога — словами, без чисел.
+
+    Пропуск (нет данных) считается непройденным; ``values`` — ровно три оценки."""
+    if len(values) != len(_DEFINITIONS_PASSED) - 1:
+        raise ValueError("definitions_note: нужно ровно три оценки")
+    passed = sum(bool(np.isfinite(v) and abs(v) >= threshold) for v in values)
+    return _DEFINITIONS_PASSED[passed]
+
+
+def size_note(est: float, est_size: float, threshold: float) -> str:
+    """Что остаётся от частного ρ доступности сверх зарплаты, если контролировать и размер МО: словами.
+
+    Ниже порога и не больше половины исходной оценки — «сигнал в основном идёт вместе с размером МО»;
+    просто ниже порога — «критерий не выполняется»; иначе — «критерий держится»."""
+    if not all(np.isfinite([est, est_size, threshold])):
+        return "проверка не посчитана: не хватает данных"
+    if abs(est_size) >= threshold:
+        return "критерий держится и\u00a0при контроле размера МО"
+    if abs(est_size) <= abs(est) / 2:
+        return (
+            "сигнал доступности сверх зарплаты в\u00a0основном идёт вместе с\u00a0размером МО, и\u00a0при "
+            "контроле размера критерий не выполняется"
+        )
+    return "при контроле размера МО критерий не выполняется"
+
+
+RANKINGS: tuple[str, ...] = ("global", "local", "centered")  # определения «внутри регионов», см. ниже
+
+
+def partial_rank_corr(
+    x: pd.Series, y: pd.Series, controls: pd.DataFrame, groups: pd.Series, ranking: str = "global"
+) -> tuple[float, int]:
+    """Частная ранговая корреляция x и y при контроле ``controls`` внутри групп (регионов) — три
+    определения «внутри регионов»:
+
+    - ``global`` — ранги всей выборки, центрированные по группе (``stats.partial_spearman``, основное,
+      Б.1 п. 9);
+    - ``local`` — ранги внутри каждой группы в долях (процентили), центрированные по группе: у МО крупного
+      и малого региона одна шкала;
+    - ``centered`` — значения, центрированные по группе (минус среднее группы), затем ранги всей выборки;
+      шкалу значений (логарифм уровня) задаёт вызывающий.
+
+    Группы из одного наблюдения и строки с пропусками отбрасываются. Дальше — как в ``stats``: остатки МНК
+    x и y на контроли и корреляция Пирсона остатков; без контролей — просто ρ внутри групп. Позиционно:
+    все входы в одном порядке строк. Возвращает (ρ, n).
+    """
+    if ranking not in RANKINGS:
+        raise ValueError(f"partial_rank_corr: неизвестное определение {ranking!r}, допустимы {RANKINGS}")
+    ctrl = pd.DataFrame(controls).reset_index(drop=True)
+    if ranking == "global":
+        return stats.partial_spearman(x, y, ctrl, groups=groups)
+    cols = {"x": pd.Series(x).reset_index(drop=True), "y": pd.Series(y).reset_index(drop=True)}
+    cols.update({f"c{i}": ctrl[c] for i, c in enumerate(ctrl.columns)})
+    d = pd.DataFrame({k: pd.to_numeric(v, errors="coerce").astype("float64") for k, v in cols.items()})
+    g = pd.Series(groups).reset_index(drop=True)
+    ok = d.notna().all(axis=1) & g.notna()
+    ok &= g.map(g[ok].value_counts()).fillna(0) >= 2
+    d, g = d.loc[ok], g.loc[ok]
+    n = len(d)
+    if n < stats.MIN_PAIRS + len(ctrl.columns):
+        return float("nan"), n
+    if ranking == "local":
+        r = d.groupby(g).rank(pct=True)
+        r = r - r.groupby(g).transform("mean")
+    else:
+        r = (d - d.groupby(g).transform("mean")).rank()
+        r = r - r.mean()
+    z = np.column_stack([np.ones(n), *(r[c].to_numpy() for c in r.columns[2:])])
+    resid = []
+    for target in ("x", "y"):
+        v = r[target].to_numpy()
+        beta, *_ = np.linalg.lstsq(z, v, rcond=None)
+        resid.append(v - z @ beta)
+    if resid[0].std() == 0 or resid[1].std() == 0:
+        return float("nan"), n
+    return float(np.corrcoef(resid[0], resid[1])[0, 1]), n
+
+
+def _log(s: pd.Series) -> pd.Series:
+    return np.log(s.where(s > 0))
 
 
 def level_drivers(
     mo: pd.DataFrame, *, year: int = YEARS[-1], wage_year: int = CONTEXT_YEAR
 ) -> dict[str, float]:
-    """От чего зависит уровень: ранговые связи с зарплатой, доступностью рынков и расстоянием до столицы.
+    """От чего зависит уровень: ранговые связи с зарплатой, доступностью рынков, размером МО и расстоянием
+    до столицы.
 
     - ``rho_level_wage`` — ρ Спирмена ``level_<wage_year>`` с ``wage_<wage_year>`` (год зарплаты); внутри
-      регионов (ранги, центрированные по региону) и без внутригородских территорий (их зарплата — по месту
-      работодателя);
+      регионов (ранги, центрированные по региону; ``_localrank`` — ранги внутри каждого региона) и без
+      внутригородских территорий (их зарплата — по месту работодателя);
     - ``rho_level_access`` — ρ ``level_<year>`` с ``market_access``; то же внутри регионов, без
       внутригородских территорий и с уровнем года зарплаты (``rho_level_access_<wage_year>``);
     - ``partial_rho_access_within`` — частный ρ ``level_<year>`` с ``market_access`` при контроле
       ``wage_<wage_year>`` внутри регионов (``stats.partial_spearman``): даёт ли доступность рынков что-то
-      сверх зарплаты и региона — критерий отказа С2; ``_no_inner`` — то же без внутригородских территорий
-      (у них зарплата по месту работодателя, а Москва и Петербург — два крупнейших «региона»):
-      проверка устойчивости критерия;
+      сверх зарплаты и региона — критерий отказа С2. Проверки устойчивости: ``_no_inner`` — без
+      внутригородских территорий (у них зарплата по месту работодателя, а Москва и Петербург — два
+      крупнейших «региона»); ``_localrank`` и ``_centered`` — два других определения «внутри регионов»
+      (``partial_rank_corr``; для ``_centered`` уровень и зарплата — в логарифме, индекс доступности —
+      как есть); ``_size`` — контроль ещё и численности населения ``pop_<wage_year>``: доступность рынков
+      внутри регионов выше у многолюдных МО (``rho_access_pop_within``), а они и тратят больше
+      (``rho_level_pop_within``);
     - ``rho_level_dist_capital_within`` — ρ ``level_<year>`` с автодорожным расстоянием до столицы региона
       внутри регионов;
     - ``n_access_wage`` — МО, где известны уровень, доступность рынков и зарплата (покрытие сюжета С2).
@@ -290,16 +411,21 @@ def level_drivers(
     level = _col(mo, f"level_{year}").reset_index(drop=True)
     access = _col(mo, "market_access").reset_index(drop=True)
     dist = _col(mo, "dist_capital_km").reset_index(drop=True)
+    pop = _col(mo, f"pop_{wage_year}").reset_index(drop=True)
+    by_wage = pd.DataFrame({"wage": wage})
     out: dict[str, float] = {}
     out["rho_level_wage"], out["n_level_wage"] = stats.spearman(base, wage)
     out["rho_level_wage_within"], _ = stats.spearman_within(base, wage, region)
+    out["rho_level_wage_within_localrank"], _ = partial_rank_corr(
+        base, wage, pd.DataFrame(index=base.index), region, "local"
+    )
     out["rho_level_wage_no_inner"], out["n_level_wage_no_inner"] = stats.spearman(base[~inner], wage[~inner])
     out["rho_level_access"], out["n_level_access"] = stats.spearman(level, access)
     out["rho_level_access_within"], _ = stats.spearman_within(level, access, region)
     out["rho_level_access_no_inner"], _ = stats.spearman(level[~inner], access[~inner])
     out[f"rho_level_access_{wage_year}"], _ = stats.spearman(base, access)
     out["partial_rho_access_within"], out["n_partial_access"] = stats.partial_spearman(
-        level, access, pd.DataFrame({"wage": wage}), groups=region
+        level, access, by_wage, groups=region
     )
     keep = ~inner
     out["partial_rho_access_within_no_inner"], out["n_partial_access_no_inner"] = stats.partial_spearman(
@@ -308,6 +434,15 @@ def level_drivers(
         pd.DataFrame({"wage": wage[keep].reset_index(drop=True)}),
         groups=region[keep].reset_index(drop=True),
     )
+    out["partial_rho_access_within_localrank"], _ = partial_rank_corr(level, access, by_wage, region, "local")
+    out["partial_rho_access_within_centered"], _ = partial_rank_corr(
+        _log(level), access, pd.DataFrame({"wage": _log(wage)}), region, "centered"
+    )
+    out["partial_rho_access_within_size"], out["n_partial_access_size"] = stats.partial_spearman(
+        level, access, pd.DataFrame({"wage": wage, "pop": pop}), groups=region
+    )
+    out["rho_access_pop_within"], _ = stats.spearman_within(access, pop, region)
+    out["rho_level_pop_within"], _ = stats.spearman_within(level, pop, region)
     out["n_access_wage"] = int((level.notna() & access.notna() & wage.notna()).sum())
     out["rho_level_dist_capital_within"], out["n_level_dist_capital"] = stats.spearman_within(
         level, dist, region
@@ -688,6 +823,26 @@ def map_classes(values: pd.Series, weights: pd.Series, k: int) -> tuple[pd.DataF
     return table, cls
 
 
+CLASS_SEP = " · "  # между границами класса и долей жителей в легенде F04
+
+
+def class_labels(classes: pd.DataFrame) -> dict[int, str]:
+    """Подписи классов легенды F04 с долей жителей: «1,70–2,84× · 23,7% жителей» (номер класса -> подпись).
+
+    Карта площадью раздувает малолюдный Север; доля жителей в легенде показывает, сколько людей за цветом.
+    Без населения — подпись без доли."""
+    out = {}
+    for cls, label, share in classes[["cls", "label", "pop_share"]].itertuples(index=False):
+        tail = f"{CLASS_SEP}{style.fmt_pct(share)} жителей" if np.isfinite(share) else ""
+        out[int(cls)] = f"{label}{tail}"
+    return out
+
+
+def about(x: float) -> int:
+    """Округление для «около N МО» в подзаголовке: от 100 — до десятков, меньше — до целого."""
+    return int(round(x, -1)) if x >= 100 else int(round(x))
+
+
 def plural(n: int, forms: tuple[str, str, str]) -> str:
     """Слово при числе: 1 регион, 2 региона, 5 регионов, 21 регион, 11 регионов."""
     n = abs(int(n))
@@ -755,11 +910,24 @@ def fact_note(key: str, year: int, wage_year: int) -> str:
     """Определение и выборка факта (поле ``note`` в ``facts.json``): сначала точный ключ, затем шаблон по
     префиксу (ключи с годом или типом МО)."""
     level = "уровень — среднее v_all за 12 месяцев года, ₽ на жителя в месяц, номинал; МО с 12 месяцами года"
+    partial = (
+        f"частный ρ level_{year} и индекса доступности рынков при контроле wage_{wage_year} внутри регионов"
+    )
     exact = {
+        f"level_median_{wage_year}": (
+            f"медиана уровня по МО («типичное МО»); {level}; ориентир Б.4 (23 111 ₽) — медиана среднего "
+            f"v_all за любые месяцы {wage_year} года (2161 МО, включая неполный год); level_{wage_year} "
+            "по Б.2 требует 12 месяцев, поэтому медиана выше"
+        ),
         "eta2_region_level": f"η² региона (межрегиональная сумма квадратов / общая) для ln level_{year}",
         "eta2_region_level_no_inner": f"η² региона для ln level_{year} без внутригородских территорий",
-        "spend_to_wage_median": f"медиана level_{wage_year} / wage_{wage_year} (зарплата Росстата, без МСП)",
-        "n_spend_to_wage": f"МО с level_{wage_year} и wage_{wage_year}",
+        "spend_to_wage_median": (
+            f"медиана level_{wage_year} / wage_{wage_year} без МО с workplace_based (внутригородские "
+            "территории: зарплата по месту работодателя), та же выборка, что у e5.spend_to_wage_median; "
+            "зарплата Росстата — крупные и средние организации, без малого бизнеса; ориентир Б.4 (0,448) "
+            "посчитан со всеми МО"
+        ),
+        "n_spend_to_wage": f"МО с level_{wage_year} и wage_{wage_year} без workplace_based",
         "median_rel_inner": f"медиана level_rel_{year} внутригородских территорий Москвы и Петербурга",
         "median_rel_north": f"медиана level_rel_{year} МО с широтой ≥ eda.north_lat, без внутригородских",
         "median_rel_rest": f"медиана level_rel_{year} прочих МО",
@@ -776,9 +944,17 @@ def fact_note(key: str, year: int, wage_year: int) -> str:
             f"ρ level_{year} и индекса доступности рынков без внутригородских территорий и без Севера"
         ),
         "n_level_access_rest": f"МО с level_{year} и доступностью рынков без внутригородских и без Севера",
-        "rho_level_wage": f"ρ Спирмена level_{wage_year} и wage_{wage_year} (зарплата по месту работы)",
+        "rho_level_wage": (
+            f"ρ Спирмена level_{wage_year} и wage_{wage_year} (зарплата по месту работы); со всеми МО, "
+            "включая внутригородские территории, где зарплата — по месту работодателя (Л3)"
+        ),
         "rho_level_wage_within": (
-            f"ρ level_{wage_year} и wage_{wage_year} внутри регионов (ранги минус среднее региона)"
+            f"ρ level_{wage_year} и wage_{wage_year} внутри регионов (ранги всей выборки минус среднее "
+            "региона)"
+        ),
+        "rho_level_wage_within_localrank": (
+            f"ρ level_{wage_year} и wage_{wage_year} внутри регионов: ранги внутри каждого региона "
+            "(процентили), центрированные по региону"
         ),
         "rho_level_wage_no_inner": f"ρ level_{wage_year} и wage_{wage_year} без внутригородских территорий",
         "n_level_wage": (
@@ -801,8 +977,8 @@ def fact_note(key: str, year: int, wage_year: int) -> str:
         ),
         "n_level_access": f"МО с level_{year} и индексом доступности рынков",
         "partial_rho_access_within": (
-            f"частный ρ level_{year} и доступности рынков при контроле wage_{wage_year} внутри регионов "
-            "(критерий отказа С2)"
+            f"{partial}: ранги всей выборки, центрированные по региону (stats.partial_spearman) — "
+            "критерий отказа С2"
         ),
         "n_partial_access": "МО в частном ρ (регионы из одного МО отброшены)",
         "partial_rho_access_within_no_inner": (
@@ -810,12 +986,33 @@ def fact_note(key: str, year: int, wage_year: int) -> str:
             "критерия отказа С2"
         ),
         "n_partial_access_no_inner": "МО в частном ρ без внутригородских территорий",
+        "partial_rho_access_within_localrank": (
+            f"{partial}: ранги внутри каждого региона (процентили), центрированные по региону — второе "
+            "определение «внутри регионов», устойчивость критерия отказа С2"
+        ),
+        "partial_rho_access_within_centered": (
+            f"{partial}: ранги всей выборки по значениям, центрированным по региону (ln level_{year}, "
+            f"ln wage_{wage_year}, индекс доступности как есть) — третье определение «внутри регионов»"
+        ),
+        "partial_rho_access_within_size": (
+            f"частный ρ level_{year} и индекса доступности рынков при контроле wage_{wage_year} "
+            f"и pop_{wage_year} (численность населения) внутри регионов, определение — как у "
+            "partial_rho_access_within: "
+            "не сводится ли сигнал С2 к размеру МО"
+        ),
+        "n_partial_access_size": f"МО в частном ρ с контролем wage_{wage_year} и pop_{wage_year}",
+        "rho_access_pop_within": (
+            f"ρ индекса доступности рынков и pop_{wage_year} (численность населения) внутри регионов"
+        ),
+        "rho_level_pop_within": f"ρ level_{year} и pop_{wage_year} (численность населения) внутри регионов",
         "partial_rho_threshold": "порог критерия отказа С2: eda.rejection.s2_partial_rho_min",
         "partial_rho_access_within_lo": (
-            "нижняя граница 95%-го перцентильного бутстреп-интервала partial_rho_access_within"
+            "нижняя граница 95%-го перцентильного бутстреп-интервала partial_rho_access_within "
+            "(МО с возвращением)"
         ),
         "partial_rho_access_within_hi": (
-            "верхняя граница 95%-го перцентильного бутстреп-интервала partial_rho_access_within"
+            "верхняя граница 95%-го перцентильного бутстреп-интервала partial_rho_access_within "
+            "(МО с возвращением)"
         ),
         "n_access_wage": f"МО с level_{year}, доступностью рынков и wage_{wage_year} (покрытие С2)",
         "rho_level_dist_capital_within": (
@@ -829,12 +1026,12 @@ def fact_note(key: str, year: int, wage_year: int) -> str:
         "top_names": f"МО с наибольшим level_rel_{year} (T03), в скобках — регион",
         "bottom_names": f"МО с наименьшим level_rel_{year} (T03), в скобках — регион",
         "wage_above_names": (
-            f"МО без внутригородских с наибольшим положительным остатком ln level_{wage_year} от робастной "
-            f"линии по ln wage_{wage_year} (подписаны на F05)"
+            f"МО без внутригородских с наибольшим положительным остатком ln level_{wage_year} от линии "
+            f"Тейла — Сена (устойчивой к выбросам) по ln wage_{wage_year}; подписаны на F05"
         ),
         "wage_below_names": (
-            f"МО без внутригородских с наибольшим отрицательным остатком ln level_{wage_year} от робастной "
-            f"линии по ln wage_{wage_year} (подписаны на F05)"
+            f"МО без внутригородских с наибольшим отрицательным остатком ln level_{wage_year} от линии "
+            f"Тейла — Сена (устойчивой к выбросам) по ln wage_{wage_year}; подписаны на F05"
         ),
     }
     if key in exact:
@@ -1236,7 +1433,7 @@ def run_section(ctx: SectionContext) -> Finding:
         ),
     )
 
-    # F04 — карта уровня к медиане страны
+    # F04 — карта уровня к типичному МО страны
     geo = maps.load_geometry(data.geo_path)
     frame = maps.map_frame(geo, year)
     n_absent = len(maps.absent_regions(frame))
@@ -1252,7 +1449,8 @@ def run_section(ctx: SectionContext) -> Finding:
         kind="quantile",
         k=int(p["map_classes"]),
         fmt=times_fmt,
-        legend_title="Траты к медиане МО того же месяца",
+        legend_title="Траты к типичному МО страны",
+        labels=class_labels(classes),
         insets=maps.insets_from_config(cfg),
         na_label=na_label(int(eda["level_rel_min_months"])),
         absent_note=note,
@@ -1286,12 +1484,13 @@ def run_section(ctx: SectionContext) -> Finding:
         slug="level_map",
         title=title,
         subtitle=typo(
-            f"Траты {year} года к медиане МО того же месяца, среднее по месяцам; "
-            f"{int(p['map_classes'])} квантильных классов; n{style.NBSP}={style.NBSP}"
-            f"{style.fmt_num(v['n_rel'])}; η² региона {_fmt_check(eta2)}"
+            f"Во сколько раз траты жителя выше или ниже, чем в типичном МО страны ({times_fmt(1.0)}), "
+            f"{year}; "
+            f"около {style.fmt_num(about(v['n_rel'] / max(len(classes), 1)))} МО в классе; "
+            f"n{style.NBSP}={style.NBSP}{style.fmt_num(v['n_rel'])}"
         ),
         alt=typo(
-            "Карта МО по тратам к медиане страны: выше всего — внутригородские территории Москвы "
+            "Карта МО по тратам к типичному МО страны: выше всего — внутригородские территории Москвы "
             f"и Петербурга (медиана {times_fmt(v['median_rel_inner'])}) и Север "
             f"({times_fmt(v['median_rel_north'])}); регион объясняет {style.fmt_pct(eta2, 0)} разброса "
             "логарифма уровня"
@@ -1306,13 +1505,16 @@ def run_section(ctx: SectionContext) -> Finding:
     # F05 — траты и зарплата
     fig = plot_wage(fit, labels, slope, intercept, p)
     rho, rho_w = v["rho_level_wage"], v["rho_level_wage_within"]
+    rho_ni = v["rho_level_wage_no_inner"]  # без внутригородских: у них зарплата по месту работодателя (Л3)
+    rho_min = float(checks["rho_wage_min"])
     title = ctx.headline(
         typo(
-            f"Траты почти повторяют зарплату: ρ{style.NBSP}={style.NBSP}{style.fmt_rho(rho)}, внутри "
-            f"регионов — {style.fmt_rho(rho_w)}"
+            f"Траты почти повторяют зарплату: ρ{style.NBSP}={style.NBSP}{style.fmt_rho(rho)}, без Москвы "
+            f"и Петербурга{style.NBSP}—{style.NBSP}{style.fmt_rho(rho_ni)}"  # число не отрывается от тире
         ),
-        rho >= float(checks["rho_wage_min"]),
-        f"F05: rho_level_wage = {_fmt_check(rho)}, нужно ≥ {_fmt_check(checks['rho_wage_min'])}",
+        rho >= rho_min and rho_ni >= rho_min,
+        f"F05: rho_level_wage = {_fmt_check(rho)}, rho_level_wage_no_inner = {_fmt_check(rho_ni)}, "
+        f"нужно оба ≥ {_fmt_check(rho_min)}",
     )
     fit_data = fit.assign(labeled=fit["territory_id"].isin(labels["territory_id"]))
     ctx.save_figure(
@@ -1321,16 +1523,19 @@ def run_section(ctx: SectionContext) -> Finding:
         slug="level_vs_wage",
         title=title,
         subtitle=typo(
-            f"{wage_year} год; зарплата Росстата — по месту работы, без МСП; шкалы логарифмические; "
+            f"{wage_year}; зарплата Росстата — по месту работы, без малого бизнеса; оси в логарифме; "
             f"n{style.NBSP}={style.NBSP}{style.fmt_num(v['n_level_wage'])}; квадраты — Москва и Петербург"
         ),
         alt=typo(
-            f"Точечный график: чем выше зарплата в МО, тем выше траты жителей, ρ = {style.fmt_rho(rho)}; "
-            f"внутри регионов связь держится (ρ = {style.fmt_rho(rho_w)}); подписаны МО дальше всего "
-            "от робастной линии, кроме внутригородских территорий"
+            f"Чем выше зарплата в МО, тем выше траты жителей: ρ = {style.fmt_rho(rho)}, без внутригородских "
+            f"территорий Москвы и Петербурга — {style.fmt_rho(rho_ni)}; внутри регионов связь держится "
+            f"(ρ = {style.fmt_rho(rho_w)}); подписаны МО дальше всего от линии, устойчивой к выбросам, кроме "
+            "внутригородских территорий"
         ),
         data=fit_data,
-        check=f"rho_level_wage ≥ {_fmt_check(checks['rho_wage_min'], 1)}",
+        check=(
+            f"rho_level_wage ≥ {_fmt_check(rho_min, 1)} и rho_level_wage_no_inner ≥ {_fmt_check(rho_min, 1)}"
+        ),
         source=style.join_sources(style.SOURCE_SBER, style.SOURCE_ROSSTAT),
     )
 
@@ -1392,69 +1597,112 @@ def run_section(ctx: SectionContext) -> Finding:
         },
     )
 
+    est, thr = v["partial_rho_access_within"], v["partial_rho_threshold"]
     verdict = c2_verdict(
-        v["partial_rho_access_within"],
+        est,
         v["partial_rho_access_within_lo"],
         v["partial_rho_access_within_hi"],
-        v["partial_rho_access_within_no_inner"],
-        v["partial_rho_threshold"],
+        thr,
+        [(v[f"partial_rho_access_within_{key}"], label) for key, label in C2_CHECKS],
     )
+    definitions = definitions_note(
+        [
+            est,
+            v["partial_rho_access_within_localrank"],
+            v["partial_rho_access_within_centered"],
+        ],
+        thr,
+    )
+    size = size_note(est, v["partial_rho_access_within_size"], thr)
     split = access_split(v["rho_level_access"], v["rho_level_access_no_inner"], v["rho_level_access_rest"])
-    summary = SUMMARY_MD.format(y=year, verdict=verdict, access_split=split)
+    summary = SUMMARY_MD.format(
+        y=year, verdict=verdict, definitions=definitions, size=size, access_split=split
+    )
     return ctx.finding(title=TITLE, summary_md=summary, caveats=CAVEATS)
 
 
-# «Что видно» и «Что это значит для сюжета»: числа — только {{e2.ключ}}; {y} — год отчёта.
-# Неразрывные пробелы (\u00a0) — после однобуквенных предлогов и союзов, в «рис. N» и вокруг «=».
+# Проверки устойчивости критерия отказа С2: суффикс факта ``partial_rho_access_within_<суффикс>`` -> подпись
+# в выводе ``c2_verdict`` («ниже порога — без внутригородских территорий, …»).
+C2_CHECKS: tuple[tuple[str, str], ...] = (
+    ("no_inner", "без внутригородских территорий"),
+    ("localrank", "при рангах внутри региона"),
+    ("centered", "при рангах центрированных значений"),
+    ("size", "при контроле размера МО"),
+)
+
+# «Что видно» и «Что это значит для сюжета»: числа — только {{e2.ключ}}; {y} — год отчёта, остальные поля —
+# словесные выводы без чисел. Неразрывные пробелы (\u00a0) — после однобуквенных предлогов и союзов,
+# в «рис. N» и вокруг «=».
 SUMMARY_MD = """\
-**Что видно.** В\u00a0типичном МО (медиана по МО) житель в\u00a0{y} году тратил по карте \
+**Что видно.** В\u00a0типичном МО (медиана по МО) житель в\u00a0{y} году тратил безналично \
 {{{{e2.level_median_{y}}}}} в\u00a0месяц, а\u00a0в\u00a0среднем по всем жителям — \
-{{{{e2.level_wmean_{y}}}}}: многолюдные МО тратят больше (рис.\u00a03, T04). Второй горб распределения — \
+{{{{e2.level_wmean_{y}}}}}: многолюдные МО тратят больше (рис.\u00a03, T04).
+
+- **Разброс.** Второй горб распределения — \
 внутригородские территории Москвы и\u00a0Петербурга: их медиана — {{{{e2.median_level_vgt}}}}, \
 у\u00a0муниципальных районов — {{{{e2.median_level_mr}}}}, у\u00a0городских округов — \
 {{{{e2.median_level_go}}}}. В\u00a0МО 90-го перцентиля траты выше, чем в\u00a0МО 10-го, \
 в\u00a0{{{{e2.p90_p10_{y}}}}} раза. Выше всех — {{{{e2.top_names}}}}; ниже всех — \
 {{{{e2.bottom_names}}}}; полный список — в\u00a0T03.
-
-Регион объясняет большую часть разброса: η² региона для логарифма уровня — \
-{{{{e2.eta2_region_level}}}}, без внутригородских территорий — \
-{{{{e2.eta2_region_level_no_inner}}}} (η² — доля разброса между регионами в\u00a0общем разбросе), \
-рис.\u00a04. Карта площадью скрывает людей: в\u00a0верхнем классе карты живёт \
-{{{{e2.pop_share_top_class}}}} жителей её МО, в\u00a0нижнем — {{{{e2.pop_share_bottom_class}}}}. \
-Траты почти повторяют зарплату Росстата: ранговая корреляция Спирмена \
-ρ\u00a0=\u00a0{{{{e2.rho_level_wage}}}} по {{{{e2.n_level_wage}}}} МО, внутри регионов — \
-{{{{e2.rho_level_wage_within}}}} (рис.\u00a05). Медиана отношения трат жителя к\u00a0средней зарплате \
-работника — {{{{e2.spend_to_wage_median}}}} (знаменатели разные: все жители против работников \
-организаций без МСП). Дальше всего выше линии — {{{{e2.wage_above_names}}}}, ниже — \
-{{{{e2.wage_below_names}}}}. Гипотеза: там зарплата по месту работы расходится с\u00a0доходом \
-жителей (жители пригорода работают в\u00a0областном центре, а\u00a0у\u00a0крупного работодателя работают \
-приезжие); проверка — в\u00a0разделе «Экономика места».
+- **Регион.** На него приходится большая часть разброса: η² региона для логарифма уровня — \
+{{{{e2.eta2_region_level}}}}, без внутригородских территорий — {{{{e2.eta2_region_level_no_inner}}}} \
+(η² — доля разброса между регионами в\u00a0общем разбросе; рис.\u00a04). Карта площадью скрывает людей: \
+в\u00a0верхнем классе карты живёт {{{{e2.pop_share_top_class}}}} жителей её МО, в\u00a0нижнем — \
+{{{{e2.pop_share_bottom_class}}}}. Рубли номинальные: на Севере и\u00a0в\u00a0столицах цены выше, поэтому \
+разрыв в\u00a0рублях, скорее всего, больше разрыва в\u00a0объёме покупок.
+- **Зарплата.** Траты почти повторяют зарплату Росстата: ранговая корреляция Спирмена \
+ρ\u00a0=\u00a0{{{{e2.rho_level_wage}}}} по {{{{e2.n_level_wage}}}} МО, без Москвы и\u00a0Петербурга \
+(у\u00a0их районов зарплата по месту работодателя) — {{{{e2.rho_level_wage_no_inner}}}} \
+по {{{{e2.n_level_wage_no_inner}}}} МО (рис.\u00a05). Внутри регионов \
+ρ\u00a0=\u00a0{{{{e2.rho_level_wage_within}}}}, а\u00a0если ранжировать МО внутри каждого региона — \
+{{{{e2.rho_level_wage_within_localrank}}}}. Медиана отношения трат жителя к\u00a0средней зарплате работника \
+без Москвы и\u00a0Петербурга — {{{{e2.spend_to_wage_median}}}} (знаменатели разные: все жители против \
+работников крупных и\u00a0средних организаций).
+- **Выбросы — гипотезы.** Дальше всего выше линии — {{{{e2.wage_above_names}}}}, ниже — \
+{{{{e2.wage_below_names}}}}. Гипотеза: там зарплата по месту работы расходится с\u00a0доходом жителей \
+(жители пригорода работают в\u00a0областном центре, а\u00a0у\u00a0крупного работодателя работают приезжие); \
+проверка — в\u00a0разделе «Экономика места».
 
 **Что это значит для сюжета.** Сырой уровень трат — почти карта регионов и\u00a0зарплат, поэтому \
-сюжет С2 «ядра и\u00a0периферия» по уровню её повторит. С\u00a0доступностью рынков \
-ρ\u00a0=\u00a0{{{{e2.rho_level_access}}}}, без внутригородских территорий — \
-{{{{e2.rho_level_access_no_inner}}}}, без них и\u00a0без Севера — \
-{{{{e2.rho_level_access_rest}}}}{access_split}. Медиана индекса доступности \
-на Севере — {{{{e2.median_access_north}}}}, у\u00a0прочих МО — {{{{e2.median_access_rest}}}}, \
-а\u00a0траты к\u00a0медиане страны — {{{{e2.median_rel_north}}}} против {{{{e2.median_rel_rest}}}}. \
-Внутри регионов ρ\u00a0=\u00a0{{{{e2.rho_level_access_within}}}}. Сверх зарплаты внутри регионов \
-доступность даёт частный ρ\u00a0=\u00a0{{{{e2.partial_rho_access_within}}}} (интервал бутстрепа — \
-от\u00a0{{{{e2.partial_rho_access_within_lo}}}} до\u00a0{{{{e2.partial_rho_access_within_hi}}}}, \
-{{{{e2.n_partial_access}}}} МО), без внутригородских территорий — \
-{{{{e2.partial_rho_access_within_no_inner}}}}. Порог критерия отказа С2 — \
-{{{{e2.partial_rho_threshold}}}}: {verdict}. С\u00a0расстоянием до столицы региона внутри регионов \
-ρ\u00a0=\u00a0{{{{e2.rho_level_dist_capital_within}}}}. Для этапа 2 уровень трат лучше брать \
-относительно региона или зарплаты, иначе типы МО повторят карту регионов. Корреляции здесь описывают \
-связь, а\u00a0не\u00a0причину.
+сюжет С2 «Ядра и\u00a0периферия» по уровню её повторит.
+
+- **Доступность рынков.** С\u00a0индексом доступности ρ\u00a0=\u00a0{{{{e2.rho_level_access}}}}, \
+без внутригородских территорий — {{{{e2.rho_level_access_no_inner}}}}, без них и\u00a0без Севера — \
+{{{{e2.rho_level_access_rest}}}}{access_split}. Медиана индекса на Севере — {{{{e2.median_access_north}}}}, \
+у\u00a0прочих МО — {{{{e2.median_access_rest}}}}, а\u00a0траты к\u00a0медиане страны — \
+{{{{e2.median_rel_north}}}} против {{{{e2.median_rel_rest}}}}. Внутри регионов \
+ρ\u00a0=\u00a0{{{{e2.rho_level_access_within}}}}, с\u00a0расстоянием до столицы региона — \
+{{{{e2.rho_level_dist_capital_within}}}}.
+- **Три определения «внутри регионов».** Частный ρ уровня с\u00a0доступностью при контроле зарплаты: \
+ранги всей выборки, центрированные по региону, — {{{{e2.partial_rho_access_within}}}}; ранги внутри \
+каждого региона — {{{{e2.partial_rho_access_within_localrank}}}}; ранги значений, центрированных \
+по региону, — {{{{e2.partial_rho_access_within_centered}}}}. Порог критерия отказа С2 \
+({{{{e2.partial_rho_threshold}}}}) пройден {definitions}.
+- **Размер МО.** Внутри регионов многолюдные МО и\u00a0тратят больше (ρ уровня с\u00a0численностью \
+населения — {{{{e2.rho_level_pop_within}}}}), и\u00a0лучше связаны с\u00a0рынками (ρ доступности \
+с\u00a0численностью — {{{{e2.rho_access_pop_within}}}}). При контроле и\u00a0зарплаты, и\u00a0численности \
+частный ρ — {{{{e2.partial_rho_access_within_size}}}}: {size}.
+- **Критерий отказа С2.** По основному определению частный ρ — {{{{e2.partial_rho_access_within}}}} \
+(интервал бутстрепа — от\u00a0{{{{e2.partial_rho_access_within_lo}}}} до\u00a0\
+{{{{e2.partial_rho_access_within_hi}}}}, {{{{e2.n_partial_access}}}} МО), без внутригородских \
+территорий — {{{{e2.partial_rho_access_within_no_inner}}}}: {verdict}.
+
+Для этапа 2 уровень трат лучше брать относительно региона или зарплаты, иначе типы МО повторят карту \
+регионов. Корреляции здесь описывают связь, а\u00a0не\u00a0причину.
 """
 
 CAVEATS: list[str] = [
-    "Траты — оценка СберИндекса средних безналичных потребительских трат жителей МО в номинальных рублях; "
-    "траты приезжих в МО не видны, а траты жителей вне своего МО (поездки, онлайн) по смыслу входят, но как "
-    "их привязывают к МО, модель не раскрывает.",
+    "Траты — оценка СберИндекса средних безналичных потребительских расходов жителей МО в номинальных "
+    "рублях; траты приезжих в МО не видны, а траты жителей вне своего МО (поездки, онлайн) по смыслу "
+    "входят, но как их привязывают к МО, СберИндекс не раскрывает.",
+    "Рубли номинальные и в пространстве: на Севере и в столицах цены выше, поэтому «траты на Севере "
+    "в {{e2.median_rel_north}} раза выше медианы страны» не значит «в {{e2.median_rel_north}} раза больше "
+    "потребления»; сравнение внутри регионов от разницы цен чище.",
+    "Подсказки T03 описывают место, а не причину трат: ночёвки в гостиницах и других коллективных "
+    "средствах размещения — это приезжие, а их траты в данных не видны.",
     "Наличные расходы не видны: где доля наличных выше, уровень занижен (гипотеза, в данных не проверить).",
-    "Зарплата Росстата — по месту работы и без малого бизнеса; у внутригородских территорий Москвы "
-    "и Петербурга она описывает работодателей района, а не жителей.",
+    "Зарплата Росстата — по месту работы, крупные и средние организации без малого бизнеса; "
+    "у внутригородских территорий Москвы и Петербурга она описывает работодателей района, а не жителей.",
     "Среднее по жителям взвешено среднегодовым населением года; МО без населения в него не входят.",
-    "Выводы — о регионах, где есть данные СберИндекса, а не о всей России.",
+    "Выводы — о регионах, где есть данные СберИндекса, а не обо всей России.",
 ]

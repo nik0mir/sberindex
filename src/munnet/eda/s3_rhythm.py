@@ -14,12 +14,16 @@ t = 0…23, y = ln траты (все категории или одна кат�
 Без снятия тренда МО повторяемость завышена: рост внутри года одинаково наклоняет оба годовых профиля.
 STL и X-13 на двух циклах ненадёжны и не используются.
 
+Размах своего профиля у типичного МО близок к размаху шума и больше у малых МО, поэтому критерий
+надёжности держится на ``r``; в сводку (``Finding.indicators``) идёт размах, сжатый на повторяемость:
+``A_i · max(r_i, 0)``. Проверка устойчивости: тренд МО со сдвигом уровня на рубеже 2023 и 2024 годов —
+такой сдвиг после снятия линейного тренда даёт в оба года одинаковую «пилу» с пиком в январе.
+
 Траты в наборе — средние безналичные расходы жителей МО: траты приезжих в курортном МО не видны, поэтому
 курортный тип по этим данным не выделяется; связь летнего избытка с туризмом смотрим по ночёвкам Росстата.
 
 Север — МО, у которых точка внутри полигона (``point_lat``, решение spec_final, часть Е) севернее
-``eda.north_lat``; так же, как тип ``north`` раздела E5. Внутригородские территории Петербурга, чья точка
-лежит севернее 60°, в Север попадают — их число и влияние на числа названы в пояснениях фактов.
+``eda.north_lat``, без внутригородских территорий (``is_inner_city``) — так же, как в разделах E2 и E5.
 """
 
 from __future__ import annotations
@@ -50,7 +54,12 @@ TITLE = "Годовой ритм"
 
 MONTHS_IN_YEAR = 12
 JANUARY, AUGUST, DECEMBER = 1, 8, 12
+# Месяцы «пилы» от сдвига уровня на рубеже лет: пик своего профиля в январе–марте (проверка устойчивости).
+WINTER_MONTHS: tuple[int, ...] = (1, 2, 3)
 FULL_STATUS = "full"
+# Средний размах 12 независимых нормальных величин в единицах их SD (константа d2 контрольных карт, n = 12):
+# размах своего профиля из чистого шума ≈ D2_12 · σ / √2, где σ — шум одного года, а профиль — среднее двух.
+D2_12 = 3.258
 # Квантили корреляций пар МО в T06 (ключи фактов pair_*_q50 и pair_*_q90).
 PAIR_QUANTILES: tuple[float, ...] = (0.5, 0.9)
 # Категории, без которых нет обязательных фактов (nat_*, mp_dec, cafe_aug, cafe_summer_*).
@@ -94,8 +103,10 @@ RHO_CONTEXT: dict[str, str] = {
 
 # Проверки заголовков (В.5): при каком соотношении чисел вывод заголовка верен.
 PEAK_DEC_MIN = 0.9  # F06: «декабрь — пик» — у ≥ 90% МО
-RELIABLE_VS_NULL = 3.0  # F07: надёжных МО не меньше чем втрое больше, чем на случайных данных
-NORTH_RATIO_MIN = 2.0  # F08: «чаще на Севере» — доля северных среди надёжных вдвое выше средней
+RELIABLE_VS_NULL = 3.0  # F07: надёжных МО не меньше чем втрое больше, чем на перемешанных месяцах
+NORTH_RATIO_MIN = 2.0  # F08: «чаще на Севере» — доля МО с устойчивым ритмом на Севере вдвое выше прочих
+# Текст: «северный слой почти не зависит от сдвига уровня» — со сдвигом на Севере остаётся ≥ 80% прежней доли.
+STEP_KEEP_MIN = 0.8
 # Сила связи в словах текста (ρ Спирмена по модулю): < 0,1 — почти нулевая (как незначимые клетки F14,
 # Б.4 E5), < 0,3 — слабая, < 0,5 — умеренная, иначе сильная.
 WEAK_RHO = 0.1
@@ -110,6 +121,7 @@ Y_HEADROOM = 1.3  # F07: запас над самым высоким столб�
 R_TICK = 0.2  # F07: шаг делений оси r
 LABEL_GAP_PT = 5  # F06: отступ подписи декабря от линии и полосы, pt
 LABEL_SPAN_MONTHS = 2  # F06: подпись декабря по ширине занимает ≈ 2 месяца левее конца линии
+LABEL_SPAN_LONG = 7  # F06: подпись «дек +53%, над трендом +24%» — ≈ 7 месяцев
 PROFILE_PAD = 0.08  # F06: запас общей шкалы сверху и снизу для подписей, доля размаха
 MAP_MIN_INTENSITY = 0.4  # F08: ближний к нулю класс — не белый (отличим от серых МО без ритма)
 HINT_Z_CAP = 10.0  # подсказка: |z| больше 10 пишется как «> +10» (у признаков с почти нулевым MAD)
@@ -123,7 +135,18 @@ CATEGORY_TEXT = {
     "cafe": "общепит",
     "other": "прочее",
 }
-SERIES_LABELS = {"raw": "Сырые ряды ln трат", "detrended": "Без тренда МО", "own": "Свой ритм"}
+# Родительный падеж: «декабрь выше во всех категориях, кроме общепита» (альт-текст F06).
+CATEGORY_GENITIVE = {
+    "all": "трат в целом",
+    "food": "продовольствия",
+    "marketplace": "маркетплейсов",
+    "transport": "транспорта",
+    "health": "здоровья",
+    "cafe": "общепита",
+    "other": "прочего",
+}
+SERIES_LABELS = {"raw": "Логарифм трат без обработки", "detrended": "Без тренда МО", "own": "Свой ритм"}
+NULL_TEXT = "перемешанные месяцы 2024 года"  # одно название нуля во всех подписях для людей
 MONTHS_FULL = [
     "январь",
     "февраль",
@@ -137,6 +160,20 @@ MONTHS_FULL = [
     "октябрь",
     "ноябрь",
     "декабрь",
+]
+MONTHS_PREPOSITIONAL = [
+    "январе",
+    "феврале",
+    "марте",
+    "апреле",
+    "мае",
+    "июне",
+    "июле",
+    "августе",
+    "сентябре",
+    "октябре",
+    "ноябре",
+    "декабре",
 ]
 
 
@@ -258,19 +295,25 @@ def _row_corr(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 # --- Модель ритма (чистые функции) ---------------------------------------------------------------
 
 
-def detrend(Y: Any) -> tuple[pd.DataFrame, pd.Series]:
+def detrend(Y: Any, step_at: int | None = None) -> tuple[pd.DataFrame, pd.Series]:
     """Снимает линейный тренд каждого МО: МНК ``y_it = a_i + b_i·t`` по всем месяцам строки.
 
     ``Y`` — матрица «МО × месяц» (колонки по порядку времени, t = 0, 1, …). Возвращает остатки ``D``
     (та же форма, в каждой строке ортогональны константе и t) и наклоны ``b_i`` (лог-пункты в месяц).
-    Пропуски недопустимы.
+    ``step_at`` — проверка устойчивости: в тренд добавляется сдвиг уровня ``c_i·[t ≥ step_at]`` (например,
+    12 — рубеж 2023 и 2024 годов). Пропуски недопустимы.
     """
     frame = _frame(Y)
     v = frame.to_numpy()
     if np.isnan(v).any():
         raise ValueError("detrend: в рядах есть пропуски")
     t = np.arange(v.shape[1], dtype="float64")
-    X = np.column_stack([np.ones_like(t), t])
+    columns = [np.ones_like(t), t]
+    if step_at is not None:
+        if not 0 < int(step_at) < v.shape[1]:
+            raise ValueError(f"detrend: step_at = {step_at} вне 1…{v.shape[1] - 1}")
+        columns.append((t >= int(step_at)).astype("float64"))
+    X = np.column_stack(columns)
     beta, *_ = np.linalg.lstsq(X, v.T, rcond=None)
     D = v - (X @ beta).T
     return (
@@ -313,6 +356,32 @@ def amplitude(own: Any) -> pd.Series:
     """Размах своего профиля ``A_i = max_m s − min_m s`` (лог-пункты: 0,05 ≈ 5%)."""
     prof = own_profile(own)
     return (prof.max(axis=1) - prof.min(axis=1)).rename("amplitude")
+
+
+def noise_amplitude(own: Any) -> pd.Series:
+    """Размах своего профиля, который дал бы один шум МО (лог-пункты): ``D2_12 · σ_i / √2``.
+
+    ``σ_i`` — шум одного года по неповторяющейся части своего ритма: SD по месяцам ``(o_2023 − o_2024) / √2``
+    (повторяющийся профиль в разности сокращается). Профиль — среднее двух лет, поэтому его шум — σ / √2,
+    а средний размах 12 таких значений — ``D2_12`` их SD. Если ритм от года к году меняется, σ завышена.
+    """
+    frame = _frame(own)
+    blocks = _year_blocks(frame)
+    if blocks.shape[1] != len(YEARS):
+        raise ValueError(f"noise_amplitude: нужно {len(YEARS)} года, получено {blocks.shape[1]}")
+    sigma = ((blocks[:, 0] - blocks[:, 1]) / np.sqrt(2)).std(axis=1, ddof=1)
+    return pd.Series(D2_12 * sigma / np.sqrt(2), index=frame.index, name="noise_amplitude")
+
+
+def shrunk_amplitude(A: Any, r: Any) -> pd.Series:
+    """Размах, сжатый на повторяемость: ``A_i · max(r_i, 0)``; пропуск ``r`` — пропуск.
+
+    Показатель МО для сводки: у МО без повторяющегося профиля (r ≤ 0) — ноль, поэтому размах шума малых МО
+    не выдаётся за сильный ритм.
+    """
+    a = pd.Series(A, dtype="float64")
+    rr = pd.Series(r, dtype="float64").reindex(a.index)
+    return (a * rr.clip(lower=0)).rename("shrunk_amplitude")
 
 
 def common_share(D: Any, own: Any) -> float:
@@ -376,8 +445,9 @@ def seasonal_excess(Y: Any, summer_months: Sequence[int]) -> pd.Series:
     """Летний избыток трат МО по формуле ``EdaData.mo.summer_excess`` (Б.2) для любого ряда ln трат.
 
     Для каждого года — среднее ln за летние месяцы минус среднее ln за остальные месяцы без декабря;
-    среднее двух лет; exp − 1. Для ln ``v_all`` совпадает с ``mo.summer_excess``. Разности линейны, поэтому
-    среднее по годам равно разности на профиле, усреднённом по годам (``own_profile``).
+    среднее двух лет; exp − 1. Для ln ``v_all`` без тренда МО (``detrend``, остатки ``D`` модели) совпадает
+    с ``mo.summer_excess``. Разности линейны, поэтому среднее по годам равно разности на профиле,
+    усреднённом по годам (``own_profile``).
     """
     diff = profile_summer_excess(own_profile(Y), summer_months)
     return np.expm1(diff).rename("summer_excess")
@@ -437,9 +507,12 @@ class RhythmModel:
     A: pd.Series
 
 
-def fit_rhythm(Y: Any) -> RhythmModel:
-    """Модель E3 целиком: тренд МО → общий ритм → свой ритм → повторяемость, профиль, размах."""
-    D, slopes = detrend(Y)
+def fit_rhythm(Y: Any, step_at: int | None = None) -> RhythmModel:
+    """Модель E3 целиком: тренд МО → общий ритм → свой ритм → повторяемость, профиль, размах.
+
+    ``step_at`` — тренд МО со сдвигом уровня (проверка устойчивости, ``detrend``); по умолчанию — без него.
+    """
+    D, slopes = detrend(Y, step_at)
     O, g = own_rhythm(D)  # noqa: E741
     prof = own_profile(O)
     return RhythmModel(
@@ -730,6 +803,13 @@ def group_median(values: pd.Series, mask: pd.Series) -> tuple[float, float]:
     return float(v[m].median()), float(v[~m].median())
 
 
+def _share(flag: pd.Series, mask: pd.Series) -> float:
+    """Доля ``flag`` среди МО с ``mask``; пустая группа — NaN."""
+    f = pd.Series(flag).astype(bool)
+    m = pd.Series(mask).reindex(f.index).fillna(False).astype(bool)
+    return float(f[m].mean()) if m.any() else float("nan")
+
+
 # --- Заголовки с проверкой (В.5) -----------------------------------------------------------------
 
 
@@ -747,29 +827,29 @@ class Headline:
 def headlines(v: Mapping[str, float], north_lat: float) -> dict[str, Headline]:
     """Заголовки F06–F08 из чисел раздела; если вывод перестал быть верным, ``ok`` = False.
 
-    Нужны ключи ``peak_dec_share_<год>``, ``mp_dec``, ``reliable_share``, ``null_reliable_share``,
-    ``north_share_reliable``, ``north_share_all``; пропуск (NaN) — проверка не выполнена.
+    Нужны ключи ``peak_dec_share_<год>``, ``nat_dec``, ``reliable_share``, ``null_reliable_share``,
+    ``reliable_share_north``, ``reliable_share_rest``; пропуск (NaN) — проверка не выполнена.
     """
     peaks = [v[f"peak_dec_share_{y}"] for y in YEARS]
-    lo, hi, mp_dec = min(peaks), max(peaks), v["mp_dec"]
+    lo, hi, nat_dec = min(peaks), max(peaks), v["nat_dec"]
     rel, null = v["reliable_share"], v["null_reliable_share"]
-    north_rel, north_all = v["north_share_reliable"], v["north_share_all"]
+    rel_north, rel_rest = v["reliable_share_north"], v["reliable_share_rest"]
     pct, nb = style.fmt_pct, style.NBSP
     peak_text = pct(lo, 0) if pct(lo, 0) == pct(hi, 0) else style.fmt_range(lo, hi, fmt=pct, decimals=0)
     peak_detail = ", ".join(f"peak_dec_share_{y} = {p:.3f}" for y, p in zip(YEARS, peaks, strict=True))
     return {
         "F06": Headline(
             "F06",
-            f"Декабрь — пик трат у{nb}{peak_text} МО; у{nb}маркетплейсов декабрь выше среднего "
-            f"на {pct(mp_dec, 0)}",
-            bool(lo >= PEAK_DEC_MIN and mp_dec > 0),
-            f"peak_dec_share_<год> ≥ {style.fmt_num(PEAK_DEC_MIN, 1)} в оба года и mp_dec > 0",
-            f"F06: {peak_detail}, mp_dec = {mp_dec:.3f}",
+            f"Декабрь — пик трат у{nb}{peak_text} МО: в{nb}типичном МО {pct(nat_dec, 0, sign=True)} "
+            "к среднему месяцу года",
+            bool(lo >= PEAK_DEC_MIN and nat_dec > 0),
+            f"peak_dec_share_<год> ≥ {style.fmt_num(PEAK_DEC_MIN, 1)} в оба года и nat_dec > 0",
+            f"F06: {peak_detail}, nat_dec = {nat_dec:.3f}",
         ),
         # Один знак после запятой: при целых 1,49% читалось бы как «1%», а отношение к нулю — как 16 раз.
         "F07": Headline(
             "F07",
-            f"Свой устойчивый годовой ритм — у{nb}{pct(rel, 1)} МО, на случайных данных — "
+            f"Свой устойчивый годовой ритм — у{nb}{pct(rel, 1)} МО, на перемешанных месяцах — "
             f"у{nb}{pct(null, 1)}",
             bool(rel > 0 and rel >= RELIABLE_VS_NULL * null),
             f"reliable_share ≥ {style.fmt_num(RELIABLE_VS_NULL)} · null_reliable_share",
@@ -777,11 +857,11 @@ def headlines(v: Mapping[str, float], north_lat: float) -> dict[str, Headline]:
         ),
         "F08": Headline(
             "F08",
-            f"Свой ритм чаще на Севере: {pct(north_rel, 0)} таких МО севернее {style.fmt_num(north_lat)}-й "
-            f"параллели, во всей выборке — {pct(north_all, 0)}",
-            bool(north_rel > 0 and north_rel >= NORTH_RATIO_MIN * north_all),
-            f"north_share_reliable ≥ {style.fmt_num(NORTH_RATIO_MIN)} · north_share_all",
-            f"F08: north_share_reliable = {north_rel:.4f}, north_share_all = {north_all:.4f}",
+            f"Свой устойчивый ритм — у{nb}{pct(rel_north, 0)} МО севернее {style.fmt_num(north_lat)}-й "
+            f"параллели и{nb}у{nb}{pct(rel_rest, 0)} остальных",
+            bool(rel_north > 0 and rel_north >= NORTH_RATIO_MIN * rel_rest),
+            f"reliable_share_north ≥ {style.fmt_num(NORTH_RATIO_MIN)} · reliable_share_rest",
+            f"F08: reliable_share_north = {rel_north:.4f}, reliable_share_rest = {rel_rest:.4f}",
         ),
     }
 
@@ -807,8 +887,23 @@ def december_label_y(part: pd.DataFrame, span: int = LABEL_SPAN_MONTHS) -> tuple
     return float(last["q75"].max() if up else last["q25"].min()) - 1, up
 
 
-def plot_national_rhythm(profile: pd.DataFrame, categories: Sequence[str]):
-    """F06: малые множители с общей шкалой — медиана «месяц / среднее года» − 1 и межквартильная полоса."""
+def december_label(dec: float, over_trend: float | None = None) -> str:
+    """Подпись декабря на панели F06: «дек +21%»; с ``over_trend`` — «дек +53%, над трендом +24%»."""
+    text = f"дек {style.fmt_pct(dec, 0, sign=True)}"
+    if over_trend is not None and np.isfinite(over_trend):
+        text += f", над трендом {style.fmt_pct(over_trend, 0, sign=True)}"
+    return text
+
+
+def plot_national_rhythm(
+    profile: pd.DataFrame, categories: Sequence[str], over_trend: Mapping[str, float] | None = None
+):
+    """F06: малые множители с общей шкалой — медиана «месяц / среднее года» − 1 и межквартильная полоса.
+
+    ``over_trend`` — категории, у которых к подписи декабря добавляется декабрь над трендом МО (там, где рост
+    внутри года заметно завышает декабрь, — у маркетплейсов).
+    """
+    over_trend = dict(over_trend or {})
     ncols = (len(categories) + 1) // 2
     fig, axes = style.new_figure("tall", 2, ncols, sharex=True, sharey=True)
     axes = np.atleast_1d(axes).ravel()
@@ -820,9 +915,11 @@ def plot_national_rhythm(profile: pd.DataFrame, categories: Sequence[str]):
         ax.plot(months, part["median"] - 1, color=color)
         ax.axhline(0, color=style.TEXT2, linewidth=0.6)
         dec = float(part.set_index("month").at[DECEMBER, "median"]) - 1
-        y, up = december_label_y(part)
+        label = december_label(dec, over_trend.get(c))
+        span = LABEL_SPAN_MONTHS if c not in over_trend else LABEL_SPAN_LONG
+        y, up = december_label_y(part, span)
         ax.annotate(
-            f"дек {style.fmt_pct(dec, 0, sign=True)}",
+            label,
             (DECEMBER, y),
             xytext=(0, LABEL_GAP_PT if up else -LABEL_GAP_PT),
             textcoords="offset points",
@@ -890,7 +987,7 @@ def plot_own_rhythm(
     )
     peak = int(np.argmax(hist["share_null"].to_numpy()))
     ax.annotate(
-        "контур — месяцы 2024 года перемешаны",
+        f"контур — {NULL_TEXT}",
         ((left[peak] + right[peak]) / 2, float(hist["share_null"].iloc[peak])),
         xytext=(-12, 14),
         textcoords="offset points",
@@ -900,8 +997,8 @@ def plot_own_rhythm(
         color=style.TEXT2,
         arrowprops={"arrowstyle": "-", "color": style.TEXT2, "linewidth": 0.6},
     )
-    ax.set_xlabel("повторяемость своего профиля 2023 и 2024 годов, r")
-    ax.set_ylabel("доля МО")
+    ax.set_xlabel("Повторяемость своего профиля 2023 и 2024 годов, r")
+    ax.set_ylabel("Доля МО")
     ax.xaxis.set_major_locator(FixedLocator(np.round(np.arange(-1.0, 1.0 + R_TICK / 2, R_TICK), 1)))
     ax.xaxis.set_major_formatter(style.ru_formatter("num", 1))
     ax.yaxis.set_major_formatter(_pct_formatter(0, sign=False))
@@ -1018,12 +1115,43 @@ def plot_rhythm_map(classes: MapClasses, geo, params: SeasonParams, cfg: Config)
 # --- Текст раздела -------------------------------------------------------------------------------
 
 
-def months_text(months: Sequence[int]) -> str:
-    """«июнь–август» для подряд идущих месяцев, иначе перечисление через запятую."""
+def months_text(months: Sequence[int], prepositional: bool = False) -> str:
+    """«июнь–август» для подряд идущих месяцев, иначе перечисление через запятую.
+
+    ``prepositional`` — предложный падеж для «в …»: «январе–марте»."""
+    names = MONTHS_PREPOSITIONAL if prepositional else MONTHS_FULL
     ms = sorted(int(m) for m in months)
     if len(ms) > 1 and ms == list(range(ms[0], ms[-1] + 1)):
-        return f"{MONTHS_FULL[ms[0] - 1]}{style.EN_DASH}{MONTHS_FULL[ms[-1] - 1]}"
-    return ", ".join(MONTHS_FULL[m - 1] for m in ms)
+        return f"{names[ms[0] - 1]}{style.EN_DASH}{names[ms[-1] - 1]}"
+    return ", ".join(names[m - 1] for m in ms)
+
+
+def _except_text(exceptions: Sequence[str], dev: Mapping[str, float]) -> str:
+    """«, кроме общепита (−3%)» — категории-исключения в родительном падеже с отклонением; пусто — «»."""
+    if not exceptions:
+        return ""
+    items = [f"{CATEGORY_GENITIVE.get(c, c)} ({style.fmt_pct(dev[c], 0, sign=True)})" for c in exceptions]
+    return ", кроме " + join_names(items)
+
+
+def national_alt(profile: pd.DataFrame, categories: Sequence[str], v: Mapping[str, Any]) -> str:
+    """Альт-текст F06 из данных: в каких категориях январь ниже среднего года, а декабрь выше, и исключения.
+
+    ``profile`` — ``national_profile`` (медиана «месяц / среднее года»); ``v`` — числа раздела (``nat_dec``,
+    ``nat_jan``, ``mp_dec``, ``mp_dec_detrended``).
+    """
+    dev = profile.set_index(["category", "month"])["median"] - 1
+    jan = {c: float(dev[(c, JANUARY)]) for c in categories}
+    dec = {c: float(dev[(c, DECEMBER)]) for c in categories}
+    jan_exc = [c for c in categories if not jan[c] < 0]
+    dec_exc = [c for c in categories if not dec[c] > 0]
+    pct = style.fmt_pct
+    return (
+        f"Январь ниже среднего года во всех категориях{_except_text(jan_exc, jan)}, декабрь выше во всех"
+        f"{_except_text(dec_exc, dec)}: все категории {pct(v['nat_dec'], 0, sign=True)} в декабре "
+        f"и {pct(v['nat_jan'], 0, sign=True)} в январе, маркетплейсы в декабре "
+        f"{pct(v['mp_dec'], 0, sign=True)} (над трендом МО {pct(v['mp_dec_detrended'], 0, sign=True)})"
+    )
 
 
 def _nbsp(text: str) -> str:
@@ -1038,23 +1166,30 @@ SUMMARY_PARAGRAPHS: tuple[str, ...] = (
     "{{e3.common_share_mo_median}}). В~типичном МО траты отклоняются от~среднего своего года "
     "на~{{e3.nat_jan}} в~январе и~на~{{e3.nat_dec}} в~декабре; декабрь оказывается месяцем с~самыми "
     "большими тратами у~{{e3.peak_dec_share_2023}} МО в~2023 году и~у~{{e3.peak_dec_share_2024}} в~2024-м. "
-    "Часть декабрьского "
-    "превышения даёт рост трат внутри года: над собственным линейным трендом МО декабрь выше "
-    "на~{{e3.nat_dec_detrended}}, а~у~маркетплейсов на~{{e3.mp_dec_detrended}} при {{e3.mp_dec}} к~среднему "
-    "года. У~общепита есть свой летний подъём: в~августе траты отклоняются от~среднего года "
-    "на~{{e3.cafe_aug}}.",
+    "Часть декабрьского превышения даёт рост трат внутри года: над собственным линейным трендом МО декабрь "
+    "отклоняется на~{{e3.nat_dec_detrended}}, у~маркетплейсов~— на~{{e3.mp_dec_detrended}} при "
+    "{{e3.mp_dec}} к~среднему года. У~общепита есть свой летний подъём: в~августе траты отклоняются "
+    "от~среднего года на~{{e3.cafe_aug}}.",
     "**Свой ритм.** Устойчивым своим ритмом назван профиль года, который остаётся после вычета общего ритма "
     "и~повторяется в~оба года: корреляция r профилей 2023 и~2024 годов больше {{e3.reliable_r}}, размах "
     "больше {{e3.reliable_amplitude}}. Такой ритм есть у~{{e3.reliable_n}} МО из~{{e3.n_full}} "
     "({{e3.reliable_share}}); на~данных с~перемешанными месяцами 2024 года его находят "
     "у~{{e3.null_reliable_share}}. Сигнал не~случаен, но~у~большинства МО своего ритма нет (медиана r "
-    "{{e3.repro_median}}).",
-    "**Где свой ритм.** Среди МО с~устойчивым ритмом {{e3.north_share_reliable}} лежат севернее "
-    "{{e3.north_lat}}-й параллели, во~всей выборке таких МО {{e3.north_share_all}}. Больше всего МО "
-    "с~устойчивым ритмом в~регионах: {{e3.reliable_top_regions}}. У~северных из~них ритм летний: пик своего "
-    "профиля летом ({{e3.summer_months}}) у~{{e3.summer_peak_share_north}}, у~остальных только "
+    "{{e3.repro_median}}). Критерий держится в~основном на~повторяемости r, а~не~на~размахе: у~типичного МО "
+    "размах своего профиля {{e3.amp_median}} при размахе чистого шума {{e3.noise_amp_median}}, связь размаха "
+    "с~населением {{e3.amp_pop_rel}} (ρ Спирмена {{e3.rho_amp_pop}}~— у~малых МО размах раздувает шум), "
+    "и~порог размаха отсекает лишь {{e3.amp_cut_n}} МО с~r > {{e3.reliable_r}}. Поэтому в~сводку "
+    "(таблица T13) идёт размах, умноженный на~r (при r ≤ 0~— ноль): его связь с~населением "
+    "{{e3.shrunk_pop_rel}} ({{e3.rho_amp_shrunk_pop}}).",
+    "**Где свой ритм.** На~Севере (севернее {{e3.north_lat}}-й параллели, без внутригородских территорий "
+    "Петербурга) устойчивый свой ритм есть у~{{e3.reliable_share_north}} МО, у~остальных~— "
+    "у~{{e3.reliable_share_rest}}. Среди МО с~устойчивым ритмом северных {{e3.north_share_reliable}}, "
+    "во~всей выборке~— {{e3.north_share_all}}. Больше всего МО с~устойчивым ритмом в~регионах: "
+    "{{e3.reliable_top_regions}}. У~северных МО с~устойчивым ритмом он летний: пик своего профиля летом "
+    "({{e3.summer_months}}) у~{{e3.summer_peak_share_north}}, у~остальных только "
     "у~{{e3.summer_peak_share_south}}. Самые сильные профили: {{e3.top_names}} (таблица T05).",
-    "Летний избыток трат ({{e3.summer_months}} к~остальным месяцам без декабря) у~типичного северного МО "
+    "Летний избыток трат над трендом МО ({{e3.summer_months}} к~остальным месяцам без декабря) у~типичного "
+    "северного МО "
     "{{e3.summer_north}}, у~остальных {{e3.summer_south}}; у~общепита {{e3.cafe_summer_north}} против "
     "{{e3.cafe_summer_south}}. Связь летнего избытка с~широтой {{e3.summer_lat_rel}} (ρ Спирмена "
     "{{e3.rho_summer_lat}}), с~долей добычи в~занятости {{e3.summer_mining_rel}} ({{e3.rho_summer_mining}}), "
@@ -1065,8 +1200,10 @@ SUMMARY_PARAGRAPHS: tuple[str, ...] = (
     "Траты приезжих в~курортных МО в~этих данных не~видны; северный летний подъём, вероятно, отражает траты "
     "самих жителей в~сезон отпусков (гипотеза).",
     "**Что это значит для сюжета.** Годовой ритм (сюжет С1) {{e3.story_role}}: устойчивый свой ритм есть "
-    "у~{{e3.reliable_share}} МО при пороге критерия отказа {{e3.s1_reliable_min}}. Для этапа 2 корреляции "
-    "и~DTW рядов нужно считать по~своему ритму. У~сырых ln-рядов медиана корреляции случайной пары МО "
+    "у~{{e3.reliable_share}} МО при пороге критерия отказа {{e3.s1_reliable_min}}. На~Севере такой ритм есть "
+    "у~{{e3.reliable_share_north}} МО~— {{e3.north_role}}. Для этапа 2 корреляции "
+    "и~DTW рядов нужно считать по~своему ритму. У~рядов логарифма трат без обработки медиана корреляции "
+    "случайной пары МО "
     "{{e3.pair_raw_q50}}: общий рост и~декабрь делают все МО «похожими». У~своего ритма 90-й перцентиль "
     "корреляции {{e3.pair_own_q90}} при {{e3.pair_null_q90}} на~перемешанных месяцах (таблица T06). "
     "Помесячные ряды малых МО шумят: в~самой малой из~{{e3.noise_groups}} равных групп МО по~населению шум "
@@ -1079,16 +1216,25 @@ SUMMARY_MD = _nbsp("\n\n".join(SUMMARY_PARAGRAPHS) + "\n")
 CAVEATS: tuple[str, ...] = tuple(
     _nbsp(text)
     for text in (
-        "Два годовых цикла: повторяемость своего профиля опирается на~две точки на~месяц, поэтому порог "
-        "надёжности сравнивается с~перестановочным нулём; STL и~X-13 на~таких рядах ненадёжны.",
+        "Два годовых цикла: повторяемость своего профиля опирается на~две точки на~месяц, поэтому долю МО "
+        "с~устойчивым ритмом сравниваем с~той~же долей на~перемешанных месяцах 2024 года; стандартные методы "
+        "выделения сезонности (STL, X-13) на~двух годах ненадёжны.",
         "Профиль рисунка 6 («месяц / среднее своего года») включает рост трат внутри года, поэтому декабрь "
-        "в~нём выше, чем над трендом МО; своему ритму и~числам «над трендом» этот рост не~мешает.",
+        "в~нём выше, чем над трендом МО (у~маркетплейсов {{e3.mp_dec}} против {{e3.mp_dec_detrended}}); "
+        "своему ритму этот рост не~мешает.",
+        "Сдвиг уровня ряда на~рубеже 2023 и~2024 годов после снятия линейного тренда даёт в~оба года "
+        "одинаковую «пилу» с~пиком в~январе. Если добавить такой сдвиг в~тренд МО, устойчивый ритм остаётся "
+        "у~{{e3.reliable_share_step}} МО (на~перемешанных месяцах~— {{e3.null_reliable_share_step}}). "
+        "Из~{{e3.winter_peak_n}} МО вне Севера с~устойчивым ритмом и~пиком своего профиля "
+        f"в~{months_text(WINTER_MONTHS, prepositional=True)} его теряют "
+        "{{e3.winter_step_lost}}: их «ритм» может быть сдвигом уровня, а~не~годовым циклом. Северный слой "
+        "от~этого почти не~зависит: устойчивый ритм у~{{e3.reliable_share_north}} северных МО без сдвига "
+        "и~у~{{e3.reliable_share_north_step}} со~сдвигом.",
         "Траты привязаны к~жителям МО: траты приезжих в~курортном МО не~видны, и~курортный тип по~этим "
         "данным не~выделить; траты жителей вне своего МО (поездки, онлайн) по~смыслу входят, но~как модель "
         "СберИндекса их привязывает, не~раскрыто. Объяснение северного лета отпусками остаётся гипотезой.",
-        "Север определён по~точке внутри полигона МО (как тип «север» в~разделе 5), поэтому в~него попадают "
-        "и~северные внутригородские территории Петербурга; их число и~влияние на~доли названы "
-        "в~пояснениях фактов.",
+        "Север~— МО севернее {{e3.north_lat}}° с.~ш. по~точке внутри полигона, без внутригородских "
+        "территорий Петербурга (севернее этой широты их {{e3.n_north_inner}}), как в~разделах 2 и~5.",
         "Курортные регионы юга (Краснодарский край, Крым, Севастополь) выпали из~данных целиком; выводы "
         "сделаны о~МО с~полным рядом за~24 месяца.",
         "Суммы номинальные; линейный тренд МО снимается до~расчёта ритма, поэтому общая инфляция и~рост МО "
@@ -1097,7 +1243,9 @@ CAVEATS: tuple[str, ...] = tuple(
 )
 
 INDICATOR_LABELS = {
-    "own_amplitude": "Размах своего годового профиля, лог-пункты",
+    "own_amplitude": (
+        "Размах своего годового профиля × повторяемость r (при r ≤ 0 — ноль), разность логарифмов"
+    ),
     "own_repro_r": "Повторяемость своего профиля 2023 и 2024 годов, r",
     "own_reliable": "Устойчивый свой ритм (1 — да)",
 }
@@ -1111,13 +1259,15 @@ class RhythmResults:
     """Все вычисления раздела до рисования: модели, нуль, профиль страны, пары, шум, таблица МО.
 
     ``top`` — все МО с устойчивым своим ритмом по убыванию размаха, с подсказками (T05: в отчёте первые
-    ``top_n``, в CSV — все); ``values`` — числа для фактов и проверок текста.
+    ``top_n``, в CSV — все); ``shrunk`` — размах, сжатый на повторяемость (показатель для сводки);
+    ``values`` — числа для фактов и проверок текста.
     """
 
     params: SeasonParams
     ids: pd.Index
     models: dict[str, RhythmModel]
     reliable: pd.Series
+    shrunk: pd.Series
     null_r: np.ndarray
     profile: pd.DataFrame
     peaks: pd.Series
@@ -1155,6 +1305,14 @@ def compute(
     ).mean(axis=1)
     pairs = pair_correlations({"raw": main.Y, "detrended": main.D, "own": main.O}, rng, params.pair_sample)
     pair_tab = pair_summary(pairs, SERIES_KINDS).set_index("series")
+    # Проверка устойчивости: тренд МО со сдвигом уровня на рубеже лет (нуль — после пар, чтобы не менять их).
+    step = fit_rhythm(main.Y, step_at=MONTHS_IN_YEAR)
+    reliable_step = pd.Series(
+        is_reliable(step.r, step.A, params.reliable_r, params.reliable_amplitude), index=ids
+    )
+    null_step = null_reliable_share(
+        step.O, step.A, rng, params.null_repeats, params.reliable_r, params.reliable_amplitude
+    )
 
     profile_cats = tuple(dict.fromkeys((*params.profile_categories, *REQUIRED_CATEGORIES)))
     profile = national_profile(wide, profile_cats)
@@ -1164,12 +1322,16 @@ def compute(
         {c: models[c].O for c in params.noise_categories}, base["weight"], params.noise_groups
     )
 
-    north = base["point_lat"].astype("float64") >= params.north_lat
+    # Север — как в разделах E2 и E5: широта точки ≥ north_lat, без внутригородских территорий.
     inner = base["is_inner_city"].astype("boolean").fillna(False).astype(bool)
-    summer_all = seasonal_excess(main.Y, params.summer_months)
+    above = base["point_lat"].astype("float64") >= params.north_lat
+    north = above & ~inner
+    # Летний избыток — по ряду без тренда МО, как mo.summer_excess (EdaData): лето в году позже остальных
+    # месяцев, и без снятия тренда избыток рос бы вместе с ростом трат МО.
+    summer_all = seasonal_excess(main.D, params.summer_months)
     s_north, s_south = group_median(summer_all, north)
-    c_north, c_south = group_median(seasonal_excess(models["cafe"].Y, params.summer_months), north)
-    by_year = summer_excess_by_year(main.Y, params.summer_months)
+    c_north, c_south = group_median(seasonal_excess(models["cafe"].D, params.summer_months), north)
+    by_year = summer_excess_by_year(main.D, params.summer_months)
     rho, rho_within, rho_years = {}, {}, {}
     for key, col in RHO_CONTEXT.items():
         x = base[col].astype("float64")
@@ -1177,6 +1339,7 @@ def compute(
         rho_within[key] = stats.spearman_within(base["summer_excess"], x, base["region_name"])
         rho_years[key] = {y: stats.spearman(by_year[y], x)[0] for y in YEARS}
     table = rhythm_table(main, reliable, mo, params.summer_months)
+    table["north"] = table["territory_id"].map(north).fillna(False).astype(bool)
     top = table.loc[table["reliable"]].sort_values("amplitude_log", ascending=False, kind="mergesort").copy()
     top["hint"] = (
         hints(
@@ -1193,6 +1356,12 @@ def compute(
     peak_north, peak_south = peak_shares(
         table.set_index("territory_id").loc[rel_mask, "peak_month"], params.summer_months, north[rel_mask]
     )
+    # Пик своего профиля в январе–марте у МО вне Севера с устойчивым ритмом: кто теряет его со сдвигом уровня.
+    winter = main.profile.idxmax(axis=1).astype(int).isin(WINTER_MONTHS) & reliable & ~north
+    weight = base["weight"].astype("float64")
+    shrunk = shrunk_amplitude(main.A, main.r)
+    rho_amp = stats.spearman(main.A, weight)[0]
+    rho_shrunk = stats.spearman(shrunk, weight)[0]
 
     values: dict[str, Any] = {
         "n_full": len(ids),
@@ -1209,11 +1378,23 @@ def compute(
         "north_share_reliable": float(north[rel_mask].mean()) if rel_mask.any() else float("nan"),
         "north_share_all": float(north.mean()),
         "reliable_north_n": int((north & reliable).sum()),
+        "reliable_share_north": _share(reliable, north),
+        "reliable_share_rest": _share(reliable, ~north),
         "summer_peak_share_north": peak_north,
         "summer_peak_share_south": peak_south,
-        "n_north_inner": int((north & inner).sum()),
-        "north_share_all_no_inner": float((north & ~inner).mean()),
-        "summer_north_no_inner": group_median(summer_all, north & ~inner)[0],
+        "n_north_inner": int((above & inner).sum()),
+        "amp_cut_n": int(((main.r > params.reliable_r) & ~reliable).sum()),
+        "amp_median": float(np.expm1(main.A.median())),
+        "noise_amp_median": float(np.expm1(noise_amplitude(main.O).median())),
+        "rho_amp_pop": rho_amp,
+        "rho_amp_pop_reliable": stats.spearman(main.A[reliable], weight[reliable])[0],
+        "rho_amp_shrunk_pop": rho_shrunk,
+        "reliable_share_step": float(reliable_step.mean()),
+        "reliable_share_north_step": _share(reliable_step, north),
+        "reliable_share_rest_step": _share(reliable_step, ~north),
+        "null_reliable_share_step": null_step,
+        "winter_peak_n": int(winter.sum()),
+        "winter_step_lost": int((winter & ~reliable_step).sum()),
         "reliable_top_regions": top_counts(base.loc[rel_mask, "region_name"], params.examples),
         "top_names": join_names(top["name"].head(params.examples).astype(str).tolist()),
         "nat_jan": float(nat.loc[("all", JANUARY)]),
@@ -1250,6 +1431,7 @@ def compute(
         ids=ids,
         models=models,
         reliable=reliable,
+        shrunk=shrunk,
         null_r=null_r,
         profile=profile,
         peaks=peaks,
@@ -1293,11 +1475,33 @@ def within_words(
     )
 
 
+def amplitude_size_text(rho: float) -> str:
+    """Связь размаха своего профиля с населением словами для названия T05 (по знаку и силе ρ)."""
+    num = style.fmt_rho(rho)
+    if not np.isfinite(rho):
+        return "Связь размаха с населением не оценена"
+    if rho <= -WEAK_RHO:
+        return f"Размах больше у малых МО (ρ Спирмена с населением среди них {num}): часть его — шум"
+    if rho >= WEAK_RHO:
+        return f"Размах больше у крупных МО (ρ Спирмена с населением среди них {num})"
+    return f"Размах почти не связан с населением (ρ Спирмена среди них {num})"
+
+
 def story_role(v: Mapping[str, Any], s1_min: float) -> str:
     """Роль сюжета С1 по его критериям отказа (Б.5): главная ось или слой."""
     share, null = v["reliable_share"], v["null_reliable_share"]
     passes = share >= s1_min and share >= RELIABLE_VS_NULL * null
     return _nbsp("может стать главной осью типологии" if passes else "годится как слой, а~не~как главная ось")
+
+
+def north_role(v: Mapping[str, Any], s1_min: float) -> str:
+    """Что доля МО с устойчивым ритмом на Севере значит для С1 — словами по числам (порог критерия отказа)."""
+    north, share = v["reliable_share_north"], v["reliable_share"]
+    if not north >= s1_min:
+        return _nbsp("и~это тоже ниже порога")
+    if share >= s1_min:
+        return _nbsp("это тоже выше порога")
+    return _nbsp("это выше порога: С1~— сильный слой для Севера, а~не~для всей страны")
 
 
 def text_checks(v: Mapping[str, Any]) -> list[tuple[str, bool, str]]:
@@ -1339,12 +1543,24 @@ def text_checks(v: Mapping[str, Any]) -> list[tuple[str, bool, str]]:
             f"rho_summer_agri = {v['rho']['agri'][0]:.3f}",
         ),
         (
-            "сырые ln-ряды всех МО «похожи» сильнее, чем свой ритм на нуле",
+            "критерий держится в основном на r: порог размаха отсекает меньше половины МО с r выше порога",
+            bool(v["amp_cut_n"] < 0.5 * v["share_r06"] * v["n_full"]),
+            f"amp_cut_n = {v['amp_cut_n']}, share_r06 · n_full = {v['share_r06'] * v['n_full']:.1f}",
+        ),
+        (
+            "северный слой почти не зависит от сдвига уровня на рубеже лет",
+            bool(v["reliable_share_north_step"] >= STEP_KEEP_MIN * v["reliable_share_north"]),
+            f"reliable_share_north_step = {v['reliable_share_north_step']:.3f}, "
+            f"reliable_share_north = {v['reliable_share_north']:.3f}",
+        ),
+        (
+            "ряды логарифма трат без обработки у всех МО «похожи» сильнее, чем свой ритм на перемешанных "
+            "месяцах",
             bool(v["pair_raw_q50"] > v["pair_null_q90"]),
             f"pair_raw_q50 = {v['pair_raw_q50']:.3f}, pair_null_q90 = {v['pair_null_q90']:.3f}",
         ),
         (
-            "у своего ритма хвост корреляций пар выше, чем на нуле",
+            "у своего ритма хвост корреляций пар выше, чем на перемешанных месяцах",
             bool(v["pair_own_q90"] > v["pair_null_q90"]),
             f"pair_own_q90 = {v['pair_own_q90']:.3f}, pair_null_q90 = {v['pair_null_q90']:.3f}",
         ),
@@ -1365,24 +1581,31 @@ def fact_rows(res: RhythmResults) -> list[tuple[str, Any, str, str]]:
     p, v = res.params, res.values
     pct, rho_t = style.fmt_pct, style.fmt_rho
     lat = style.fmt_num(p.north_lat)
-    north = f"севернее {lat}° с. ш. (eda.north_lat; точка внутри полигона МО)"
-    inner = (
-        f"из них {v['n_north_inner']} — внутригородские территории Петербурга (точка внутри полигона "
-        f"севернее {lat}°)"
+    north = (
+        f"севернее {lat}° с. ш. (eda.north_lat; точка внутри полигона МО) без внутригородских территорий, "
+        "как в разделах E2 и E5"
     )
+    rest = "остальных МО с полным рядом (южнее, а также все внутригородские территории)"
     prof = "медиана по МО отношения «месяц / среднее своего года» − 1, среднее двух лет"
     detrended = "exp(общего ритма g декабря, среднее двух лет) − 1"
     summer = (
         "медиана по МО с полным рядом летнего избытка mo.summer_excess (формула Б.2). Ориентиры spec_final "
         "(+10,7 и +5,7%, общепит +32,7 и +20,1%) — избыток медианного профиля группы, Север — по центру МО "
-        "из справочника (центра нет у внутригородских территорий); на панели так они воспроизводятся точно. "
-        "Здесь Север — по точке внутри полигона, как у раздела E5, и типичное МО — медиана по МО"
+        "из справочника (центра нет у внутригородских территорий), тренд МО не снят; на панели так они "
+        "воспроизводятся точно. Здесь типичное МО — медиана по МО, и летний избыток считается над линейным "
+        "трендом МО, как mo.summer_excess: лето в году позже остальных месяцев, и без снятия тренда избыток "
+        "рос бы вместе с ростом трат МО"
     )
     null_note = (
         f"перестановка месяцев 2024 года внутри МО, размах наблюдаемый; среднее по {p.null_repeats} "
         f"перестановкам, стандартная ошибка {pct(v['null_se'], 2)}. Ориентир 1,4% (другой генератор, "
         "20 перестановок) в пределах двух ошибок"
     )
+    step = (
+        "тренд МО со сдвигом уровня на рубеже 2023 и 2024 годов (y = a + b·t + c·[t ≥ 12]), дальше — та же "
+        "модель и те же пороги"
+    )
+    amp = "размах своего профиля (разность логарифмов самого высокого и самого низкого месяца)"
     mp_years = ", ".join(f"{y} — {pct(x, 1, sign=True)}" for y, x in v["mp_dec_years"].items())
     rows: list[tuple[str, Any, str, str]] = [
         ("n_full", v["n_full"], "int", "МО с полным рядом 24 месяца — выборка модели E3"),
@@ -1402,12 +1625,74 @@ def fact_rows(res: RhythmResults) -> list[tuple[str, Any, str, str]]:
             "pct",
             "доля МО с устойчивым своим ритмом, МО с полным рядом",
         ),
-        ("null_reliable_share", v["null_reliable_share"], "pct", f"то же на нуле: {null_note}"),
+        (
+            "null_reliable_share",
+            v["null_reliable_share"],
+            "pct",
+            f"то же на перемешанных месяцах (нуль): {null_note}",
+        ),
         ("reliable_r", p.reliable_r, "num1", "порог повторяемости r (eda.season.reliable_r)"),
-        ("reliable_amplitude", p.reliable_amplitude, "pct", "порог размаха, лог-пункты: 0,05 ≈ 5%"),
+        (
+            "reliable_amplitude",
+            pct(p.reliable_amplitude, 0),
+            "str",
+            f"порог размаха своего профиля, разность логарифмов (eda.season.reliable_amplitude = "
+            f"{p.reliable_amplitude}); в тексте — в процентах без знаков после запятой",
+        ),
+        (
+            "amp_cut_n",
+            v["amp_cut_n"],
+            "int",
+            f"МО с r > {style.fmt_num(p.reliable_r, 1)}, которых отсекает только порог размаха: критерий "
+            "держится в основном на r. На реальных данных порог относительно шума МО (размах больше размаха "
+            "чистого шума, см. noise_amp_median) не отсекает ни одного МО с r > 0,6: при такой повторяемости "
+            "размах выше шума",
+        ),
+        (
+            "amp_median",
+            v["amp_median"],
+            "pct",
+            f"медиана по МО: {amp}; exp(размаха) − 1",
+        ),
+        (
+            "noise_amp_median",
+            v["noise_amp_median"],
+            "pct",
+            f"медиана по МО размаха своего профиля из чистого шума: d2(12) · σ / √2, d2 = {D2_12}, σ — SD по "
+            "месяцам неповторяющейся части (o 2023 − o 2024) / √2; exp − 1. По SD всего своего ритма "
+            "(с повторяющейся частью) шум завышен",
+        ),
+        (
+            "rho_amp_pop",
+            v["rho_amp_pop"],
+            "rho",
+            f"ρ Спирмена: {amp} с населением (mo.weight), все МО с полным рядом; у малых МО размах "
+            "раздувает шум",
+        ),
+        (
+            "rho_amp_pop_reliable",
+            v["rho_amp_pop_reliable"],
+            "rho",
+            "то же среди МО с устойчивым своим ритмом (T05: самые сильные профили — у малых северных МО)",
+        ),
+        (
+            "rho_amp_shrunk_pop",
+            v["rho_amp_shrunk_pop"],
+            "rho",
+            "ρ Спирмена размаха, сжатого на повторяемость (размах × max(r, 0)), с населением — показатель "
+            "own_amplitude для сводки (T13)",
+        ),
+        ("amp_pop_rel", relation_text(v["rho_amp_pop"]), "str", "сила и знак rho_amp_pop"),
+        ("shrunk_pop_rel", relation_text(v["rho_amp_shrunk_pop"]), "str", "сила и знак rho_amp_shrunk_pop"),
         ("north_lat", p.north_lat, "int", "граница Севера, градусы северной широты (eda.north_lat)"),
-        ("n_north", v["n_north"], "int", f"МО с полным рядом {north}; {inner}"),
-        ("n_north_inner", v["n_north_inner"], "int", f"внутригородские территории среди МО {north}"),
+        ("n_north", v["n_north"], "int", f"МО с полным рядом {north}"),
+        (
+            "n_north_inner",
+            v["n_north_inner"],
+            "int",
+            f"внутригородские территории с полным рядом, чья точка внутри полигона севернее {lat}° (районы "
+            "Петербурга); в Север не входят",
+        ),
         (
             "north_share_reliable",
             v["north_share_reliable"],
@@ -1418,11 +1703,50 @@ def fact_rows(res: RhythmResults) -> list[tuple[str, Any, str, str]]:
             "north_share_all",
             v["north_share_all"],
             "pct",
-            f"доля МО {north} среди МО с полным рядом; {inner}. Если их не считать северными — "
-            f"{pct(v['north_share_all_no_inner'], 1)}; ориентир 8,4% посчитан по центру МО из справочника, "
-            "у внутригородских территорий центра нет",
+            f"доля МО {north} среди МО с полным рядом; ориентир 8,4% посчитан по центру МО из справочника",
         ),
         ("reliable_north_n", v["reliable_north_n"], "int", f"МО с устойчивым своим ритмом {north}"),
+        (
+            "reliable_share_north",
+            v["reliable_share_north"],
+            "pct",
+            f"доля МО с устойчивым своим ритмом среди МО {north}",
+        ),
+        ("reliable_share_rest", v["reliable_share_rest"], "pct", f"то же среди {rest}"),
+        ("north_role", north_role(v, p.s1_reliable_min), "str", "reliable_share_north и порог критерия С1"),
+        (
+            "reliable_share_step",
+            v["reliable_share_step"],
+            "pct",
+            f"доля МО с устойчивым своим ритмом, проверка устойчивости: {step}",
+        ),
+        (
+            "reliable_share_north_step",
+            v["reliable_share_north_step"],
+            "pct",
+            f"то же среди МО {north}",
+        ),
+        ("reliable_share_rest_step", v["reliable_share_rest_step"], "pct", f"то же среди {rest}"),
+        (
+            "null_reliable_share_step",
+            v["null_reliable_share_step"],
+            "pct",
+            f"доля «надёжных» на перемешанных месяцах при тренде со сдвигом уровня; {p.null_repeats} "
+            "перестановок",
+        ),
+        (
+            "winter_peak_n",
+            v["winter_peak_n"],
+            "int",
+            "МО вне Севера с устойчивым своим ритмом и пиком своего профиля "
+            f"в {months_text(WINTER_MONTHS, prepositional=True)}",
+        ),
+        (
+            "winter_step_lost",
+            v["winter_step_lost"],
+            "int",
+            f"из них теряют устойчивый ритм при тренде со сдвигом уровня ({step})",
+        ),
         (
             "summer_peak_share_north",
             v["summer_peak_share_north"],
@@ -1434,7 +1758,7 @@ def fact_rows(res: RhythmResults) -> list[tuple[str, Any, str, str]]:
             "summer_peak_share_south",
             v["summer_peak_share_south"],
             "pct",
-            f"то же среди остальных МО с устойчивым ритмом (южнее {lat}°)",
+            "то же среди остальных МО с устойчивым ритмом",
         ),
         (
             "reliable_top_regions",
@@ -1463,7 +1787,7 @@ def fact_rows(res: RhythmResults) -> list[tuple[str, Any, str, str]]:
         (
             "nat_dec_detrended",
             v["nat_dec_detrended"],
-            "pct",
+            "pct_signed",
             f"декабрь над линейным трендом МО, все категории: {detrended}",
         ),
         (
@@ -1478,30 +1802,29 @@ def fact_rows(res: RhythmResults) -> list[tuple[str, Any, str, str]]:
         (
             "mp_dec_detrended",
             v["mp_dec_detrended"],
-            "pct",
+            "pct_signed",
             f"декабрь над линейным трендом МО, маркетплейсы: {detrended}",
         ),
         ("cafe_aug", v["cafe_aug"], "pct_signed", f"август, общественное питание: {prof}"),
         ("summer_months", months_text(p.summer_months), "str", "летние месяцы (eda.summer_months)"),
-        ("s1_reliable_min", p.s1_reliable_min, "pct", "порог критерия отказа С1 (eda.rejection)"),
-        ("story_role", story_role(v, p.s1_reliable_min), "str", "роль С1 по критериям отказа Б.5"),
         (
-            "summer_north",
-            v["summer_north"],
-            "pct_signed",
-            f"{summer}; все категории, МО {north}. Без внутригородских территорий Петербурга "
-            f"{pct(v['summer_north_no_inner'], 1, sign=True)}",
+            "s1_reliable_min",
+            pct(p.s1_reliable_min, 0),
+            "str",
+            f"порог критерия отказа С1 (eda.rejection.s1_reliable_share_min = {p.s1_reliable_min})",
         ),
-        ("summer_south", v["summer_south"], "pct_signed", f"{summer}; все категории, остальные МО"),
+        ("story_role", story_role(v, p.s1_reliable_min), "str", "роль С1 по критериям отказа Б.5"),
+        ("summer_north", v["summer_north"], "pct_signed", f"{summer}; все категории, МО {north}"),
+        ("summer_south", v["summer_south"], "pct_signed", f"{summer}; все категории, {rest}"),
         ("cafe_summer_north", v["cafe_summer_north"], "pct_signed", f"{summer}; общепит, МО {north}"),
-        ("cafe_summer_south", v["cafe_summer_south"], "pct_signed", f"{summer}; общепит, остальные МО"),
+        ("cafe_summer_south", v["cafe_summer_south"], "pct_signed", f"{summer}; общепит, {rest}"),
         ("noise_groups", p.noise_groups, "int", "групп МО равной численности по населению в T07"),
     ]
     rho_texts = {
         "lat": "широтой (точка внутри полигона)",
         "nights": "ночёвками в гостиницах на жителя 2023 года (Росстат)",
-        "mining": "долей добычи в занятости 2023 года (Росстат, без МСП)",
-        "agri": "долей сельского хозяйства в занятости 2023 года (Росстат, без МСП)",
+        "mining": "долей добычи в занятости 2023 года (Росстат, без малого бизнеса)",
+        "agri": "долей сельского хозяйства в занятости 2023 года (Росстат, без малого бизнеса)",
     }
     extra = {
         "nights": " Ориентир −0,20 посчитан по 2024 году (лето к среднему года с декабрём, траты к медиане "
@@ -1541,15 +1864,18 @@ def fact_rows(res: RhythmResults) -> list[tuple[str, Any, str, str]]:
             note = f"{word} корреляций рядов пар МО: {label[:1].lower()}{label[1:]}; пар {n_pairs}"
             rows.append((f"pair_{kind}_{tag}", v[f"pair_{kind}_{tag}"], "rho", note))
     rows.append(
-        ("pair_null_q50", v["pair_null_q50"], "rho", "медиана корреляций своего ритма пар МО на нуле")
+        (
+            "pair_null_q50",
+            v["pair_null_q50"],
+            "rho",
+            "медиана корреляций своего ритма пар МО на перемешанных месяцах (месяцы переставлены внутри МО)",
+        )
     )
-    rows.append(
-        ("pair_null_q90", v["pair_null_q90"], "rho", "90-й перцентиль того же; месяцы переставлены в МО")
-    )
+    rows.append(("pair_null_q90", v["pair_null_q90"], "rho", "90-й перцентиль того же"))
     for c in p.noise_categories:
         note = (
-            f"робастное SD своего ритма ({CATEGORY_TEXT[c]}): медиана в самой малой группе МО по населению / "
-            f"в самой крупной; групп {p.noise_groups}"
+            f"разброс своего ритма ({CATEGORY_TEXT[c]}, 1,4826 × MAD по месяцам): медиана в самой малой "
+            f"группе МО по населению / в самой крупной; групп {p.noise_groups}"
         )
         rows.append((f"noise_ratio_{c}", v[f"noise_ratio_{c}"], "num1", note))
     return rows
@@ -1580,16 +1906,13 @@ def run_section(ctx: SectionContext) -> Finding:
     h = heads["F06"]
     shown = res.profile.loc[res.profile["category"].isin(p.profile_categories)].reset_index(drop=True)
     ctx.save_figure(
-        plot_national_rhythm(shown, p.profile_categories),
+        plot_national_rhythm(shown, p.profile_categories, {"marketplace": v["mp_dec_detrended"]}),
         fid="F06",
         slug="national_rhythm",
         title=ctx.headline(h.title, h.ok, h.detail),
-        subtitle=f"Траты месяца к среднему своего года, тренд МО не снят: медиана по МО "
-        f"и межквартильный размах; 2023–2024, n{NB}={NB}{n_full}",
-        alt=f"Во всех категориях декабрь выше среднего года, январь ниже: все категории "
-        f"{style.fmt_pct(v['nat_dec'], 0, sign=True)} в декабре и "
-        f"{style.fmt_pct(v['nat_jan'], 0, sign=True)} в январе, маркетплейсы в декабре "
-        f"{style.fmt_pct(v['mp_dec'], 0, sign=True)}",
+        subtitle=f"Траты месяца к среднему своего года, рост внутри года не снят: медиана и средняя половина "
+        f"МО; 2023–2024, n{NB}={NB}{n_full}",
+        alt=national_alt(shown, p.profile_categories, v),
         data=shown,
         check=h.check,
     )
@@ -1604,9 +1927,9 @@ def run_section(ctx: SectionContext) -> Finding:
         title=ctx.headline(h.title, h.ok, h.detail),
         subtitle=f"После снятия тренда МО и общего ритма; надёжно: r > {style.fmt_num(p.reliable_r, 1)} "
         f"и размах > {style.fmt_pct(p.reliable_amplitude, 0)}; n{NB}={NB}{n_full}",
-        alt=f"Повторяемость своего профиля у большинства МО близка к нулю, как на перемешанных данных; "
+        alt=f"Повторяемость своего профиля у большинства МО близка к нулю, как на перемешанных месяцах; "
         f"устойчивый свой ритм — у {style.fmt_pct(v['reliable_share'], 1)} МО против "
-        f"{style.fmt_pct(v['null_reliable_share'], 1)} на нуле",
+        f"{style.fmt_pct(v['null_reliable_share'], 1)} на перемешанных месяцах 2024 года",
         data=hist,
         check=h.check,
     )
@@ -1627,6 +1950,7 @@ def run_section(ctx: SectionContext) -> Finding:
             "repro_r",
             "amplitude_log",
             "summer_own",
+            "north",
         ]
     ].assign(map_class=table["territory_id"].map(classes.labels))
     ctx.save_figure(
@@ -1634,8 +1958,8 @@ def run_section(ctx: SectionContext) -> Finding:
         fid="F08",
         slug="north_rhythm_map",
         title=ctx.headline(h.title, h.ok, h.detail),
-        subtitle=f"Цвет — летний избыток своего профиля ({months_text(p.summer_months)}) у МО с устойчивым "
-        f"своим ритмом; пунктир — {style.fmt_num(p.north_lat)}° с. ш.",
+        subtitle=f"Летний избыток своего профиля ({months_text(p.summer_months)}) у МО с устойчивым ритмом; "
+        f"пунктир — {style.fmt_num(p.north_lat)}° с. ш.; Север без районов Петербурга",
         alt=f"МО с устойчивым своим годовым ритмом сосредоточены на Севере, и летом траты у них выше общего "
         f"ритма: {style.fmt_pct(v['north_share_reliable'], 0)} таких МО севернее "
         f"{style.fmt_num(p.north_lat)}-й параллели при {style.fmt_pct(v['north_share_all'], 0)} "
@@ -1662,11 +1986,11 @@ def run_section(ctx: SectionContext) -> Finding:
         tid="T05",
         slug="rhythm_top",
         title=f"МО с самым сильным устойчивым своим ритмом: первые {p.top_n} из {v['reliable_n']} по размаху "
-        "своего профиля",
+        f"своего профиля. {amplitude_size_text(v['rho_amp_pop_reliable'])}",
         md_rows=p.top_n,
         md_formats={
             "amplitude_log": lambda a: style.fmt_pct(np.expm1(a), 0),
-            "peak_month": lambda m: style.MONTHS_RU[int(m) - 1],
+            "peak_month": lambda m: MONTHS_FULL[int(m) - 1],
             "summer_own": lambda s: style.fmt_pct(s, 0, sign=True),
             "repro_r": style.fmt_rho,
             "point_lat": lambda x: style.fmt_num(x, 1),
@@ -1705,8 +2029,8 @@ def run_section(ctx: SectionContext) -> Finding:
             "n_pairs": "Пар МО",
             "q50": "Медиана ρ",
             "q90": "90-й перцентиль ρ",
-            "null_q50": "Медиана на нуле",
-            "null_q90": "90-й перцентиль на нуле",
+            "null_q50": "Медиана, месяцы перемешаны",
+            "null_q90": "90-й перцентиль, месяцы перемешаны",
         },
     )
 
@@ -1717,7 +2041,8 @@ def run_section(ctx: SectionContext) -> Finding:
         res.noise,
         tid="T07",
         slug="noise_by_size",
-        title="Шум своего ритма по группам населения (1 — самые малые МО): робастное SD, лог-пункты ≈ %",
+        title="Шум своего ритма по группам МО по населению (1 — самые малые): разброс 1,4826 × MAD, "
+        "в процентах",
         md_formats=md_noise,
         md_labels={
             "group": "Группа",
@@ -1731,7 +2056,7 @@ def run_section(ctx: SectionContext) -> Finding:
     indicators = pd.DataFrame(
         {
             "territory_id": res.ids.to_numpy().astype("int32"),
-            "own_amplitude": main.A.to_numpy(),
+            "own_amplitude": res.shrunk.reindex(res.ids).to_numpy(),
             "own_repro_r": main.r.to_numpy(),
             "own_reliable": res.reliable.to_numpy().astype("float64"),
         }

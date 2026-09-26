@@ -2,7 +2,8 @@
 
 ``load(cfg)`` читает ``data/processed`` и ``outputs/panel`` (разведка панель не пересобирает) и строит:
 
-- ``mo`` — строка на МО панели: уровни, доли и CLR по годам, рост, сезонные показатели, контекст 2023 года;
+- ``mo`` — строка на МО панели: уровни, доли и CLR по годам, рост, сезонные показатели (после снятия
+  линейного тренда МО), контекст 2023 года;
 - ``national`` — месяц × категория: медианы и квартили трат, медиана долей по МО («типичное МО») и доля
   в тратах всех жителей (веса — среднегодовое население).
 
@@ -24,6 +25,7 @@ from munnet.contracts import (
     CATEGORY_CODES,
     CONTEXT_ANNUAL,
     CONTEXT_LONG,
+    N_MONTHS,
     OKVED_GROUPS,
     OKVED_SHARES,
     PANEL_LONG,
@@ -74,6 +76,15 @@ CONTEXT_2023: tuple[str, ...] = (
     "recipients_to_pop",
 )
 CONTEXT_YEAR = YEARS[0]  # год контекста разведки (2023): у 2024 года покрытие Росстата меньше (А.11)
+# Строковые колонки ``outputs/panel/unmatched.csv``: без этого ОКТМО с ведущим нулём (01512000) читается
+# числом 1512000.0.
+UNMATCHED_STR: dict[str, type] = {
+    "indicator": str,
+    "reason": str,
+    "oktmo": str,
+    "name": str,
+    "region_name": str,
+}
 
 
 @dataclass(frozen=True)
@@ -120,7 +131,7 @@ def load(cfg: Config) -> EdaData:
     geo_path = _require(processed / "territories_geo.parquet")
     with open(_require(panel_out / "controls.json"), encoding="utf-8") as f:
         controls = json.load(f)
-    unmatched = pd.read_csv(_require(panel_out / "unmatched.csv"), dtype={"reason": str})
+    unmatched = pd.read_csv(_require(panel_out / "unmatched.csv"), dtype=UNMATCHED_STR)
     eda = cfg["eda"]
     mo = build_mo(
         tables["panel_wide"],
@@ -167,24 +178,47 @@ def _level_rel(wide: pd.DataFrame, year: int, min_months: int) -> pd.Series:
     return np.exp(mean.where(n >= min_months))
 
 
-def _seasonal(wide: pd.DataFrame, summer_months: Sequence[int]) -> pd.DataFrame:
-    """Летний избыток и декабрьский пик по МО (ряд трат ln v_all), среднее двух лет, затем exp − 1.
+def detrended_log(wide: pd.DataFrame) -> pd.DataFrame:
+    """ln ``v_all`` без линейного тренда МО: остатки МНК ``ln v_it = a_i + b_i·t`` по всем 24 месяцам.
 
-    Летний избыток: среднее ln за летние месяцы минус среднее ln за остальные месяцы без декабря.
-    Декабрьский пик: ln декабря минус среднее ln за январь–ноябрь.
+    Строки — МО со всеми месяцами панели, колонки — ``t`` 0…23. Так же тренд снимает раздел E3
+    (``s3_rhythm.detrend``): сезонные показатели ``mo`` и свой ритм E3 считаются от одного ряда.
     """
-    w = wide[["territory_id", "year", "month"]].copy()
-    w["ln"] = wide["log_all"]
-    summer = w["month"].isin(list(summer_months))
-    dec = w["month"] == DECEMBER
-    keys = ["territory_id", "year"]
-    s_mean = w.loc[summer].groupby(keys)["ln"].mean()
-    rest_mean = w.loc[~summer & ~dec].groupby(keys)["ln"].mean()
-    dec_ln = w.loc[dec].groupby(keys)["ln"].mean()
-    jan_nov = w.loc[~dec].groupby(keys)["ln"].mean()
-    per_year = pd.DataFrame({"summer": s_mean - rest_mean, "dec": dec_ln - jan_nov})
-    avg = per_year.groupby(level="territory_id").mean()
-    return pd.DataFrame({"summer_excess": np.expm1(avg["summer"]), "dec_peak": np.expm1(avg["dec"])})
+    Y = wide.pivot(index="territory_id", columns="t", values="log_all").astype("float64")
+    Y = Y.reindex(columns=range(N_MONTHS)).dropna()
+    t = np.arange(N_MONTHS, dtype="float64")
+    X = np.column_stack([np.ones_like(t), t])
+    beta, *_ = np.linalg.lstsq(X, Y.to_numpy().T, rcond=None)
+    return pd.DataFrame(Y.to_numpy() - (X @ beta).T, index=Y.index, columns=Y.columns)
+
+
+def _seasonal(wide: pd.DataFrame, summer_months: Sequence[int]) -> pd.DataFrame:
+    """Летний избыток и декабрьский пик по МО с полным рядом: ln ``v_all`` без тренда МО, среднее двух лет,
+    затем exp − 1.
+
+    Летний избыток: среднее за летние месяцы минус среднее за остальные месяцы без декабря. Декабрьский
+    пик: декабрь минус среднее за январь–ноябрь. Тренд снимается до сравнения месяцев (spec_final, Б.1,
+    п. 4): летние месяцы и декабрь в году позже остальных, и без этого показатели росли бы вместе с ростом
+    трат МО (у декабря — на половину годового прироста).
+    """
+    D = detrended_log(wide)
+    t = D.columns.to_numpy()
+    month, year = t % MONTHS_IN_YEAR + 1, t // MONTHS_IN_YEAR
+    summer = np.isin(month, list(summer_months))
+    dec = month == DECEMBER
+    v = D.to_numpy()
+    per_year_s, per_year_d = [], []
+    for y in np.unique(year):
+        in_y = year == y
+        per_year_s.append(v[:, in_y & summer].mean(axis=1) - v[:, in_y & ~summer & ~dec].mean(axis=1))
+        per_year_d.append(v[:, in_y & dec].mean(axis=1) - v[:, in_y & ~dec].mean(axis=1))
+    return pd.DataFrame(
+        {
+            "summer_excess": np.expm1(np.mean(per_year_s, axis=0)),
+            "dec_peak": np.expm1(np.mean(per_year_d, axis=0)),
+        },
+        index=D.index,
+    )
 
 
 def build_mo(
@@ -198,7 +232,8 @@ def build_mo(
     """Таблица ``mo``: одна строка на МО панели, ключ ``territory_id`` (формулы — spec_final, Б.2).
 
     Уровень года — среднее ``v_all`` за 12 месяцев (NA, если месяцев меньше); доли года — Σ ``v_<часть>`` /
-    Σ ``v_all`` за 12 месяцев; рост, летний избыток и декабрьский пик — только у МО с полным рядом (номинал).
+    Σ ``v_all`` за 12 месяцев; рост (номинал), летний избыток и декабрьский пик (без тренда МО) — только
+    у МО с полным рядом.
     """
     ter = territories.set_index("territory_id")
     mo = ter[list(TERRITORY_COLUMNS)].copy()

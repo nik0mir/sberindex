@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import contextlib
 import math
+import re
 from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,7 @@ from matplotlib.ticker import (
     NullLocator,
     ScalarFormatter,
 )
+from matplotlib.transforms import Bbox
 
 from munnet.contracts import CATEGORY_CODES
 
@@ -380,30 +383,50 @@ def _renderer(fig: Figure):
     return fig.canvas.get_renderer()
 
 
-def _text_width_in(fig: Figure, text: str, size: float, weight: str) -> float:
+def text_width_in(fig: Figure, text: str, size: float, weight: str = "normal") -> float:
+    """Ширина строки текста на фигуре, дюймы (шрифт проекта)."""
     t = fig.text(0, 0, text, fontsize=size, fontweight=weight)
     width = t.get_window_extent(renderer=_renderer(fig)).width / fig.dpi
     t.remove()
     return width
 
 
+# Склейка при переносе: короткий предлог, союз или частица не остаётся в конце строки, тире и «=» не
+# начинают строку. Склеенные слова переносятся вместе, в готовой строке остаётся обычный пробел.
+_GLUE = ""
+_SHORT_WORDS = re.compile(
+    r"(?<![\w-])(в|во|к|ко|с|со|о|об|обо|у|и|а|но|да|на|по|от|до|из|за|не|ни|для|без|при|над|под|про) ",
+    re.IGNORECASE,
+)
+
+
+def _glue_short_words(text: str) -> str:
+    text = _SHORT_WORDS.sub(lambda m: m.group(1) + _GLUE, text)
+    return text.replace(" — ", f"{_GLUE}— ").replace(" = ", f"{_GLUE}={_GLUE}")
+
+
 def wrap_text(
     fig: Figure, text: str, size: float, weight: str = "normal", width_in: float | None = None
 ) -> list[str]:
-    """Переносит текст по пробелам в ширину фигуры (неразрывные пробелы не рвутся)."""
+    """Переносит текст по пробелам в ширину фигуры.
+
+    Неразрывные пробелы не рвутся; короткие предлоги и союзы («в», «во», «на», «и»…) переносятся вместе
+    со следующим словом, тире и «=» — вместе с предыдущим (правила ru-text). Текст строк совпадает
+    с исходным, меняются только места переноса.
+    """
     width_in = (fig.get_figwidth() - 2 * MARGIN_IN) if width_in is None else width_in
     lines: list[str] = []
     current = ""
-    for word in text.split(" "):
+    for word in _glue_short_words(text).split(" "):
         trial = f"{current} {word}" if current else word
-        if not current or _text_width_in(fig, trial, size, weight) <= width_in:
+        if not current or text_width_in(fig, trial.replace(_GLUE, " "), size, weight) <= width_in:
             current = trial
         else:
             lines.append(current)
             current = word
     if current:
         lines.append(current)
-    return lines
+    return [line.replace(_GLUE, " ") for line in lines]
 
 
 def _russify_axes(fig: Figure) -> None:
@@ -425,6 +448,7 @@ def finish(fig: Figure, title: str, subtitle: str, source: str, number: int | No
     подвал не наезжали на оси. ``source`` — один источник или ``join_sources(...)``; к нему добавляется
     «расчёт munnet» и «Рисунок N». Легенды — только легенды осей (``ax.legend``, в том числе за краем осей):
     их макет учитывает, а ``fig.legend(loc="outside …")`` встаёт у края фигуры и наезжает на источник.
+    Подписи точек ``label_points`` раскладываются заново по окончательному месту поля графика.
     """
     _russify_axes(fig)
     width, height = fig.get_figwidth(), fig.get_figheight()
@@ -461,7 +485,7 @@ def finish(fig: Figure, title: str, subtitle: str, source: str, number: int | No
     label = "Источники" if SOURCE_SEP in source else "Источник"
     caption = f"{label}: {source}; расчёт munnet."
     if number is not None:
-        caption += f" Рисунок {number}"
+        caption += f" Рисунок{NBSP}{number}"  # номер не отрывается от слова при переносе
     cap_lines = wrap_text(fig, caption, SOURCE_PT)
     fig.text(
         x,
@@ -481,6 +505,7 @@ def finish(fig: Figure, title: str, subtitle: str, source: str, number: int | No
         engine.set(rect=(0.0, bottom, 1.0, top - bottom))
     else:
         fig.subplots_adjust(bottom=max(bottom, fig.subplotpars.bottom), top=min(top, fig.subplotpars.top))
+    _replace_point_labels(fig)
 
 
 # Кандидаты смещения подписи точки, pt: сначала вправо-вверх, затем по кругу и дальше.
@@ -502,6 +527,83 @@ _LABEL_OFFSETS = [
 ]
 
 
+POINT_MARKER_S = 18  # площадь маркера выделенной точки, pt²
+POINT_HALO_PT = 3.0  # полуразмер занятой области вокруг выделенной точки: подпись её не закрывает, pt
+_LABEL_GROUPS_ATTR = "_munnet_point_labels"
+
+
+@dataclass
+class _LabelGroup:
+    """Подписи одного вызова ``label_points``: точки, аннотации и тексты-препятствия."""
+
+    ax: Axes
+    xy: list[tuple[float, float]]
+    annotations: list[Any]
+    avoid: list[Any] = field(default_factory=list)
+
+
+def _offset_align(dx: float, dy: float) -> tuple[str, str]:
+    return (
+        "left" if dx > 0 else "right" if dx < 0 else "center",
+        "bottom" if dy > 0 else "top" if dy < 0 else "center",
+    )
+
+
+def _set_offset(ann: Any, dx: float, dy: float) -> None:
+    ha, va = _offset_align(dx, dy)
+    ann.xyann = (dx, dy)
+    ann.set_horizontalalignment(ha)
+    ann.set_verticalalignment(va)
+
+
+def _on_figure(artist: Any) -> bool:
+    """Художник на фигуре и видим (убранный ``remove()`` — нет)."""
+    return getattr(artist, "figure", None) is not None and artist.get_visible()
+
+
+def _place_group(group: _LabelGroup, taken: list, renderer: Any) -> None:
+    """Раскладывает подписи группы по кандидатам ``_LABEL_OFFSETS``: подпись внутри поля графика и не
+    пересекает ``taken`` (уже поставленные подписи), тексты ``avoid`` и выделенные точки всех групп осей."""
+    ax = group.ax
+    fig = ax.figure
+    ax_box = ax.get_window_extent(renderer=renderer)
+    halo = POINT_HALO_PT * fig.dpi / 72
+    groups = [g for g in getattr(fig, _LABEL_GROUPS_ATTR, []) if g.ax is ax] or [group]
+    points = [xy for g in groups for xy in g.xy]
+    centers = ax.transData.transform(np.asarray(points, dtype="float64")) if points else np.empty((0, 2))
+    markers = [Bbox.from_extents(cx - halo, cy - halo, cx + halo, cy + halo) for cx, cy in centers]
+    obstacles = [a.get_window_extent(renderer=renderer) for a in group.avoid if _on_figure(a)]
+    for ann in group.annotations:
+        if not _on_figure(ann):  # подпись уже убрана с графика
+            continue
+        chosen = None
+        for dx, dy in _LABEL_OFFSETS:
+            _set_offset(ann, dx, dy)
+            box = ann.get_window_extent(renderer=renderer)
+            inside = ax_box.contains(box.x0, box.y0) and ax_box.contains(box.x1, box.y1)
+            blocked = any(box.overlaps(b) for b in (*taken, *obstacles, *markers))
+            if inside and not blocked:
+                chosen = box
+                break
+        if chosen is None:  # места нет: первое положение
+            _set_offset(ann, *_LABEL_OFFSETS[0])
+            chosen = ann.get_window_extent(renderer=renderer)
+        taken.append(chosen)
+
+
+def _replace_point_labels(fig: Figure) -> None:
+    """Раскладывает подписи ``label_points`` заново после раскладки поля графика (вызывает ``finish``):
+    шапка и подвал сжимают поле, и подписи, разведённые на полном поле, иначе сходились бы."""
+    groups = getattr(fig, _LABEL_GROUPS_ATTR, [])
+    if not groups:
+        return
+    fig.draw_without_rendering()
+    renderer = _renderer(fig)
+    taken: dict[int, list] = {}
+    for group in groups:
+        _place_group(group, taken.setdefault(id(group.ax), []), renderer)
+
+
 def label_points(
     ax: Axes,
     x: Sequence[float],
@@ -511,63 +613,50 @@ def label_points(
     max_labels: int = 7,
     color: str = ACCENT,
     fontsize: float = POINT_LABEL_PT,
+    avoid: Sequence[Any] = (),
 ) -> list:
-    """Выделяет точки цветом ``color`` и подписывает их, раздвигая подписи, чтобы они не пересекались.
+    """Выделяет точки цветом ``color`` и подписывает их, раздвигая подписи.
 
-    Больше ``max_labels`` подписей — ``ValueError``: правило отчёта — не больше 5–7 подписей МО на графике.
-    Возвращает список аннотаций.
+    Подпись не пересекает другие подписи, выделенные точки (свои и чужие) и тексты ``avoid`` (подписи
+    линий, пояснения в углу поля) и не выходит за поле графика. Подписи не участвуют в раскладке
+    constrained (не сжимают поле) и раскладываются заново в ``finish``, когда поле графика встанет на
+    окончательное место. Больше ``max_labels`` подписей — ``ValueError``: правило отчёта — не больше 5–7
+    подписей МО на графике. Возвращает список аннотаций.
     """
     xs, ys, texts = list(x), list(y), [str(t) for t in labels]
     if not len(xs) == len(ys) == len(texts):
         raise ValueError("x, y и labels должны быть одной длины")
     if len(texts) > max_labels:
         raise ValueError(f"подписей {len(texts)}, а допустимо не больше {max_labels}")
-    ax.scatter(xs, ys, s=18, color=color, zorder=3, linewidths=0)
+    ax.scatter(xs, ys, s=POINT_MARKER_S, color=color, zorder=3, linewidths=0)
+    dx, dy = _LABEL_OFFSETS[0]
+    ha, va = _offset_align(dx, dy)
+    annotations = [
+        ax.annotate(
+            text,
+            (xi, yi),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            ha=ha,
+            va=va,
+            fontsize=fontsize,
+            color=TEXT,
+            zorder=4,
+            path_effects=[patheffects.withStroke(linewidth=2.5, foreground="white")],
+            in_layout=False,
+        )
+        for xi, yi, text in zip(xs, ys, texts, strict=True)
+    ]
     fig = ax.figure
+    group = _LabelGroup(ax, list(zip(xs, ys, strict=True)), annotations, list(avoid))
+    groups = getattr(fig, _LABEL_GROUPS_ATTR, None)
+    if groups is None:
+        groups = []
+        setattr(fig, _LABEL_GROUPS_ATTR, groups)
+    groups.append(group)
     renderer = _renderer(fig)
-    ax_box = ax.get_window_extent(renderer=renderer)
-    taken = []
-    annotations = []
-    for xi, yi, text in zip(xs, ys, texts, strict=True):
-        chosen = None
-        for dx, dy in _LABEL_OFFSETS:
-            ha = "left" if dx > 0 else "right" if dx < 0 else "center"
-            va = "bottom" if dy > 0 else "top" if dy < 0 else "center"
-            ann = ax.annotate(
-                text,
-                (xi, yi),
-                xytext=(dx, dy),
-                textcoords="offset points",
-                ha=ha,
-                va=va,
-                fontsize=fontsize,
-                color=TEXT,
-                zorder=4,
-                path_effects=[patheffects.withStroke(linewidth=2.5, foreground="white")],
-            )
-            box = ann.get_window_extent(renderer=renderer)
-            inside = ax_box.contains(box.x0, box.y0) and ax_box.contains(box.x1, box.y1)
-            if inside and not any(box.overlaps(b) for b in taken):
-                chosen = (ann, box)
-                break
-            ann.remove()
-        if chosen is None:  # места нет: оставляем первое положение
-            dx, dy = _LABEL_OFFSETS[0]
-            ann = ax.annotate(
-                text,
-                (xi, yi),
-                xytext=(dx, dy),
-                textcoords="offset points",
-                ha="left",
-                va="bottom",
-                fontsize=fontsize,
-                color=TEXT,
-                zorder=4,
-                path_effects=[patheffects.withStroke(linewidth=2.5, foreground="white")],
-            )
-            chosen = (ann, ann.get_window_extent(renderer=renderer))
-        annotations.append(chosen[0])
-        taken.append(chosen[1])
+    taken = [a.get_window_extent(renderer=renderer) for g in groups[:-1] if g.ax is ax for a in g.annotations]
+    _place_group(group, taken, renderer)
     return annotations
 
 

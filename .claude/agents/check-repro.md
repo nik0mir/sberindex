@@ -29,7 +29,7 @@ hooks:
 
 Скил `munnet-agents` загружен: команды — раздел 2, правила проверяющих — раздел 7, временный конфиг — раздел 8.
 Если его нет в контексте, прочитай `.claude/skills/munnet-agents/SKILL.md` первым. Всё выполняешь во временной
-копии; в репозитории ничего не меняешь, git — только чтение и `git clone` во временную папку. Каждая строка
+копии; в репозитории ничего не меняешь, git — только чтение и `git clone` во временную папку. Каждая строка
 отчёта — команда и её фактический вывод; что не запускал — «не проверено».
 
 ## Подготовка (одной командой Bash: переменные между вызовами не сохраняются)
@@ -48,12 +48,12 @@ hooks:
 | R1 | окружение ставится строго по lock | `uv sync --frozen` в копии; время |
 | R2 | `requirements.txt` соответствует `uv.lock` | `diff <(uv export --frozen --no-emit-project --no-dev \| tail -n +3 \| tr -d '\r') <(tail -n +3 requirements.txt \| tr -d '\r')` |
 | R3 | все реализованные этапы проходят, код 0 (код 3 — не сошлось контрольное число или проверка заголовка) | прогон с временным конфигом; время и место на диске |
-| R4 | тесты зелёные и не ходят в сеть | `uv run --frozen pytest -q -p no:cacheprovider`, затем то же с `HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9` |
-| R5 | линтер | `uv run --frozen ruff check .` и `ruff format --check .` |
+| R4 | тесты зелёные и не ходят в сеть | `uv run --frozen pytest -q -p no:cacheprovider`, затем то же с `HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9` |
+| R5 | линтер | `uv run --frozen ruff check .` и `ruff format --check .` |
 | R6 | детерминизм | второй прогон в другую папку; sha256 табличных выходов (или pandas с допуском 1e-9; рисунки не сравнивать); расхождения — поимённо и с причиной (seed не передан, Leiden или HDBSCAN без seed, параллельность, порядок множеств); повторный `eda` не меняет `docs/eda.md` (сравни с исходным файлом) |
 | R7 | seed из конфига во всех случайных шагах | `grep -rnE "random_state\|default_rng\|seed\|shuffle" src` с разбором |
 | R8 | гиперпараметры в YAML, без абсолютных путей | `grep -rnE "random_state=[0-9]\|n_clusters=[0-9]\|n_neighbors=[0-9]" src`; `grep -rnE "[A-Za-z]:\\\\\|/Users/\|/home/" src configs tests` |
-| R9 | нет зависимости от `certs/` | `grep -rn certs src configs README.md`; этапы после `data` с `download.ca_files: []` во временном конфиге |
+| R9 | нет зависимости от `certs/` | `grep -rn certs src configs README.md`; этапы после `data` с `download.ca_files: []` во временном конфиге |
 | R10 | README буквально | каждая команда «Быстрого старта» как написано; в Windows без make — эквиваленты `uv run` и пометка; обещание про WSL — правда ли |
 | R11 | числа в текстах | числа из `docs/eda.md`, `report/report.md`, `README.md`, `site/` найдены в выходах с учётом округления (подробно это делает `check-facts`) |
 | R12 | ссылки в Markdown | относительные ссылки ведут на существующие файлы |

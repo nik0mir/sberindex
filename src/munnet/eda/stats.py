@@ -203,20 +203,50 @@ def partial_spearman(x, y, controls: pd.DataFrame, groups=None) -> tuple[float, 
     return _pearson(resid[0], resid[1]), n
 
 
-def eta2(x, groups) -> float:
-    """η² — доля межгрупповой суммы квадратов в общей: 1 — всё различие между группами, 0 — внутри."""
+def _eta2_parts(x, groups) -> tuple[float, int, int]:
+    """(η², n, k): доля межгрупповой суммы квадратов, число наблюдений и групп без пропусков."""
     xv = _arr(x)
     codes = _group_codes(groups, xv.size)
     ok = ~np.isnan(xv) & (codes >= 0)
     xv, codes = xv[ok], codes[ok]
-    if xv.size < 2:
-        return float("nan")
+    n, k = int(xv.size), int(np.unique(codes).size)
+    if n < 2:
+        return float("nan"), n, k
     total = ((xv - xv.mean()) ** 2).sum()
     if total == 0:
-        return float("nan")
+        return float("nan"), n, k
     means = pd.Series(xv).groupby(codes).transform("mean").to_numpy()
     between = ((means - xv.mean()) ** 2).sum()
-    return float(between / total)
+    return float(between / total), n, k
+
+
+def eta2(x, groups) -> float:
+    """η² — доля межгрупповой суммы квадратов в общей: 1 — всё различие между группами, 0 — внутри.
+
+    Сырая доля смещена вверх: на чистом шуме она в среднем (k − 1)/(n − 1) — при 77 регионах и 2100 МО
+    около 0,036. Рядом с порогами показывать и ``eta2_adj``.
+    """
+    return _eta2_parts(x, groups)[0]
+
+
+def adjusted_r2(r2: float, n: int, n_params: int) -> float:
+    """Скорректированный R²: 1 − (1 − R²)·(n − 1)/(n − p − 1), p — число предикторов без константы.
+
+    На шуме в среднем около нуля (может быть меньше нуля); при n ≤ p + 1 не определён — NaN.
+    """
+    if not np.isfinite(r2) or n - n_params - 1 <= 0:
+        return float("nan")
+    return float(1.0 - (1.0 - r2) * (n - 1) / (n - n_params - 1))
+
+
+def eta2_adj(x, groups) -> float:
+    """η² с поправкой на число групп k: 1 − (1 − η²)·(n − 1)/(n − k) = η² − (k − 1)/(n − k)·(1 − η²).
+
+    Это скорректированный R² регрессии на фиктивные переменные групп (оценка ε²): на шуме он в среднем около
+    нуля (сырой η² — около (k − 1)/(n − 1)), при постоянстве внутри групп равен 1.
+    """
+    value, n, k = _eta2_parts(x, groups)
+    return adjusted_r2(value, n, k - 1)
 
 
 def closure(df: pd.DataFrame) -> pd.DataFrame:

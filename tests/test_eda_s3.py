@@ -1,6 +1,7 @@
 """Раздел E3 «Годовой ритм»: чистые функции модели, ловушки определения сезонности, прогон на синтетике."""
 
 import copy
+import dataclasses
 
 import matplotlib as mpl
 import numpy as np
@@ -94,6 +95,32 @@ def test_detrend_residuals_orthogonal_to_constant_and_time():
     assert np.allclose(D.to_numpy() @ t, 0.0, atol=1e-8)
 
 
+def test_detrend_with_step_removes_level_shift():
+    t = np.arange(N_T)
+    Y = _matrix(np.array([10.0, 9.0])[:, None] + 0.01 * t + np.array([0.1, -0.05])[:, None] * (t >= 12))
+    D, slopes = e3.detrend(Y, step_at=12)
+    assert np.allclose(D.to_numpy(), 0.0, atol=1e-10)
+    assert np.allclose(slopes.to_numpy(), 0.01)
+    with pytest.raises(ValueError, match="step_at"):
+        e3.detrend(Y, step_at=0)
+
+
+def test_level_step_mimics_january_rhythm_and_step_trend_removes_it():
+    """Ловушка: сдвиг уровня на рубеже лет после линейного тренда даёт в оба года одинаковую «пилу»
+    с пиком в январе — повторяемый «свой ритм»; тренд со сдвигом его убирает."""
+    rng = np.random.default_rng(15)
+    n = 200
+    t = np.arange(N_T)
+    jumped = np.arange(n) < n // 4  # у четверти МО скачок уровня в январе 2024 года
+    step = np.where(jumped, 0.15, 0.0)[:, None]
+    Y = _matrix(rng.normal(10, 0.3, (n, 1)) + 0.005 * t + step * (t >= 12) + rng.normal(0, 0.01, (n, N_T)))
+    plain = e3.fit_rhythm(Y)
+    stepped = e3.fit_rhythm(Y, step_at=12)
+    assert plain.r[jumped].median() > 0.6  # выше порога надёжности
+    assert (plain.profile[jumped].idxmax(axis=1) == 1).mean() > 0.9
+    assert abs(stepped.r[jumped].median()) < 0.3
+
+
 def test_detrend_rejects_missing_months():
     Y = np.ones((2, N_T))
     Y[0, 5] = np.nan
@@ -158,6 +185,25 @@ def test_profile_and_amplitude():
     assert list(prof.columns) == list(range(1, 13))
     assert np.allclose(prof.to_numpy()[0], (year1 + year2) / 2)
     assert e3.amplitude(own).iloc[0] == pytest.approx(0.1)
+
+
+def test_noise_amplitude_matches_amplitude_of_pure_noise():
+    rng = np.random.default_rng(16)
+    own = _matrix(rng.normal(0, 0.03, (4000, N_T)))
+    ratio = e3.noise_amplitude(own).median() / e3.amplitude(own).median()
+    assert 0.9 < ratio < 1.1
+    # Повторяющийся профиль в разности двух лет сокращается: шум не растёт вместе с ним.
+    year = rng.normal(0, 0.2, 12)
+    repeated = _matrix(np.r_[year, year][None, :] + rng.normal(0, 0.03, (1, N_T)))
+    assert e3.noise_amplitude(repeated).iloc[0] < 0.2 * e3.amplitude(repeated).iloc[0]
+
+
+def test_shrunk_amplitude_zero_without_repeatability():
+    A = pd.Series([0.1, 0.2, 0.3, 0.4])
+    r = pd.Series([0.5, -0.4, np.nan, 1.0])
+    out = e3.shrunk_amplitude(A, r)
+    assert out.iloc[0] == pytest.approx(0.05) and out.iloc[1] == 0.0 and np.isnan(out.iloc[2])
+    assert out.iloc[3] == pytest.approx(0.4)
 
 
 def test_is_reliable_needs_both_thresholds():
@@ -281,9 +327,10 @@ def test_full_ids_selects_only_full(data):
 
 
 def test_seasonal_excess_matches_eda_data(data, params):
+    """Летний избыток раздела — тот же, что ``mo.summer_excess``: по ряду ln трат без тренда МО."""
     ids = e3.full_ids(data.mo)
     Y = e3.series_matrix(data.panel_wide, ids, "all")
-    ours = e3.seasonal_excess(Y, params.summer_months)
+    ours = e3.seasonal_excess(e3.detrend(Y)[0], params.summer_months)
     theirs = data.mo.set_index("territory_id").loc[ids, "summer_excess"]
     assert np.allclose(ours.to_numpy(), theirs.to_numpy())
 
@@ -411,6 +458,39 @@ def test_december_label_above_or_below_band():
     assert not up2 and y2 == pytest.approx(-0.1)
 
 
+def test_december_label_with_over_trend():
+    assert e3.december_label(0.528) == "дек +53%"
+    assert e3.december_label(0.528, 0.238) == "дек +53%, над трендом +24%"
+    assert e3.december_label(0.2, float("nan")) == "дек +20%"
+
+
+def test_national_alt_names_exceptions():
+    """Альт-текст F06 собирается из данных: категория, у которой декабрь ниже среднего года, названа."""
+    rows = []
+    for c, jan, dec in (("all", 0.85, 1.21), ("food", 0.9, 1.1), ("cafe", 0.8, 0.974)):
+        for m in range(1, 13):
+            rows.append((c, m, jan if m == 1 else dec if m == 12 else 1.0))
+    prof = pd.DataFrame(rows, columns=["category", "month", "median"])
+    v = {"nat_dec": 0.211, "nat_jan": -0.151, "mp_dec": 0.528, "mp_dec_detrended": 0.238}
+    alt = e3.national_alt(prof, ["all", "food", "cafe"], v)
+    head = "Январь ниже среднего года во всех категориях, декабрь выше во всех, кроме общепита"
+    assert alt.startswith(f"{head} ({style.MINUS}3%):")
+    assert "маркетплейсы в декабре +53% (над трендом МО +24%)" in alt
+    same = e3.national_alt(prof.assign(median=prof["median"].where(prof["month"] != 12, 1.2)), ["all"], v)
+    assert same.startswith("Январь ниже среднего года во всех категориях, декабрь выше во всех:")
+
+
+def test_north_role_and_amplitude_words():
+    assert "сильный слой для Севера" in e3.north_role(
+        {"reliable_share_north": 0.535, "reliable_share": 0.156}, 0.25
+    )
+    assert "тоже ниже" in e3.north_role({"reliable_share_north": 0.2, "reliable_share": 0.156}, 0.25)
+    assert "тоже выше" in e3.north_role({"reliable_share_north": 0.5, "reliable_share": 0.3}, 0.25)
+    assert e3.amplitude_size_text(-0.48).startswith("Размах больше у малых МО")
+    assert e3.amplitude_size_text(0.3).startswith("Размах больше у крупных МО")
+    assert e3.amplitude_size_text(0.05).startswith("Размах почти не связан")
+
+
 def test_noise_by_size_finds_noisier_small_mo():
     rng = np.random.default_rng(12)
     n = 200
@@ -464,11 +544,11 @@ def _values(**over):
     base = {
         "peak_dec_share_2023": 0.968,
         "peak_dec_share_2024": 0.976,
-        "mp_dec": 0.53,
+        "nat_dec": 0.211,
         "reliable_share": 0.156,
         "null_reliable_share": 0.014,
-        "north_share_reliable": 0.293,
-        "north_share_all": 0.096,
+        "reliable_share_north": 0.535,
+        "reliable_share_rest": 0.120,
     }
     base.update(over)
     return base
@@ -478,11 +558,18 @@ def test_headlines_pass_on_reference_numbers():
     heads = e3.headlines(_values(null_reliable_share=0.0149), 60)
     assert all(h.ok for h in heads.values())
     # Один знак после запятой: 1,49% не превращается в «1%», и отношение к нулю не завышается.
+    nb = style.NBSP
     assert heads["F07"].title == (
-        f"Свой устойчивый годовой ритм — у{style.NBSP}15,6% МО, на случайных данных — у{style.NBSP}1,5%"
+        f"Свой устойчивый годовой ритм — у{nb}15,6% МО, на перемешанных месяцах — у{nb}1,5%"
     )
-    assert heads["F06"].title.startswith(f"Декабрь — пик трат у{style.NBSP}97–98% МО;")
-    assert "севернее 60-й параллели, во всей выборке — 10%" in heads["F08"].title
+    assert (
+        heads["F06"].title
+        == f"Декабрь — пик трат у{nb}97–98% МО: в{nb}типичном МО +21% к среднему месяцу года"
+    )
+    assert (
+        heads["F08"].title
+        == f"Свой устойчивый ритм — у{nb}54% МО севернее 60-й параллели и{nb}у{nb}12% остальных"
+    )
     assert all(len(h.title) <= 90 for h in heads.values())
 
 
@@ -491,11 +578,11 @@ def test_headlines_pass_on_reference_numbers():
     [
         ("F06", {"peak_dec_share_2024": 0.8}),
         ("F06", {"peak_dec_share_2023": 0.85}),
-        ("F06", {"mp_dec": -0.05}),
+        ("F06", {"nat_dec": -0.01}),
         ("F07", {"reliable_share": 0.03, "null_reliable_share": 0.014}),
         ("F07", {"reliable_share": 0.0, "null_reliable_share": 0.0}),
-        ("F08", {"north_share_reliable": 0.15, "north_share_all": 0.096}),
-        ("F08", {"north_share_reliable": float("nan")}),
+        ("F08", {"reliable_share_north": 0.2, "reliable_share_rest": 0.12}),
+        ("F08", {"reliable_share_north": float("nan")}),
     ],
 )
 def test_headline_fails_when_claim_breaks(fid, over):
@@ -557,6 +644,11 @@ def _text_values(**over):
         "noise_ratio_all": 2.2,
         "noise_ratio_cafe": 4.4,
         "noise_ratio_transport": 3.0,
+        "amp_cut_n": 24,
+        "share_r06": 0.168,
+        "n_full": 2016,
+        "reliable_share_north": 0.535,
+        "reliable_share_north_step": 0.523,
     }
     base.update(over)
     return base
@@ -564,7 +656,7 @@ def _text_values(**over):
 
 def test_text_checks_pass_on_reference_numbers():
     checks = e3.text_checks(_text_values())
-    assert len(checks) == 8
+    assert len(checks) == 10
     assert all(flag for _, flag, _ in checks), [c for c, flag, _ in checks if not flag]
 
 
@@ -589,6 +681,8 @@ def test_text_checks_allow_missing_southern_group():
         ({"pair_raw_q50": 0.2}, "похожи"),
         ({"pair_own_q90": 0.25}, "хвост"),
         ({"noise_ratio_cafe": 0.95}, "шумят"),
+        ({"amp_cut_n": 200}, "держится"),  # порог размаха отсекает больше половины МО с r > 0,6
+        ({"reliable_share_north_step": 0.3}, "сдвига уровня"),
     ],
 )
 def test_text_checks_flag_broken_claim(over, word):
@@ -613,6 +707,7 @@ def test_within_words_follow_numbers():
 def test_months_text():
     assert e3.months_text([6, 7, 8]) == "июнь–август"
     assert e3.months_text([1, 7]) == "январь, июль"
+    assert e3.months_text([1, 2, 3], prepositional=True) == "январе–марте"
 
 
 # --- Параметры ------------------------------------------------------------------------------------
@@ -697,6 +792,9 @@ def test_run_section_facts_and_checks(section):
     assert finding.headline_errors == []
     used = {f"{s}.{k}" for s, k in PLACEHOLDER.findall(finding.summary_md)}
     assert used and used <= set(finding.facts)
+    in_caveats = {f"{s}.{k}" for c in finding.caveats for s, k in PLACEHOLDER.findall(c)}
+    assert in_caveats and in_caveats <= set(finding.facts)
+    assert not any("~" in c for c in finding.caveats)
     assert '"' not in finding.summary_md and " - " not in finding.summary_md and "~" not in finding.summary_md
     for fact in finding.facts.values():
         assert fact.note, fact.key
@@ -711,17 +809,34 @@ def test_run_section_context_and_trend_facts(section):
         assert f"e3.rho_summer_{key}_within" in facts
         rho = facts[f"e3.rho_summer_{key}"].value
         assert facts[f"e3.summer_{key}_rel"].value == e3.relation_text(np.nan if rho is None else rho)
-    assert facts["e3.n_north_inner"].value <= facts["e3.n_north"].value
     assert facts["e3.reliable_north_n"].value <= facts["e3.reliable_n"].value
+    assert facts["e3.winter_step_lost"].value <= facts["e3.winter_peak_n"].value
+    assert facts["e3.reliable_amplitude"].value == "5%"  # порог в тексте — без знаков после запятой
+    assert facts["e3.nat_dec_detrended"].kind == "pct_signed"
     # На синтетике траты растут внутри года: над трендом МО декабрь ниже, чем к среднему года.
     assert 0 < facts["e3.nat_dec_detrended"].value < facts["e3.nat_dec"].value
     assert "+54%" in facts["e3.mp_dec"].note  # пояснение расхождения с ориентиром spec_final
+
+
+def test_north_excludes_inner_city(data, params):
+    """Север — как в разделах E2 и E5: внутригородская территория севернее 60° в него не входит."""
+    mo = data.mo.copy()
+    inner = mo["is_inner_city"].astype(bool) & (mo["series_status"].astype(str) == "full")
+    assert inner.any()
+    mo.loc[inner, "point_lat"] = 61.0
+    base = e3.compute(data, params, np.random.default_rng(0)).values
+    moved = e3.compute(dataclasses.replace(data, mo=mo), params, np.random.default_rng(0)).values
+    assert moved["n_north"] == base["n_north"]
+    assert moved["n_north_inner"] == base["n_north_inner"] + int(inner.sum())
 
 
 def test_run_section_indicators(section, data):
     _, finding = section
     ind = finding.indicators
     assert list(ind.columns) == ["territory_id", "own_amplitude", "own_repro_r", "own_reliable"]
+    # own_amplitude — размах, сжатый на повторяемость: не больше размаха и ноль при r ≤ 0.
+    assert (ind["own_amplitude"] >= 0).all()
+    assert (ind.loc[ind["own_repro_r"] <= 0, "own_amplitude"] == 0).all()
     assert set(finding.indicator_labels) == {"own_amplitude", "own_repro_r", "own_reliable"}
     assert ind["territory_id"].dtype == "int32" and ind["territory_id"].is_unique
     assert len(ind) == len(e3.full_ids(data.mo))

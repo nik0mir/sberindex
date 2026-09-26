@@ -12,7 +12,10 @@
 - доля общепита растёт с уровнем, продовольствия — падает (корзина связана с уровнем);
 - неполные ряды — у самых мелких МО (только 2023 год, только 2024 год, внутренние разрывы, 11 месяцев 2024);
 - 2 внутригородских МО (Москва и Санкт-Петербург, по одному), объединение 2024 года (предшественник и
-  преемник), выпавший регион без данных СберИндекса (только на карте);
+  преемник; у преемника в 2023 году причина ``not_in_slice`` в ``unmatched.csv``), выпавший регион без
+  данных СберИндекса (только на карте); в ``controls.json`` — и справочные числа (``kind: info``);
+- шум трат растёт у малых МО (множитель √(медиана населения / население)), у общепита и транспорта —
+  сильнее: T07 видит шумные малые МО;
 - контекст: доли занятости (аграрные МО беднее), ночёвки, пригороды столиц с низким доходом по месту работы.
 
 Импорт в тестах: ``from synth import make_eda_data`` (pytest кладёт ``tests/`` в ``sys.path``).
@@ -60,7 +63,14 @@ DEFAULT_CONFIG = ROOT / "configs" / "default.yaml"
 COMMON_RHYTHM = np.array([-0.15, -0.12, -0.03, -0.02, 0.0, 0.01, 0.03, 0.03, -0.01, 0.0, 0.0, 0.20])
 NORTH_SUMMER = 0.12  # свой летний подъём северной группы, лог-пункты (июнь–август)
 SUMMER = (6, 7, 8)
-NOISE_SD = 0.03  # помесячный шум ln v_all
+NOISE_SD = 0.03  # помесячный шум ln v_all у МО медианного населения
+# Шум долей у МО медианного населения; общепит и транспорт шумят сильнее (как в данных, T07).
+SHARE_NOISE_SD = {"food": 0.005, "marketplace": 0.003, "transport": 0.004, "health": 0.002, "cafe": 0.002}
+# Шум растёт у малых МО: множитель √(медиана населения / население МО) в этих пределах. У ln v_all шум
+# только растёт (не меньше NOISE_SD): иначе у южных МО появляются случайные «надёжные» ритмы, и заложенный
+# сигнал E3 (свой ритм — только у Севера) размывается; у долей — в обе стороны.
+SIZE_NOISE_CLIP = {"all": (1.0, 2.0), "share": (0.5, 3.0)}
+SIZE_NOISY = ("transport", "cafe")  # доли, шум которых зависит от населения
 SIDE_KM = 40.0  # сторона квадрата МО
 CITY_SIDE_KM = 5.0  # сторона квадрата внутригородской территории
 CITY_REGIONS = {77: "Москва", 78: "Санкт-Петербург"}
@@ -193,30 +203,39 @@ def _coverage(ter: pd.DataFrame) -> dict[int, np.ndarray]:
     return cover
 
 
+def _size_factor(pop: pd.Series, kind: str) -> np.ndarray:
+    """Множитель шума МО: √(медиана населения / население), в пределах ``SIZE_NOISE_CLIP[kind]``."""
+    lo, hi = SIZE_NOISE_CLIP[kind]
+    return np.clip(np.sqrt(pop.median() / pop.to_numpy(dtype="float64")), lo, hi)
+
+
 def _panel(rng: np.random.Generator, ter: pd.DataFrame, cover: dict[int, np.ndarray]) -> pd.DataFrame:
+    """Помесячные траты: уровень, рост, общий ритм, летний подъём Севера и шум, растущий у малых МО."""
     months = _months()
     t = months["t"].to_numpy()
     m_idx = months["month"].to_numpy() - 1
     summer_bump = np.isin(months["month"], SUMMER) * NORTH_SUMMER
     summer_bump = summer_bump - summer_bump.mean()
+    f_all, f_share = _size_factor(ter["pop"], "all"), _size_factor(ter["pop"], "share")
     frames = []
-    for row in ter.itertuples(index=False):
+    for i, row in enumerate(ter.itertuples(index=False)):
         ln_all = (
             row.log_level
             + row.growth * (t - (N_MONTHS - 1) / 2) / 12
             + COMMON_RHYTHM[m_idx]
             + (summer_bump if row.north else 0.0)
-            + rng.normal(0.0, NOISE_SD, N_MONTHS)
+            + rng.normal(0.0, NOISE_SD * f_all[i], N_MONTHS)
         )
         v_all = np.round(np.exp(ln_all)).astype(np.int64)
         mp = row.mp0 + row.mp_gain * t / (N_MONTHS - 1) + np.where(m_idx == 11, 0.02, 0.0)
+        sd = {c: s * (f_share[i] if c in SIZE_NOISY else 1.0) for c, s in SHARE_NOISE_SD.items()}
         shares = {
-            "food": row.food0 + rng.normal(0.0, 0.005, N_MONTHS),
-            "marketplace": mp + rng.normal(0.0, 0.003, N_MONTHS),
-            "transport": 0.057 + rng.normal(0.0, 0.003, N_MONTHS),
-            "health": 0.049 + rng.normal(0.0, 0.002, N_MONTHS),
+            "food": row.food0 + rng.normal(0.0, sd["food"], N_MONTHS),
+            "marketplace": mp + rng.normal(0.0, sd["marketplace"], N_MONTHS),
+            "transport": 0.057 + rng.normal(0.0, sd["transport"], N_MONTHS),
+            "health": 0.049 + rng.normal(0.0, sd["health"], N_MONTHS),
             "cafe": row.cafe0 * (1 + 0.3 * np.isin(months["month"], SUMMER))
-            + rng.normal(0.0, 0.001, N_MONTHS),
+            + rng.normal(0.0, sd["cafe"], N_MONTHS),
         }
         wide = months.copy()
         wide["territory_id"] = row.territory_id
@@ -371,6 +390,13 @@ def _okved(rng: np.random.Generator, ter: pd.DataFrame) -> list[tuple[int, dict[
             disclosed.pop("B")  # раздел скрыт
         rows.append((row.territory_id, disclosed))
     return rows
+
+
+def _absent_keys(table: pd.DataFrame) -> set[tuple[int, int]]:
+    """(МО, год) вне среза справочника года: преемник объединения в 2023 году (реальный этап panel пишет
+    для него в ``unmatched.csv`` причину ``not_in_slice``)."""
+    roles = table.set_index("territory_id")["lineage_role"].astype(str)
+    return {(int(t), YEARS[0]) for t in roles.index[roles == "union_successor"]}
 
 
 def _context(rng: np.random.Generator, ter: pd.DataFrame, table: pd.DataFrame, okved_rows, cfg: Config):
@@ -589,20 +615,36 @@ def make_processed(root: Path, *, n_regions: int = 6, mo_per_region: int = 12, s
             "ok": True,
         },
         "pop_jan1_2023": {"expected": len(table), "actual": len(table) - 1, "kind": "soft", "ok": False},
+        # информационные числа: ожидаемого значения нет (как у реального этапа)
+        "bdmo_stable_pairs": {"expected": None, "actual": len(table), "kind": "info", "ok": True},
+        "method_population_2023_version": {
+            "expected": None,
+            "actual": int((context_long["method"].astype(str) == "version").sum()),
+            "kind": "info",
+            "ok": True,
+        },
     }
     with open(panel_out / "controls.json", "w", encoding="utf-8") as f:
         json.dump(controls, f, ensure_ascii=False, sort_keys=True, indent=1)
-    succ = int(table.loc[table["lineage_role"] == "union_successor", "territory_id"].iloc[0])
-    unmatched = pd.DataFrame(
-        {
-            "territory_id": [succ, succ],
-            "year": [2023, 2023],
-            "indicator": ["population", "wage"],
-            "reason": ["no_code", "no_code"],
-        }
-    )
-    unmatched.to_csv(panel_out / "unmatched.csv", index=False, lineterminator="\n")
+    _unmatched(table).to_csv(panel_out / "unmatched.csv", index=False, lineterminator="\n")
     return processed
+
+
+UNMATCHED_INDICATORS = ("population", "wage")  # показатели строк unmatched.csv у преемника в 2023 году
+
+
+def _unmatched(table: pd.DataFrame) -> pd.DataFrame:
+    """``unmatched.csv`` с колонками реального файла: преемник объединения в 2023 году, причина
+    ``not_in_slice`` (МО нет в срезе справочника года), ОКТМО пуст. Значения 2023 года в синтетике у него
+    остаются: раздел E1 считает их исключением, а не потерей."""
+    info = table.set_index("territory_id")[["name", "region_code", "region_name"]]
+    rows = [
+        (tid, year, ind, "not_in_slice", None)
+        for tid, year in sorted(_absent_keys(table))
+        for ind in UNMATCHED_INDICATORS
+    ]
+    out = pd.DataFrame(rows, columns=["territory_id", "year", "indicator", "reason", "oktmo"])
+    return out.join(info, on="territory_id")
 
 
 def make_eda_data(tmp_path: Path, **kw) -> EdaData:
