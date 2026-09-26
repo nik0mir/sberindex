@@ -124,3 +124,201 @@ icvi: [silhouette, calinski_harabasz, s_dbw, avi, avu, modularity]
 dynamics:
   window_months: 12
   step_months: 1
+
+# ---------------------------------------------------------------------------------------------
+# Этап 1. Панель «МО × месяц × категория», справочник территорий и годовой контекст (python -m munnet panel).
+# Пути источников — относительно paths.raw. Числа и правила — spec_final, часть А.
+panel:
+  consumption: hackathon/consumption.parquet
+  market_access: hackathon/market_access.parquet
+  connection: hackathon/connection.parquet
+  dictionary: borders/t_dict_municipal_districts.xlsx
+  polygons: borders/t_dict_municipal_districts_poly.gpkg
+  dictionary_last_year: 2024        # справочник знает преобразования МО по 01.01.2024; для 2025 берём срез 2024
+  years: [2023, 2024]
+  categories:                       # код -> название в consumption.parquet; порядок = порядок на графиках
+    all: Все категории
+    food: Продовольствие
+    marketplace: Маркетплейсы
+    transport: Транспорт
+    health: Здоровье
+    cafe: Общественное питание
+  other: {code: other, label: Прочее}   # «Все категории» минус сумма пяти; на данных всегда > 0
+  mo_types:                         # тип МО из справочника -> короткий код
+    муниципальный район: mr
+    муниципальный округ: mo
+    городской округ: go
+    внутригородская территория города федерального значения: vgt
+  inner_city_regions: [Москва, Санкт-Петербург]   # vgt этих субъектов -> is_inner_city (247 МО)
+  capital_status: административный_центр_субъекта
+  mo_statuses:                      # дополнение пакета F: municipal_district_status справочника -> mo_status
+    административный_центр_субъекта: capital
+    ЗАТО: zato
+    федеральная_территория: federal_territory
+  crs: "+proj=aea +lat_1=52 +lat_2=64 +lat_0=0 +lon_0=100 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"
+  simplify_m: 2000                  # допуск упрощения полигонов для карт, м
+  simplify_rel: 0.05                # но не больше 5% от √площади МО: районы Москвы (≈8 км²) не схлопываются
+  controls:
+    tolerance: 0.01                 # мягкие числа: предупреждение при отклонении больше 1%
+    hard:                           # входы закреплены sha256, поэтому расхождение = ошибка кода (QCError, код 3)
+      consumption_rows: 303126
+      territories: 2190
+      months: 24
+      mo_months: 50521
+      panel_long_rows: 353647
+      dup_keys: 0
+      other_nonpositive: 0
+      series_full: 2016
+      series_only_2023: 43
+      series_only_2024: 9
+      series_partial: 122
+      exactly_12_months: 56
+      internal_gap: 78
+      dict_versions: 3101
+      dict_territories: 2660
+      in_slice_2023: 2188
+      in_slice_2024: 2187
+      inner_city: 247
+      regions: 77
+      polygons_matched: 2190
+      market_access: 2170
+    soft:                           # покрытие контекста МО панели (значение не NA)
+      pop_jan1_2023: 2188
+      pop_jan1_2024: 2186
+      pop_jan1_2025: 1932
+      pop_avg_both_2024: 1932
+      pop_carried_2024: 27
+      pop_fallback_period_2023: 32
+      pop_sum_2024_mln: 120.48
+      age_2023: 2072                # возрастные группы по разрезам (итога нет); уточнено по прогону, в ТЗ ≈ 2071
+      age_2024: 1918                # в ТЗ ≈ 1913
+      wage_2023: 2188
+      wage_2024: 2037
+      employees_2023: 2188
+      employees_2024: 2037
+      retail_2023: 2023
+      retail_2024: 1916
+      catering_turnover_2023: 1402
+      catering_turnover_2024: 1345
+      shipments_2023: 2182
+      shipments_2024: 2031
+      nights_2023: 1338
+      nights_2024: 1228
+      beds_2023: 1377
+      beds_2024: 1252
+      orgs_2024: 2187
+      ip_2024: 2187
+      invest_2023: 2019             # инвестиции есть только за 2023 год
+      ndfl_income_2023: 1957
+      ndfl_income_2024: 1852
+      ndfl_recipients_2023: 1948
+      ndfl_recipients_2024: 1853
+
+context:
+  bdmo_dir: bdmo                    # data/raw/bdmo/<файл>.csv.gz, разделитель «;», все колонки читаются строкой
+  level: Муниципальное образование верхнего уровня
+  na_codes: [CD, ND, UD]
+  read_years: [2022, 2023, 2024, 2025]
+  okved_total: &total Всего по обследуемым видам экономической деятельности
+  okved_letters: {А: A, В: B, Е: E, Н: H}   # кириллица в метках БД ПМО -> латиница
+  okved_groups:
+    primary: [A, B]                 # сельское хозяйство, добыча
+    industry: [C, D, E]             # обработка, энергетика, водоснабжение
+    trade_transport: [F, G, H]      # стройка, торговля, транспорт
+    market_services: [I, J, K, L, M, N, R, S, T]
+    public: [O, P, Q]               # госуправление, образование, здравоохранение
+  indicators:                       # kind: stock — запас (на дату), flow — поток за год, mean — среднее за год
+    population:      {file: Y48112027, dims: {mest: Все население}, kind: stock,
+                      periods: [На 1 января, Значение показателя за год], years: [2022, 2023, 2024, 2025]}
+    population_urban: {file: Y48112027, dims: {mest: Городское население}, kind: stock,
+                       periods: [На 1 января, Значение показателя за год], years: [2023, 2024]}
+    population_rural: {file: Y48112027, dims: {mest: Сельское население}, kind: stock,
+                       periods: [На 1 января, Значение показателя за год], years: [2023, 2024]}
+    employees:       {file: Y48423005, by: okved2, kind: flow, periods: [Январь-декабрь], years: [2023, 2024]}
+    payroll:         {file: Y48423006, dims: {okved2: *total}, kind: flow, periods: [Январь-декабрь], years: [2023, 2024]}
+    wage:            {file: Y48423007, dims: {okved2: *total}, kind: mean, periods: [Январь-декабрь], years: [2023, 2024]}
+    retail:          {file: Y48401003, dims: {okved2: *total}, kind: flow,
+                      periods: [Январь-декабрь, Значение показателя за год], years: [2023, 2024]}
+    catering_turnover: {file: Y48401006, dims: {okved2: *total}, kind: flow,
+                        periods: [Январь-декабрь, Значение показателя за год], years: [2023, 2024]}
+    shipments:       {file: Y48401011, by: okved2, keep: [TOTAL, B], kind: flow,
+                      periods: [Январь-декабрь, Значение показателя за год], years: [2023, 2024]}
+    orgs:            {file: Y49010002, kind: stock, periods: [На 1 апреля, На 1 июля, На 1 октября], years: [2024]}
+    ip:              {file: Y49010003, kind: stock, periods: [На 1 апреля, На 1 июля, На 1 октября], years: [2024]}
+    nights:          {file: Y47000004, dims: {vozr: Всего}, kind: flow, periods: [Значение показателя за год],
+                      years: [2023, 2024]}
+    beds:            {file: Y48060002, kind: stock, periods: [Значение показателя за год], years: [2023, 2024]}
+    invest:          {file: Y48109001, dims: {istinv: Всего, okved2: *total}, kind: flow,
+                      periods: [Значение показателя за год, Январь-декабрь], years: [2023]}
+  age:
+    files: {2023: Y48112014_2023, 2024: Y48112014_2024}
+    dims: {grup_2: Всего}
+    period: На 1 января
+    groups: {young: Моложе трудоспособного возраста, working: Трудоспособный возраст,
+             old: Старше трудоспособного возраста}
+  ndfl:
+    file: ndfl/data_5ndfl_155_v20260722.parquet   # 34 млн строк: только pyarrow.dataset с фильтром
+    years: [2022, 2023, 2024]
+    object_level: Муниципальное образование верхнего уровня
+    tax_authority: Всего
+    income: {indicator_code: Y777000006, tax_rate: Всего}    # не Y777000030: на уровне МО почти везде 0
+    recipients: {indicator_code: Y777000028, individual_type: Всего, income: Всего}
+    recipients_ratio_ok: [0.05, 3.0]   # получатели / жители вне интервала -> ndfl_ok = false
+
+# ---------------------------------------------------------------------------------------------
+# Этап 1. Разведочный анализ (python -m munnet eda): графики, таблицы, outputs/eda/facts.json, docs/eda.md.
+eda:
+  reference_year: 2024
+  north_lat: 60.0
+  summer_months: [6, 7, 8]
+  robust_z: 3.5
+  top_n: 10
+  knn_main: 8
+  knn_sensitivity: [5, 12]
+  permutations: 999
+  bootstrap: 1000
+  pair_sample: 20000               # пар МО для распределения корреляций рядов (T06)
+  season:
+    reliable_r: 0.6                # повторяемость своего профиля 2023 ~ 2024
+    reliable_amplitude: 0.05       # размах своего профиля, лог-пункты
+    null_repeats: 20               # перестановок месяцев 2024 года для нулевого распределения
+  step_test_pp: 2.0                # скачок годового прироста доли маркетплейсов между соседними месяцами, п. п.
+  economy_types:                   # гипотезы о типах местной экономики (T11): DataFrame.query над EdaData.mo
+    inner_city: {rule: is_inner_city}
+    capital: {rule: is_capital}
+    suburb: {rule: "dist_capital_km <= 50 and not is_capital and not is_inner_city"}
+    north: {rule: "point_lat >= 60"}
+    mining: {rule: "emp_sh_B_2023 >= 0.2"}
+    manufacturing: {rule: "emp_sh_C_2023 >= 0.3"}
+    agrarian: {rule: "emp_sh_A_2023 >= 0.2"}
+    public_periphery: {rule: "emp_sh_public_2023 >= 0.55"}
+    resort: {rule: "nights_pc_2023 >= 5"}
+  rejection:                       # критерии отказа сюжетов (часть Б.5): сюжет «главный», только если выполнены
+    s1_reliable_share_min: 0.25
+    s2_partial_rho_min: 0.2
+    s3_half_consistency_min: 0.5
+    s4_residual_share_min: 0.3
+    s4_residual_stability_min: 0.7
+    s5_split_half_min: 0.5
+    s5_rho_within_min: 0.3
+    s6_usable_min: 1500
+    s6_suburb_ratio_min: 1.2
+  matrix_weights:                  # из весов критериев жюри (часть Б.5); сумма 1
+    signal: 0.25
+    network_dynamics: 0.20
+    practical: 0.20
+    coverage: 0.15
+    explainability: 0.10
+    data_risk: 0.10
+  cpi: null                        # помесячный ИПЦ Росстата {source: ссылка, base: "2022-12", values: {"2023-01": …}}; null — только номинал
+  annotations: {}                  # territory_id: «пояснение» — подпись к точке и колонка «объяснение» в таблицах выбросов
+  report: docs/eda.md
+  report_images: docs/img/eda
+  figure: {dpi: 200, formats: [png, svg], docs_max_kb: 400}
+  # Дополнения пакета F к части Г: параметры, которые иначе были бы числами в коде.
+  level_rel_min_months: 6          # level_rel_<год>: уровень к медиане страны, если в году не меньше 6 месяцев (Б.2)
+  figure_limits: {title_max: 90, subtitle_max: 120, alt_min: 40}   # знаков: заголовок, подзаголовок, альт-текст (В.2)
+  maps:                            # картограммы (maps.py)
+    insets:                        # врезки: 247 внутригородских территорий на общей карте не видны
+      moscow: {region_code: 77, title: Москва, extent_km: 45}            # окно вокруг медианы точек МО, км
+      spb: {region_code: 78, title: Санкт-Петербург, extent_km: 60}
