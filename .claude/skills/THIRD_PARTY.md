@@ -36,6 +36,13 @@ receiving-code-review, finishing-a-development-branch, using-git-worktrees.
 
 Коммит `752a981bcdb7f47f66b2156d429b20f77759dc4a`: data-storytelling. Убраны ссылки на не включённые скилы плагина.
 
+## nextlevelbuilder/ui-ux-pro-max-skill — MIT (`ui-ux-pro-max/LICENSE`)
+
+Коммит `09170eec67eefd46a7ae85de61b40c194020f997` (27.09.2026, версия 2.13.0): ui-ux-pro-max. Взяты SKILL.md,
+`references/`, `data/` и скрипты поиска `core.py`, `design_system.py`, `reasoning_contract.py`, `search.py`;
+не взяты тесты и `validate_data.py` (инструмент авторов для обновления базы). Пути команд `${CLAUDE_PLUGIN_ROOT}/…`
+заменены на путь от корня репозитория, добавлены строки про запуск в Windows и про русский текст по ru-text.
+
 ## geserdugarov/shared-skill-ru-text — MIT (`ru-text/LICENSE`)
 
 Коммит `bbab21fff36b3167ae8b549e353965cb62295715`: ru-text. Убраны строки с благодарностями и ссылками
