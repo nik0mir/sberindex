@@ -861,3 +861,83 @@ FEATURE_SCHEMAS: dict[str, TableSchema] = {
         FEATURES_RHYTHM_MONTHLY,
     )
 }
+
+# --- Схемы выходов этапа network ----------------------------------------------------------------
+# Рёбра — неориентированные пары узлов: source < target (territory_id). Правила и способы разрежения —
+# секция ``network`` конфига; формулы — ``munnet.network.rules`` и docs/network.md.
+
+SPARSIFY_METHODS: tuple[str, ...] = ("knn", "mutual_knn", "threshold")
+NETWORK_WINDOW_KINDS: tuple[str, ...] = ("quarter", "half", "rolling")
+RULE_NAME_PATTERN = r"[a-z][a-z0-9_]*"
+
+
+def _source_lt_target(df: pd.DataFrame) -> pd.Series:
+    return df["source"].astype("int64") < df["target"].astype("int64")
+
+
+NETWORK_EDGES = TableSchema(
+    name="network_edges",
+    columns=(
+        Col("rule", "string", pattern=RULE_NAME_PATTERN),
+        Col("sparsify", "category", values=SPARSIFY_METHODS),
+        Col("k", "int16", range=(1, 999)),
+        Col("source", "int32", range=POSITIVE_INT),
+        Col("target", "int32", range=POSITIVE_INT),
+        Col("weight", "float64"),
+        Col("lag", "int8", nullable=True, range=(-12, 12)),
+        Col("q_value", "float64", nullable=True, range=SHARE),
+        Col("same_region", "bool"),
+        Col("dist_km", "float64", range=NONNEG),
+        Col("is_main", "bool"),
+    ),
+    key=("rule", "sparsify", "k", "source", "target"),
+    checks=(Check("source < target: ребро неориентированное, петель нет", _source_lt_target),),
+)
+
+NETWORK_WINDOWS = TableSchema(
+    name="network_windows",
+    columns=(
+        Col("rule", "string", pattern=RULE_NAME_PATTERN),
+        Col("window_kind", "category", values=NETWORK_WINDOW_KINDS),
+        Col("window", "string"),
+        Col("n_months", "int8", range=(1, N_MONTHS)),
+        Col("source", "int32", range=POSITIVE_INT),
+        Col("target", "int32", range=POSITIVE_INT),
+        Col("weight", "float64"),
+        Col("is_main_kind", "bool"),
+    ),
+    key=("rule", "window_kind", "window", "source", "target"),
+    checks=(Check("source < target: ребро неориентированное, петель нет", _source_lt_target),),
+)
+
+NETWORK_WINDOW_NODES = TableSchema(
+    name="network_window_nodes",
+    columns=(
+        Col("window_kind", "category", values=NETWORK_WINDOW_KINDS),
+        Col("window", "string"),
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("n_months", "int8", range=(1, N_MONTHS)),
+        Col("first_date", "string", pattern=DATE_PATTERN),
+        Col("last_date", "string", pattern=DATE_PATTERN),
+        *(Col(f"clr_rel_{p}", "float64") for p in PARTS),
+    ),
+    key=("window_kind", "window", "territory_id"),
+    checks=(Check("CLR относительно группы региона в сумме 0", _clr_rows_zero("clr_rel")),),
+)
+
+NETWORK_NODES = TableSchema(
+    name="network_nodes",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("rule", "string", pattern=RULE_NAME_PATTERN),
+        Col("degree", "int32", range=(0, INT32_MAX)),
+        Col("kocc", "int32", range=(0, INT32_MAX)),
+        Col("community", "int32", range=(0, INT32_MAX)),
+        Col("is_city_node", "bool"),
+    ),
+    key=("territory_id", "rule"),
+)
+
+NETWORK_SCHEMAS: dict[str, TableSchema] = {
+    s.name: s for s in (NETWORK_EDGES, NETWORK_WINDOWS, NETWORK_WINDOW_NODES, NETWORK_NODES)
+}

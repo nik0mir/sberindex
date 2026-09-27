@@ -160,11 +160,88 @@ features:
       offline_2023: 720
       offline_2024: 17
 
+# Этап 2. Правила рёбер и сеть (python -m munnet network): data/processed/network_*.parquet, outputs/network/,
+# отчёт docs/network.md. Формулы правил — в src/munnet/network/rules.py и в отчёте.
 network:
-  edge_rules: [correlation, cosine, lagged_correlation, dtw, road_distance]
+  # Правила рёбер: имя -> вид и параметры. Сходство S_ij пары узлов, больше — ближе.
+  rules:
+    basket_cos:          # косинус векторов корзины: CLR шести долей за окно минус центр группы региона
+      kind: basket_cosine
+    basket_dist:         # то же пространство, расстояние Эйчисона d = ‖s_i − s_j‖ и ядро exp(−d²/σ²)
+      kind: basket_distance
+    rhythm_corr:         # корреляция Пирсона своего ритма (после тренда узла и общего ритма месяца)
+      kind: rhythm_corr
+    rhythm_corr_all:     # вариант: только ряд «Все категории» (не кандидат; показывает, что даёт среднее
+      kind: rhythm_corr  # по шести частям корзины)
+      categories: [all]
+    rhythm_lag:          # максимум корреляции своего ритма по сдвигам |ℓ| ≤ max_lag
+      kind: rhythm_lag
+      max_lag: 3
+    rhythm_dtw:          # DTW z-нормированного своего ритма с окном Сакоэ — Чибы, ядро exp(−d²/σ²)
+      kind: rhythm_dtw
+      window: 2          # допустимый сдвиг, месяцев (dtaidistance: параметр window = сдвиг + 1)
+    geo_road:            # контроль «чистой географии»: дорожное расстояние (highway), ядро exp(−d²/σ²)
+      kind: road
+    geo_gravity:         # контроль: гравитация P_i·P_j / d^β, P — население, d — дорожное расстояние
+      kind: gravity
+      beta: 2.0
+      min_km: 1.0        # у части пар МО дорожное расстояние 0 (общий центр): снизу ограничено
+  rhythm_categories: [food, marketplace, transport, health, cafe, other]   # ряды своего ритма для rhythm_*
+                             # по умолчанию (правило может задать свои categories): шесть частей корзины;
+                             # корреляция — среднее корреляций по категориям (= корреляция сцепленных
+                             # z-рядов), у лагов сдвиг общий для всех категорий пары, DTW — среднее
+                             # расстояний по категориям
+  spearman_check: true       # rhythm_corr: Спирмен вместо Пирсона — проверка на выбросы (Жаккар рёбер)
+  city_distance: pop_mean    # расстояние от узла-города: pop_mean — среднее по районам с весами населения,
+                             # min — до ближайшего района
+  period: all                # окно сравнения правил: all — 24 месяца; надёжность — сети 2023 против 2024
   sparsify:
-    method: knn  # knn | mutual_knn | threshold
+    method: knn              # основное разрежение: knn (объединение списков) | mutual_knn | threshold
     k: 10
+    k_grid: [5, 10, 15, 20]  # чувствительность к k — обязательно
+    fdr_q: 0.05              # threshold для правил по рядам: Бенджамини — Хохберг против циклического сдвига
+  nulls:                     # нулевые модели
+    shift_repeats: 5         # повторов циклического сдвига: нулевое распределение сходства пар рядов
+    shift_guard: 2           # сдвиг s допустим, если |s| mod 12 дальше от 0 и 12 на досягаемость правила
+                             # (лаг L, окно DTW w, у корреляции 0) плюс guard: сезон не совпадает
+    rewire_repeats: 10       # перемешиваний рёбер с сохранением степеней: нуль модульности
+    rewire_factor: 10        # перестановок на ребро при перемешивании
+    mantel_permutations: 49  # перестановок узлов: значимость ранговой корреляции сходств двух правил
+    naive_r: 0.5             # «наивный» порог по r без поправки: сколько пар он пропускает в данных и на нуле
+  bootstrap: 20              # бутстрап месяцев (корзина, корреляция): Жаккар с сетью на всех месяцах
+  probe:                     # фиксированный зонд кластеров: Leiden, модульность, одно разрешение
+    resolution: 1.0
+    seeds: 10
+  attributes:                # согласованность рёбер с экономикой места (не участвует ни в одном правиле)
+    year: 2023               # у 2024 года нет зарплаты в 5 регионах
+    columns: [log_wage_rel, urban_share_rel, age_old_share_rel, log_pop_rel, market_access_rel,
+              emp_sh_primary, emp_sh_industry, emp_sh_trade_transport, emp_sh_market_services, emp_sh_public]
+    relative: [emp_sh_primary, emp_sh_industry, emp_sh_trade_transport, emp_sh_market_services, emp_sh_public]
+                             # эти берутся относительно группы региона (минус медиана группы), как *_rel
+  # Выбор основного правила. Критерии и их порядок объявлены до расчёта (27.09.2026, защита от подгонки):
+  # 1) надёжность — Жаккар рёбер kNN сетей 2023 и 2024 годов, больше — лучше;
+  # 2) отличие от географии — 1 − Жаккар с сетью geo_road, больше — лучше;
+  # 3) согласованность с атрибутами места — средняя ассортативность по attributes.columns, больше — лучше;
+  # 4) простота — ранг simplicity, меньше — лучше.
+  # Правило: Парето-фронт по четырём критериям, на фронте — лексикографически по priority; чувствительность —
+  # выбор при всех 24 порядках критериев. Кандидаты — только правила по тратам (geo_* — контроль).
+  selection:
+    priority: [reliability, geo_difference, attribute_consistency, simplicity]
+    candidates: [basket_cos, basket_dist, rhythm_corr, rhythm_lag, rhythm_dtw]
+    simplicity: {basket_cos: 1, basket_dist: 1, rhythm_corr: 1, rhythm_lag: 2, rhythm_dtw: 3,
+                 geo_road: 1, geo_gravity: 2}
+  modes: [separate]          # режимы узлов для сравнения с основным (nodes.mode): сеть на 247 районах
+  dynamics:                  # последовательность окон для выбранного правила (этап 3 кластеризует её)
+    kinds: [quarter, half, rolling]   # виды окон; rolling — dynamics.window_months и dynamics.step_months
+    main_kind: rolling       # основная последовательность — скользящие 12 месяцев: в каждом окне все
+                             # календарные месяцы, сезонный состав корзины не смешивается со сдвигом типов;
+                             # кварталы и полугодия — проверка (сезон у соседних окон разный)
+    lengths: [3, 6, 12]      # шум против изменения при окне L месяцев: сети на нечётных и чётных месяцах
+                             # отрезка 2L (одно время — разница только шум) против сетей двух соседних окон
+                             # по L месяцев того же отрезка (шум плюс изменение)
+    min_series_months: 12    # правила по рядам — только в окнах не короче (корреляция по 3 точкам — шум)
+  report: docs/network.md
+  report_images: docs/img/network
 
 clustering:
   methods: [kmeans, ward, gmm, hdbscan, louvain, leiden, spectral]
