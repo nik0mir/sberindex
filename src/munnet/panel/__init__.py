@@ -4,7 +4,8 @@
 справочник границ МО, БД ПМО, 5-НДФЛ); выходы (spec_final, А.2):
 
 - ``data/processed``: ``panel_long``, ``panel_wide``, ``territories``, ``territories_geo`` (GeoParquet),
-  ``context_long``, ``context_annual``, ``okved_shares`` — по схемам ``munnet.contracts``;
+  ``context_long``, ``context_annual``, ``okved_shares`` — по схемам ``munnet.contracts``; ``city_context`` —
+  доход и получатели 5-НДФЛ городов федерального значения целиком (для узлов-городов ``munnet.nodes``);
 - ``data/interim``: ``bdmo_rows``, ``ndfl_rows`` — отобранные строки источников до соединения (аудит);
 - ``outputs/panel``: ``controls.json`` и CSV покрытия и потерь.
 
@@ -22,6 +23,7 @@ import pandas as pd
 
 from munnet.config import Config
 from munnet.contracts import (
+    CITY_CONTEXT,
     CONTEXT_ANNUAL,
     CONTEXT_LONG,
     OKVED_SHARES,
@@ -35,6 +37,7 @@ from munnet.contracts import (
 from munnet.panel.consumption import build_panel, read_consumption
 from munnet.panel.context import build_context_full
 from munnet.panel.controls import atomic_write, check_controls, compute_controls, write_coverage_reports
+from munnet.panel.ndfl import read_city_rows
 from munnet.panel.territory import build_territories, read_dictionary, read_polygons
 
 log = logging.getLogger(__name__)
@@ -82,6 +85,9 @@ def run(cfg: Config) -> None:
 
     ctx = build_context_full(cfg, dic, territories)
     log.info("контекст: %d значений, %d потерь", len(ctx.context_long), len(ctx.unmatched))
+    cx = cfg["context"]
+    cities = {int(code): str(spec["oktmo"]) for code, spec in cfg["nodes"]["cities"].items()}
+    city = read_city_rows(raw / cx["ndfl"]["file"], cx["ndfl"], cities, cx["na_codes"])
 
     processed = cfg.dir("processed")
     interim = cfg.dir("interim")
@@ -93,6 +99,7 @@ def run(cfg: Config) -> None:
         (ctx.context_long, CONTEXT_LONG, "context_long"),
         (ctx.context_annual, CONTEXT_ANNUAL, "context_annual"),
         (ctx.okved_shares, OKVED_SHARES, "okved_shares"),
+        (city, CITY_CONTEXT, "city_context"),
     ):
         write_table(coerce(df, schema), schema, processed / f"{name}.parquet")
     atomic_write(

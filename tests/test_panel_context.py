@@ -27,7 +27,7 @@ from munnet.panel.bdmo import (
     stable_pairs,
 )
 from munnet.panel.context import build_annual, flag_recipient_jumps, population
-from munnet.panel.ndfl import read_ndfl
+from munnet.panel.ndfl import read_city_rows, read_ndfl
 from munnet.panel.territory import read_dictionary
 
 CFG = make_config(".")
@@ -440,3 +440,20 @@ def test_read_ndfl_filters_indicator_rate_authority_and_zero(tmp_path):
     present = set(map(tuple, out["present"].astype({"year": "int64"}).to_numpy()))
     assert ("41631000", 2022) in present and ("41631000", 2023) not in present
     assert ("42630000", 2016) in present
+
+
+def test_read_city_rows_takes_subject_summary_report_only(tmp_path):
+    path = tmp_path / "ndfl.parquet"
+    ndfl_frame().to_parquet(path, index=False)
+    cities = {77: "45000000", 78: "40000000"}
+    out = read_city_rows(path, CX["ndfl"], cities, CX["na_codes"]).set_index(["region_code", "indicator"])
+    # Москва: отчёт «Свод» (18 млн получателей), а не отчёт «МО» с тем же ключом (135 получателей)
+    assert out.loc[(77, "ndfl_recipients"), "value"] == 18_000_000.0
+    assert out.loc[(77, "ndfl_income"), "value"] == 3.5e13
+    assert out.loc[(77, "ndfl_recipients"), "oktmo"] == "45000000"
+    # у Петербурга строки «Свод» нет — строки нет, а не 35 получателей
+    assert 78 not in out.index.get_level_values("region_code")
+    assert set(out["report_type"]) == {"Свод"}
+    # строки МО верхнего уровня из read_ndfl не пропадают и городских не содержат
+    mo = read_ndfl(path, CX["ndfl"], CX["na_codes"])
+    assert "45000000" not in set(mo["ndfl_recipients"]["oktmo"])

@@ -21,6 +21,7 @@ from panel_synth import (
 )
 
 from munnet.contracts import (
+    CITY_CONTEXT,
     CONTEXT_ANNUAL,
     CONTEXT_LONG,
     GEO_COLUMNS,
@@ -224,6 +225,11 @@ def test_run_writes_all_outputs_by_contract(built):
     assert geo["territory_id"].dtype == np.int32 and (geo.geom_type == "MultiPolygon").all()
     for name in ("bdmo_rows", "ndfl_rows"):
         assert (Path(built["paths"]["interim"]) / f"{name}.parquet").exists()
+    city = read_table(processed / "city_context.parquet", CITY_CONTEXT).set_index(
+        ["region_code", "indicator"]
+    )
+    assert city.loc[(77, "ndfl_recipients"), "value"] == 18_000_000.0  # отчёт «Свод», не «МО»
+    assert 78 not in city.index.get_level_values("region_code")
 
 
 def test_run_outputs_follow_consumer_contracts(built):

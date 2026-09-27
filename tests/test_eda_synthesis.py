@@ -611,13 +611,17 @@ def test_run_synthesis_on_synthetic(synthetic):
     for k in ("s1", "s2", "s3", "s4", "s5", "s6"):
         for key in ("score", "reject", "status", "external", "example", "user", "proto_note", "main_label"):
             assert f"syn.{key}_{k}" in facts
-        assert f"syn.score_{k}_no_inner" in facts and f"syn.status_{k}_no_inner" in facts
+        assert f"syn.score_{k}_alt" in facts and f"syn.status_{k}_alt" in facts
     for key in (
         "top_story",
         "second_story",
         "verdict",
         "sensitivity",
-        "top_story_no_inner",
+        "top_story_alt",
+        "alt_label",
+        "node_mode_text",
+        "n_nodes",
+        "region_group_text",
         "n_mo",
         "eta2_log_level_2024",
         "moran_log_level_2024",
@@ -635,7 +639,7 @@ def test_run_synthesis_on_synthetic(synthetic):
     )
     t14 = pd.read_csv(out / syn.tables[1].csv)
     assert list(t14["sid"]) == ["С1", "С2", "С3", "С4", "С5", "С6"]
-    assert t14["score"].between(1, 5).all() and {"score_no_inner", "status_no_inner", "failed"} <= set(t14)
+    assert t14["score"].between(1, 5).all() and {"score_alt", "status_alt", "failed"} <= set(t14)
     # индикаторы сводки — вся таблица показателей МО с подписями
     assert {"log_level_2024", "own_amplitude", "log_spend_to_ndfl"} <= set(syn.indicators.columns)
     assert set(syn.indicators.columns) - {"territory_id"} == set(syn.indicator_labels)
@@ -699,3 +703,63 @@ def test_synthesis_is_reproducible(synthetic):
     t = synthesis.region_or_place(ind, data.mo, cfg, rng, labels=labels)
     first = pd.read_csv(synthetic["out"] / synthetic["syn"].figures[0].data_csv)
     assert np.allclose(first["moran_p"], t["moran_p"]) and list(first["indicator"]) == list(t["indicator"])
+
+
+# --- Узлы сети (nodes.mode) -------------------------------------------------------------------------
+
+
+def test_node_mode_matrix_is_on_nodes(synthetic):
+    """По умолчанию (collapse) матрица T14 — на узлах: знаменатель покрытия — узлы, вторая матрица — 247
+    внутригородских территорий отдельными узлами."""
+    facts, data = synthetic["syn"].facts, synthetic["data"]
+    n_inner = int(data.mo["is_inner_city"].sum())
+    n_cities = facts["syn.n_city_nodes"].value
+    assert facts["syn.n_nodes"].value == len(data.mo) - n_inner + n_cities
+    assert facts["syn.alt_label"].value == stories.SEPARATE_LABEL
+    assert facts["syn.node_mode"].value == "collapse"
+    for key in stories.NODES.values():
+        assert key in facts, key
+    cover = facts["syn.coverage_note_s1"].value.replace(NB, " ")
+    assert f"из {facts['syn.n_nodes'].value}" in cover
+
+
+def test_separate_mode_keeps_matrix_by_mo(synthetic):
+    """Режим separate: матрица — по фактам разделов (все МО), вторая — без внутригородских территорий."""
+    cfg = copy.deepcopy(synthetic["cfg"].data)
+    cfg["nodes"]["mode"] = "separate"
+    cfg = Config(data=cfg, path=synthetic["cfg"].path)
+    ctx = SectionContext(
+        cfg, synthetic["data"], eda.eda_dir(cfg), SYNTHESIS_ID, eda.section_rng(cfg, SYNTHESIS_NUMBER)
+    )
+    facts = synthesis.run_synthesis(ctx, synthetic["findings"]).facts
+    assert facts["syn.alt_label"].value == stories.NO_INNER_LABEL
+    assert facts["syn.n_nodes"].value == len(synthetic["data"].mo)
+    assert "syn.reliable_share_nodes" not in facts
+
+
+def test_node_view_uses_region_group_and_hides_outliers(synthetic):
+    from munnet.eda.data import node_view
+
+    view, nd = node_view(synthetic["data"], synthetic["cfg"])
+    mo = view.mo.set_index("territory_id")
+    msk = nd.params.node_id(77)
+    assert msk in mo.index and not mo["is_inner_city"].any()
+    # в синтетике Московской области нет: Москва — сама себе группа, регион в mo — группа
+    assert (
+        view.mo["region_code"].to_numpy()
+        == nd.nodes.set_index("territory_id").loc[view.mo["territory_id"], "region_group"].to_numpy()
+    ).all()
+    assert np.isnan(mo.loc[msk, "wage_2023"])  # зарплата Москвы — выброс, критерии её не видят
+    assert set(view.panel_wide["territory_id"]) == set(view.mo["territory_id"])
+
+
+def test_separate_alternatives_skip_mo_only_keys():
+    facts = facts_of({**REAL_LIKE, "syn.n_mo": (2190, "int"), "e1.n_full": (2016, "int")})
+    copies, mapping = stories.separate_alternatives(facts)
+    assert "e4.residual_share" in mapping and mapping["e4.residual_share"] in copies
+    assert "e2.partial_rho_access_within_no_inner" not in mapping  # С2 в разделе уже без внутригородских
+    assert "syn.n_mo" not in mapping and "e1.n_full" not in mapping
+    rej = stories.Rejection("x", "e4.residual_share", ">=", "rejection.s4_residual_share_min", "доля")
+    alts = stories.other_estimates(rej, [(mapping, "отдельными узлами")])
+    assert alts == [(mapping["e4.residual_share"], "отдельными узлами")]
+    assert stories.other_estimates(rej) == [("syn.residual_share_no_inner", stories.NO_INNER_LABEL)]

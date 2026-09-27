@@ -112,3 +112,43 @@ def read_ndfl(path: Path, spec: dict, na_codes: Sequence[str] = NA_CODES) -> dic
         log.info("5-НДФЛ %s: %d строк МО-год", name, len(out[f"ndfl_{name}"]))
     log.info("5-НДФЛ: %d пар моста oktmo_stable", len(out["pairs"]))
     return out
+
+
+CITY_READ_COLUMNS = [*READ_COLUMNS, "report_type"]
+
+
+def read_city_rows(
+    path: Path, spec: dict, cities: dict[int, str], na_codes: Sequence[str] = NA_CODES
+) -> pd.DataFrame:
+    """Доход и получатели 5-НДФЛ городов федерального значения целиком (узлы-города ``munnet.nodes``).
+
+    ``cities`` — код субъекта -> ОКТМО города (``nodes.cities``). Строки — уровень и отчёт
+    ``spec["city_rows"]`` («Субъект РФ», «Свод»): отчёт «МО» с тем же ключом у Москвы — другой отчёт (единицы
+    получателей), его брать нельзя. Фильтры показателей и инспекции — те же, что у ``read_ndfl``; ноль
+    и пропуск удаляются, дубль ключа с разными значениями — первая строка и флаг ``dup_conflict``. Город без
+    строки «Свод» в результат не попадает (у Петербурга её нет). Колонки — схема ``contracts.CITY_CONTEXT``.
+    """
+    city = spec["city_rows"]
+    by_oktmo = {str(v): int(k) for k, v in cities.items()}
+    dset = ds.dataset(path)
+    parts = []
+    for name in INDICATORS:
+        flt = (
+            (ds.field("object_level") == city["object_level"])
+            & (ds.field("report_type") == city["report_type"])
+            & ds.field("object_oktmo").isin(list(by_oktmo))
+            & ds.field("year").isin([int(y) for y in spec["years"]])
+            & (ds.field("tax_authority") == spec["tax_authority"])
+        )
+        for col, val in spec[name].items():
+            flt = flt & (ds.field(col) == val)
+        frame = dset.to_table(columns=CITY_READ_COLUMNS, filter=flt).to_pandas()
+        rows = _rows(frame, na_codes)
+        rows["report_type"] = city["report_type"]
+        parts.append(rows.assign(indicator=f"ndfl_{name}"))
+    out = pd.concat(parts, ignore_index=True)
+    out["region_code"] = out["oktmo"].map(by_oktmo).astype("int16")
+    out["year"] = out["year"].astype("int16")
+    out = out[["region_code", "year", "indicator", "value", "oktmo", "source_code", "report_type", "flag"]]
+    log.info("5-НДФЛ, города целиком: %d строк (%s)", len(out), ", ".join(sorted(set(out["oktmo"]))))
+    return out.sort_values(["region_code", "year", "indicator"], kind="mergesort").reset_index(drop=True)

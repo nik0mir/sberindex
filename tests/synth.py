@@ -37,6 +37,7 @@ from pyproj import Transformer
 from munnet.config import Config, load_config
 from munnet.contracts import (
     CATEGORY_CODES,
+    CITY_CONTEXT,
     CONTEXT_ANNUAL,
     CONTEXT_LONG,
     LINEAGE_ROLES,
@@ -601,6 +602,7 @@ def make_processed(root: Path, *, n_regions: int = 6, mo_per_region: int = 12, s
     write_table(context_long, CONTEXT_LONG, processed / "context_long.parquet")
     write_table(annual, CONTEXT_ANNUAL, processed / "context_annual.parquet")
     write_table(shares, OKVED_SHARES, processed / "okved_shares.parquet")
+    write_table(_city_context(ter), CITY_CONTEXT, processed / "city_context.parquet")
     _geo(ter, table, crs).to_parquet(processed / "territories_geo.parquet")
 
     panel_out = cfg.dir("outputs") / "panel"
@@ -628,6 +630,22 @@ def make_processed(root: Path, *, n_regions: int = 6, mo_per_region: int = 12, s
         json.dump(controls, f, ensure_ascii=False, sort_keys=True, indent=1)
     _unmatched(table).to_csv(panel_out / "unmatched.csv", index=False, lineterminator="\n")
     return processed
+
+
+def _city_context(ter: pd.DataFrame) -> pd.DataFrame:
+    """Строки 5-НДФЛ «город целиком» (как ``panel.ndfl.read_city_rows``): только у Москвы (77), у Петербурга
+    строки «Свод» нет. Получателей в 1,4 раза больше жителей (работают в городе и жители области)."""
+    pop = float(ter.loc[ter["region_code"] == 77, "pop"].sum())
+    rows = []
+    for year in YEARS:
+        rows.append((77, year, "ndfl_recipients", 1.4 * pop))
+        rows.append((77, year, "ndfl_income", 1.4 * pop * 12 * 90_000.0))
+    out = pd.DataFrame(rows, columns=["region_code", "year", "indicator", "value"])
+    out["oktmo"] = "45000000"
+    out["source_code"] = np.where(out["indicator"] == "ndfl_income", "Y777000006", "Y777000028")
+    out["report_type"] = "Свод"
+    out["flag"] = pd.Series([None] * len(out), dtype="str")
+    return out.astype({"region_code": "int16", "year": "int16"})
 
 
 UNMATCHED_INDICATORS = ("population", "wage")  # показатели строк unmatched.csv у преемника в 2023 году

@@ -13,16 +13,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from munnet import nodes
 from munnet.config import Config
 from munnet.contracts import (
     CATEGORY_CODES,
+    CITY_CONTEXT,
     CONTEXT_ANNUAL,
     CONTEXT_LONG,
     N_MONTHS,
@@ -37,6 +40,8 @@ from munnet.contracts import (
     read_table,
 )
 from munnet.eda import stats
+
+log = logging.getLogger(__name__)
 
 PANEL_HINT = "сначала запустите этап panel: python -m munnet panel"
 MONTHS_IN_YEAR = 12
@@ -102,6 +107,8 @@ class EdaData:
     mo: pd.DataFrame
     national: pd.DataFrame
     geo_path: Path
+    # 5-НДФЛ городов федерального значения целиком (этап panel, для узлов-городов); пусто — нет файла.
+    city_context: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=list(CITY_CONTEXT.names)))
 
 
 def _require(path: Path) -> Path:
@@ -129,6 +136,12 @@ def load(cfg: Config) -> EdaData:
         "okved_shares": read_table(_require(processed / "okved_shares.parquet"), OKVED_SHARES),
     }
     geo_path = _require(processed / "territories_geo.parquet")
+    city_path = processed / "city_context.parquet"
+    if city_path.exists():
+        city = read_table(city_path, CITY_CONTEXT)
+    else:
+        log.warning("нет %s: у узлов-городов не будет числа получателей 5-НДФЛ (%s)", city_path, PANEL_HINT)
+        city = pd.DataFrame(columns=list(CITY_CONTEXT.names))
     with open(_require(panel_out / "controls.json"), encoding="utf-8") as f:
         controls = json.load(f)
     unmatched = pd.read_csv(_require(panel_out / "unmatched.csv"), dtype=UNMATCHED_STR)
@@ -142,8 +155,60 @@ def load(cfg: Config) -> EdaData:
     )
     national = build_national(tables["panel_long"], tables["panel_wide"], tables["context_annual"])
     return EdaData(
-        **tables, controls=controls, unmatched=unmatched, mo=mo, national=national, geo_path=geo_path
+        **tables,
+        controls=controls,
+        unmatched=unmatched,
+        mo=mo,
+        national=national,
+        geo_path=geo_path,
+        city_context=city,
     )
+
+
+def node_view(data: EdaData, cfg: Config) -> tuple[EdaData, nodes.NodeData]:
+    """Те же входы разведки, но на узлах сети (``nodes.mode`` конфига): для матрицы сюжетов и прототипа.
+
+    Панель, справочник, контекст и доли ОКВЭД2 — таблицы ``munnet.nodes``; ``mo`` и ``national`` строятся теми
+    же функциями, что и для МО. Регион в ``mo`` и ``territories`` — группа региона узла (``region_group``:
+    Москва вместе с Московской областью, Петербург — с Ленинградской), иначе у узла-города всё «относительно
+    региона» тождественно нулю. Значения с флагом выброса (зарплата и доход 5-НДФЛ Москвы) в ``mo`` — пропуск:
+    критерии сюжетов их не видят. ``panel_long`` — траты float64, ``context_long``, ``unmatched`` и полигоны —
+    как у МО (узлам-городам полигонов нет).
+    """
+    nd = nodes.build_nodes(
+        data.panel_wide,
+        data.territories,
+        data.context_annual,
+        data.okved_shares,
+        data.city_context,
+        nodes.node_params(cfg),
+    )
+    ter = nd.nodes.copy()
+    ter["region_code"] = ter["region_group"]
+    ter["region_name"] = ter["region_group_name"]
+    ctx = nd.context_annual.copy()
+    ctx["wage"] = ctx["wage"].where(~ctx["wage_outlier"].astype(bool))
+    eda = cfg["eda"]
+    mo = build_mo(
+        nd.panel_wide,
+        ter,
+        ctx,
+        summer_months=eda["summer_months"],
+        rel_min_months=eda["level_rel_min_months"],
+    )
+    long = nodes.panel_long(nd.panel_wide)
+    national = build_national(long, nd.panel_wide, ctx)
+    view = replace(
+        data,
+        panel_long=long,
+        panel_wide=nd.panel_wide,
+        territories=ter,
+        context_annual=ctx,
+        okved_shares=nd.okved_shares,
+        mo=mo,
+        national=national,
+    )
+    return view, nd
 
 
 # --- mo ------------------------------------------------------------------------------------------

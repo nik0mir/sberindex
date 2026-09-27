@@ -70,10 +70,15 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
   (выполнен хотя бы один критерий силы сигнала) или «контекст», какой бы ни был итог. Сигнал сюжета проверяется
   сверх того, что дают уровень трат, зарплата и регион: иначе типы повторят карту регионов и зарплат.
 - **Критерий на границе** — критерий, по которому другая оценка той же величины (граница интервала бутстрепа,
-  другое определение «внутри регионов», выборка без внутригородских территорий) даёт другой ответ: на таком
+  другое определение «внутри регионов», другое решение по Москве и Петербургу) даёт другой ответ: на таком
   критерии решение строить не стоит.
-- **Без Москвы и Петербурга.** Матрица посчитана ещё раз без {{syn.n_inner}} внутригородских территорий:
-  критерии и сила сигнала — на МО без них, покрытие и экспертные баллы — те же.
+- **Узлы сети.** Критерии отказа, сила сигнала, покрытие и прототип типов посчитаны на узлах сети:
+  {{syn.node_mode_text}} (параметр `nodes.mode`); узлов {{syn.n_nodes}}, из них с полным рядом —
+  {{syn.n_full_nodes}}. Функции те же, что в разделах, а «относительно региона» — {{syn.region_group_text}}.
+  Сюжет С6 на узлах не пересчитывается: внутригородские территории и узлы-города не входят в выборку 5-НДФЛ,
+  меняется только знаменатель покрытия.
+- **Другое решение по Москве и Петербургу.** Вторая матрица — {{syn.alt_label}}: критерии, сила сигнала
+  и покрытие — при этом решении, экспертные баллы — те же.
 - **Проверки сюжета.** Быстрый прототип типов (таблица T15) показывает, не повторяют ли типы простое деление МО;
   внешняя проверка — связь главного показателя сюжета внутри регионов с показателем Росстата вне признаков
   сюжета, ожидаемый знак связи записан до этапа 2; пример МО — наибольшее отклонение от того, что дают
@@ -88,8 +93,8 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
 <!-- table: T15 -->
 
 **{{syn.title_s1}}** — {{syn.gist_s1}}. Роль: {{syn.role_s1}}; итог {{syn.score_s1}} (по фактам
-{{syn.score_facts_s1}}, экспертный {{syn.score_expert_s1}}); без внутригородских территорий —
-{{syn.status_s1_no_inner}}, итог {{syn.score_s1_no_inner}}.
+{{syn.score_facts_s1}}, экспертный {{syn.score_expert_s1}}); {{syn.alt_label}} —
+{{syn.status_s1_alt}}, итог {{syn.score_s1_alt}}.
 
 - Критерии отказа: {{syn.criteria_s1}}.
 - Сигнал {{syn.signal_s1}}: {{syn.signal_note_s1}}; покрытие {{syn.coverage_s1}}: {{syn.coverage_note_s1}}.
@@ -99,8 +104,8 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
 - Пример МО: {{syn.example_s1}}; кому полезен: {{syn.user_s1}}.
 
 **{{syn.title_s2}}** — {{syn.gist_s2}}. Роль: {{syn.role_s2}}; итог {{syn.score_s2}} (по фактам
-{{syn.score_facts_s2}}, экспертный {{syn.score_expert_s2}}); без внутригородских территорий —
-{{syn.status_s2_no_inner}}, итог {{syn.score_s2_no_inner}}.
+{{syn.score_facts_s2}}, экспертный {{syn.score_expert_s2}}); {{syn.alt_label}} —
+{{syn.status_s2_alt}}, итог {{syn.score_s2_alt}}.
 
 - Критерии отказа: {{syn.criteria_s2}}.
 - Сигнал {{syn.signal_s2}}: {{syn.signal_note_s2}}; покрытие {{syn.coverage_s2}}: {{syn.coverage_note_s2}}.
@@ -110,8 +115,8 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
 - Пример МО: {{syn.example_s2}}; кому полезен: {{syn.user_s2}}.
 
 **{{syn.title_s3}}** — {{syn.gist_s3}}. Роль: {{syn.role_s3}}; итог {{syn.score_s3}} (по фактам
-{{syn.score_facts_s3}}, экспертный {{syn.score_expert_s3}}); без внутригородских территорий —
-{{syn.status_s3_no_inner}}, итог {{syn.score_s3_no_inner}}.
+{{syn.score_facts_s3}}, экспертный {{syn.score_expert_s3}}); {{syn.alt_label}} —
+{{syn.status_s3_alt}}, итог {{syn.score_s3_alt}}.
 
 - Критерии отказа: {{syn.criteria_s3}}.
 - Сигнал {{syn.signal_s3}}: {{syn.signal_note_s3}}; покрытие {{syn.coverage_s3}}: {{syn.coverage_note_s3}}.
@@ -121,8 +126,8 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
 - Пример МО: {{syn.example_s3}}; кому полезен: {{syn.user_s3}}.
 
 **{{syn.title_s4}}** — {{syn.gist_s4}}. Роль: {{syn.role_s4}}; итог {{syn.score_s4}} (по фактам
-{{syn.score_facts_s4}}, экспертный {{syn.score_expert_s4}}); без внутригородских территорий —
-{{syn.status_s4_no_inner}}, итог {{syn.score_s4_no_inner}}.
+{{syn.score_facts_s4}}, экспертный {{syn.score_expert_s4}}); {{syn.alt_label}} —
+{{syn.status_s4_alt}}, итог {{syn.score_s4_alt}}.
 
 - Критерии отказа: {{syn.criteria_s4}}.
 - Сигнал {{syn.signal_s4}}: {{syn.signal_note_s4}}; покрытие {{syn.coverage_s4}}: {{syn.coverage_note_s4}}.
@@ -132,8 +137,8 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
 - Пример МО: {{syn.example_s4}}; кому полезен: {{syn.user_s4}}.
 
 **{{syn.title_s5}}** — {{syn.gist_s5}}. Роль: {{syn.role_s5}}; итог {{syn.score_s5}} (по фактам
-{{syn.score_facts_s5}}, экспертный {{syn.score_expert_s5}}); без внутригородских территорий —
-{{syn.status_s5_no_inner}}, итог {{syn.score_s5_no_inner}}.
+{{syn.score_facts_s5}}, экспертный {{syn.score_expert_s5}}); {{syn.alt_label}} —
+{{syn.status_s5_alt}}, итог {{syn.score_s5_alt}}.
 
 - Критерии отказа: {{syn.criteria_s5}}.
 - Сигнал {{syn.signal_s5}}: {{syn.signal_note_s5}}; покрытие {{syn.coverage_s5}}: {{syn.coverage_note_s5}}.
@@ -147,8 +152,8 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
 - Пример МО: {{syn.example_s5}}; кому полезен: {{syn.user_s5}}.
 
 **{{syn.title_s6}}** — {{syn.gist_s6}}. Роль: {{syn.role_s6}}; итог {{syn.score_s6}} (по фактам
-{{syn.score_facts_s6}}, экспертный {{syn.score_expert_s6}}); без внутригородских территорий —
-{{syn.status_s6_no_inner}}, итог {{syn.score_s6_no_inner}}.
+{{syn.score_facts_s6}}, экспертный {{syn.score_expert_s6}}); {{syn.alt_label}} —
+{{syn.status_s6_alt}}, итог {{syn.score_s6_alt}}.
 
 - Критерии отказа: {{syn.criteria_s6}}.
 - Сигнал {{syn.signal_s6}}: {{syn.signal_note_s6}}; покрытие {{syn.coverage_s6}}: {{syn.coverage_note_s6}}.
@@ -237,8 +242,8 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
 - **Москва и Петербург.** Без {{syn.n_inner}} внутригородских территорий η² уровня трат меняется с
   {{syn.eta2_log_level_2024}} до {{syn.eta2_log_level_2024_no_inner}}, I Морана — с {{syn.moran_log_level_2024}}
   до {{syn.moran_log_level_2024_no_inner}}; сильнее всего меняется η² показателя «{{syn.inner_max_shift}}»: с
-  {{syn.inner_max_shift_from}} до {{syn.inner_max_shift_to}}. От того, оставить их отдельными узлами, свернуть
-  в два узла или исключить с оговоркой, зависит и выбор сюжета (таблица T14) — решить до этапа 2.
+  {{syn.inner_max_shift_from}} до {{syn.inner_max_shift_to}}. В сети они — {{syn.node_mode_text}} (параметр
+  `nodes.mode`); матрица сюжетов посчитана на узлах сети, вторая матрица — {{syn.alt_label}} (таблица T14).
 <!-- if e1 e5 -->
 - **Контекст.** Зарплата Росстата есть у {{e1.cov_wage_2023}} МО панели, доход 5-НДФЛ — у
   {{e1.cov_ndfl_income_2023}}. Доход 5-НДФЛ на жителя пригоден (флаг `ndfl_ok`) у {{syn.n_ndfl_ok}} МО, а отношение
@@ -277,8 +282,9 @@ lead, title, sources, if … endif (см. src/munnet/eda/report.py). «рис. N
   {{e1.n_gap_regions_2024}} регионах: {{e1.gap_regions_2024}} ({{e1.n_gap_mo_2024}} МО панели), поэтому признаки
   контекста разведки взяты за 2023 год.
 - **Москва и Петербург.** {{e1.n_inner_city}} внутригородских территорий — {{e1.inner_city_node_share}} узлов
-  и {{e1.pop_share_inner_city}} населения выборки; с ними и без них оценки «регион или место» и роли сюжетов
-  различаются (таблицы T13, T14).
+  и {{e1.pop_share_inner_city}} населения выборки; с ними и без них оценки «регион или место» различаются
+  (таблица T13). В сети они — {{syn.node_mode_text}}; роли сюжетов при другом решении — во второй матрице
+  (таблица T14).
 <!-- endif -->
 <!-- if e4 -->
 - **Маркетплейсы.** Рост доли может частично быть переклассификацией продавцов: резкого скачка тест ступеньки

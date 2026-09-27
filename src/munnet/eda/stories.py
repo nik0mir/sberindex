@@ -107,6 +107,57 @@ NO_INNER: dict[str, str] = {
     "syn.mp_split_half_resid": "syn.mp_split_half_resid_no_inner",
 }
 
+# Та же величина на узлах сети (``nodes.mode`` конфига, по умолчанию Москва и Петербург — два узла-города):
+# факт основной оценки -> факт сводки, посчитанный теми же функциями разделов на узлах
+# (``synthesis.node_values``). В режиме узлов матрица T14 считается по этим фактам, а оценка «247
+# внутригородских территорий отдельными узлами» (факты разделов) становится другой оценкой критерия и второй
+# матрицей. С6 на узлах не пересчитывается: внутригородские территории и узлы-города не входят в выборку
+# 5-НДФЛ (``ndfl_ok`` = false), меняется только знаменатель покрытия.
+NODES_LABEL = "на узлах сети"
+SEPARATE_LABEL = "247 внутригородских территорий отдельными узлами"
+NODES: dict[str, str] = {
+    N_MO_FACT: "syn.n_nodes",
+    "e1.n_full": "syn.n_full_nodes",
+    "e3.reliable_share": "syn.reliable_share_nodes",
+    "e3.share_r06": "syn.share_r06_nodes",
+    "e3.null_reliable_share": "syn.null_reliable_share_nodes",
+    "e2.partial_rho_access_within_no_inner": "syn.partial_rho_access_nodes",
+    "e2.n_access_wage": "syn.n_access_wage_nodes",
+    "e4.growth_half_consistency": "syn.growth_half_consistency_nodes",
+    "e4.residual_share": "syn.residual_share_nodes",
+    "e4.residual_pc1_stability": "syn.residual_pc1_stability_nodes",
+    "e4.n_basket": "syn.n_basket_nodes",
+    "e4.mp_split_half": "syn.mp_split_half_nodes",
+    "e4.rho_mp_pp_level_within": "syn.rho_mp_pp_level_within_nodes",
+    "e4.mp_step_max_pp": "syn.mp_step_max_pp_nodes",
+    "syn.mp_split_half_resid": "syn.mp_split_half_resid_nodes",
+    "syn.mp_r2_level_region": "syn.mp_r2_level_region_nodes",
+    "syn.resid_part_stability_span": "syn.resid_part_stability_span_nodes",
+    "e5.n_ndfl_usable": "syn.n_ndfl_usable_nodes",
+}
+# Ключи основной оценки, у которых оценка разделов включает 247 внутригородских территорий (С2 в разделе уже
+# без них): для них оценка разделов — другая оценка критерия с подписью ``SEPARATE_LABEL``.
+SEPARATE_PREFIX = "separate:"
+
+
+def separate_alternatives(facts: Mapping[str, Fact]) -> tuple[dict[str, Fact], dict[str, str]]:
+    """Копии фактов разделов под ключами ``separate:<ключ>`` и карта «ключ -> копия» для ``other_estimates``.
+
+    Только для ключей ``NODES``, чья оценка в разделах включает внутригородские территории (без С2 и без
+    знаменателей покрытия).
+    """
+    skip = {N_MO_FACT, "e2.partial_rho_access_within_no_inner", "e2.n_access_wage", "e1.n_full"}
+    skip |= {"e4.n_basket", "e5.n_ndfl_usable"}
+    copies, mapping = {}, {}
+    for key in NODES:
+        if key in skip or key not in facts:
+            continue
+        alias = SEPARATE_PREFIX + key
+        copies[alias] = dataclasses.replace(facts[key], key=alias)
+        mapping[key] = alias
+    return copies, mapping
+
+
 # Параметры по умолчанию; ``eda.stories`` конфига переопределяет их ключ за ключом, отсутствующие пороги
 # ``eda.rejection`` берутся из ``rejection`` (spec_final, Б.5).
 DEFAULTS: dict[str, Any] = {
@@ -315,17 +366,27 @@ def resolve_threshold(path: str, prm: Mapping[str, Any], eda: Mapping[str, Any] 
     return float(node)
 
 
-def other_estimates(rej: Rejection) -> list[tuple[str, str]]:
-    """Другие оценки критерия: ``rej.alts`` и, если есть, оценка без внутригородских территорий."""
+AltMaps = Sequence[tuple[Mapping[str, str], str]]
+DEFAULT_ALTS: tuple[tuple[Mapping[str, str], str], ...] = ((NO_INNER, NO_INNER_LABEL),)
+
+
+def other_estimates(rej: Rejection, alt_maps: AltMaps | None = None) -> list[tuple[str, str]]:
+    """Другие оценки критерия: ``rej.alts`` и оценки из карт ``alt_maps`` (ключ основной оценки -> факт другой
+    оценки, подпись); по умолчанию — оценка без внутригородских территорий (``NO_INNER``)."""
     alts = list(rej.alts)
-    extra = NO_INNER.get(rej.fact_key)
-    if extra and extra not in {key for key, _ in alts}:
-        alts.append((extra, NO_INNER_LABEL))
+    for mapping, label in DEFAULT_ALTS if alt_maps is None else alt_maps:
+        extra = mapping.get(rej.fact_key)
+        if extra and extra not in {key for key, _ in alts}:
+            alts.append((extra, label))
     return alts
 
 
 def check_rejection(
-    rej: Rejection, facts: Mapping[str, Fact], prm: Mapping[str, Any], eda: Mapping[str, Any] | None
+    rej: Rejection,
+    facts: Mapping[str, Fact],
+    prm: Mapping[str, Any],
+    eda: Mapping[str, Any] | None,
+    alt_maps: AltMaps | None = None,
 ) -> CriterionResult:
     """Проверяет один критерий отказа по фактам; пропуск факта — ``ok=None``.
 
@@ -355,7 +416,11 @@ def check_rejection(
     ok = bool(compare(value, limit))
     text = f"{rej.text} {_fmt_like(facts, rej.fact_key, value)}, {need} {sym} {limit_text}"
     short = style_nbsp(text)
-    found = [(key, label, v) for key, label in other_estimates(rej) if (v := _value(facts, key)) is not None]
+    found = [
+        (key, label, v)
+        for key, label in other_estimates(rej, alt_maps)
+        if (v := _value(facts, key)) is not None
+    ]
     fragile = any(bool(compare(v, limit)) != ok for _, _, v in found)
     notes = []
     if found and fragile:
@@ -823,6 +888,7 @@ def evaluate(
     weights: Mapping[str, float],
     prm: Mapping[str, Any],
     eda: Mapping[str, Any] | None,
+    alt_maps: AltMaps | None = None,
 ) -> pd.DataFrame:
     """Матрица решения: строка на сюжет — баллы по шести критериям, части итога и итог, роль, критерии отказа.
 
@@ -840,7 +906,7 @@ def evaluate(
         cov, cov_note = s.coverage(facts)
         scores: dict[str, int | None] = {"signal": sig, "coverage": cov}
         scores.update({k: int(v[0]) for k, v in s.manual.items()})
-        results = [check_rejection(r, facts, prm, eda) for r in s.rejections]
+        results = [check_rejection(r, facts, prm, eda, alt_maps) for r in s.rejections]
         status = story_status(results)
         manual_note = "; ".join(f"{CRITERIA_SHORT[k]} {s.manual[k][0]}: {s.manual[k][1]}" for k in s.manual)
         rows.append(
@@ -975,13 +1041,18 @@ def verdict_text(matrix: pd.DataFrame) -> str:
     return style_nbsp(text + ".")
 
 
-def sensitivity_text(matrix: pd.DataFrame, other: pd.DataFrame, n_inner: int | None) -> str:
-    """Меняет ли выбор сюжета исключение внутригородских территорий: ``other`` — матрица без них.
+def sensitivity_text(
+    matrix: pd.DataFrame, other: pd.DataFrame, n_inner: int | None, where: str | None = None
+) -> str:
+    """Меняет ли выбор сюжета другое решение по Москве и Петербургу: ``other`` — матрица при этом решении.
 
-    Сравниваются сюжеты, прошедшие все критерии отказа, и лучший по итогу. Ничего не меняется — одна фраза
-    об этом; иначе — кто начинает или перестаёт проходить критерии и кто выходит вперёд по итогу.
+    ``where`` — начало фразы о другом решении («С 247 внутригородскими территориями отдельными узлами»); по
+    умолчанию — исключение внутригородских территорий («Без 247 внутригородских территорий Москвы и
+    Петербурга»). Сравниваются сюжеты, прошедшие все критерии отказа, и лучший по итогу. Ничего не
+    меняется — одна фраза об этом; иначе — кто начинает или перестаёт проходить критерии и кто выходит вперёд.
     """
-    where = "Без " + (f"{n_inner} " if n_inner else "") + "внутригородских территорий Москвы и Петербурга"
+    if where is None:
+        where = "Без " + (f"{n_inner} " if n_inner else "") + "внутригородских территорий Москвы и Петербурга"
 
     def mains(m: pd.DataFrame) -> list[str]:
         r = ranking(m)

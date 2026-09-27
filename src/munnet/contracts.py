@@ -1,4 +1,4 @@
-"""Контракты таблиц этапов panel и eda: схемы, проверка, запись и чтение parquet.
+"""Контракты таблиц этапов panel, eda и features: схемы, проверка, запись и чтение parquet.
 
 Схемы описывают выходы этапа panel (spec_final, часть А.4). ``validate`` проверяет набор колонок, типы,
 пропуски, диапазоны, допустимые значения, шаблоны строк, уникальность ключа и межколоночные правила и
@@ -551,6 +551,313 @@ OKVED_SHARES = TableSchema(
     key=("territory_id", "year", "section"),
 )
 
+# Строки «Субъект РФ» 5-НДФЛ городов федерального значения (узлы-города, ``munnet.nodes``): получатели
+# дохода Москвы берутся из городской строки — сумма по районам считает людей дважды.
+CITY_INDICATORS: tuple[str, ...] = ("ndfl_income", "ndfl_recipients")
+CITY_CONTEXT = TableSchema(
+    name="city_context",
+    columns=(
+        Col("region_code", "int16", range=(1, 99)),
+        Col("year", "int16", range=CONTEXT_YEAR_RANGE),
+        Col("indicator", "string", values=CITY_INDICATORS),
+        Col("value", "float64", range=(0.0, INF)),
+        Col("oktmo", "string", pattern=OKTMO_PATTERN),
+        Col("source_code", "string"),
+        Col("report_type", "string"),
+        Col("flag", "string", nullable=True, pattern=FLAG_PATTERN),
+    ),
+    key=("region_code", "year", "indicator"),
+)
+
 SCHEMAS: dict[str, TableSchema] = {
-    s.name: s for s in (PANEL_LONG, PANEL_WIDE, TERRITORIES, CONTEXT_LONG, CONTEXT_ANNUAL, OKVED_SHARES)
+    s.name: s
+    for s in (PANEL_LONG, PANEL_WIDE, TERRITORIES, CONTEXT_LONG, CONTEXT_ANNUAL, OKVED_SHARES, CITY_CONTEXT)
+}
+
+
+# --- Схемы узлов сети и признаков узлов (этап 2: munnet.nodes, munnet.features) -----------------
+#
+# Узел — МО панели или узел-город (внутригородские территории Москвы и Петербурга, свёрнутые в два узла
+# в режиме ``nodes.mode = collapse``). У узла-города свой ``territory_id`` (``nodes.city_id_base`` + код
+# субъекта), которого нет в справочнике СберИндекса: связь с МО панели — таблица ``node_members``.
+
+NODE_MODES: tuple[str, ...] = ("collapse", "separate", "exclude")
+CITY_MO_TYPE = "city"  # тип узла-города: город федерального значения целиком
+NODE_MO_TYPES: tuple[str, ...] = (*MO_TYPES, CITY_MO_TYPE)
+MEMBER_ROLES: tuple[str, ...] = ("self", "city_member", "excluded")
+MAX_MEMBERS = 999.0
+
+
+def _node_consistent(df: pd.DataFrame) -> pd.Series:
+    months_ok = df["n_months"].astype("int64") == df["n_2023"].astype("int64") + df["n_2024"].astype("int64")
+    pattern_ok = df["coverage_pattern"].astype(str).str.count("1") == df["n_months"].astype("int64")
+    city_ok = df["is_city_node"] == (df["mo_type"].astype(str) == CITY_MO_TYPE)
+    members_ok = df["is_city_node"] | (df["n_members"].astype("int64") == 1)
+    return months_ok & pattern_ok & city_ok & members_ok
+
+
+NODES = TableSchema(
+    name="nodes",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("name", "string"),
+        Col("name_short", "string"),
+        Col("region_code", "int16", range=(1, 99)),
+        Col("region_name", "string"),
+        Col("region_group", "int16", range=(1, 99)),
+        Col("region_group_name", "string"),
+        Col("mo_type", "category", values=NODE_MO_TYPES),
+        Col("mo_status", "category", nullable=True, values=MO_STATUSES),
+        Col("is_capital", "bool"),
+        Col("is_inner_city", "bool"),
+        Col("is_city_node", "bool"),
+        Col("n_members", "int16", range=(1, MAX_MEMBERS)),
+        Col("oktmo_2023", "string", nullable=True, pattern=OKTMO_PATTERN),
+        Col("oktmo_2024", "string", nullable=True, pattern=OKTMO_PATTERN),
+        Col("point_lat", "float64", range=LAT),
+        Col("point_lon", "float64", range=LON),
+        Col("x_aea", "float64"),
+        Col("y_aea", "float64"),
+        Col("area_km2", "float64", range=(0.0, INF)),
+        Col("market_access", "float64", nullable=True, range=(0.0, 1000.0)),
+        Col("dist_capital_km", "float64", nullable=True, range=NONNEG),
+        Col("n_months", "int8", range=(1, N_MONTHS)),
+        Col("n_2023", "int8", range=(0, 12)),
+        Col("n_2024", "int8", range=(0, 12)),
+        Col("first_date", "string", pattern=DATE_PATTERN),
+        Col("last_date", "string", pattern=DATE_PATTERN),
+        Col("coverage_pattern", "string", pattern=rf"[01]{{{N_MONTHS}}}"),
+        Col("series_status", "category", values=SERIES_STATUSES),
+        Col("has_internal_gap", "bool"),
+        Col("longest_gap", "int8", range=(0, N_MONTHS - 2)),
+        Col("lineage_role", "category", values=LINEAGE_ROLES),
+    ),
+    key=("territory_id",),
+    extra_allowed=True,  # этап features добавляет is_node и drop_reason
+    checks=(
+        Check(
+            "n_months = n_2023 + n_2024 = число единиц; узел-город ⇔ тип city; у МО один участник",
+            _node_consistent,
+        ),
+    ),
+)
+
+
+def _member_consistent(df: pd.DataFrame) -> pd.Series:
+    role = df["role"].astype(str)
+    excluded_ok = (role == "excluded") == df["node_id"].isna()
+    same = df["node_id"].astype("Int64") == df["territory_id"].astype("Int64")
+    self_ok = (role != "self") | same.fillna(False).astype(bool)
+    return excluded_ok & self_ok
+
+
+NODE_MEMBERS = TableSchema(
+    name="node_members",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("node_id", "int32", nullable=True, range=POSITIVE_INT),
+        Col("role", "category", values=MEMBER_ROLES),
+        Col("region_code", "int16", range=(1, 99)),
+    ),
+    key=("territory_id",),
+    checks=(Check("excluded ⇔ нет узла; self — узел это само МО", _member_consistent),),
+)
+
+
+def _node_parts_sum(df: pd.DataFrame) -> pd.Series:
+    parts = df[[f"v_{p}" for p in PARTS]].sum(axis=1)
+    return (parts - df["v_all"]).abs() <= SUM_TOL * df["v_all"].abs()
+
+
+NODE_PANEL = TableSchema(
+    name="node_panel",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        *_MONTH_COLS,
+        *(Col(f"v_{c}", "float64", range=(0.0, INF)) for c in CATEGORY_CODES),
+        *(Col(f"sh_{p}", "float64", range=SHARE) for p in PARTS),
+        Col("log_all", "float64"),
+        Col("n_members", "int16", range=(1, MAX_MEMBERS)),
+        Col("pop_coverage", "float64", range=SHARE),
+    ),
+    key=("territory_id", "date"),
+    checks=(
+        Check("месяц согласован: date, t, year, month", _month_consistent),
+        Check("шесть долей в сумме 1", _shares_sum_to_one),
+        Check("шесть частей в сумме дают v_all (до 1e-9 относительно)", _node_parts_sum),
+        Check("log_all = ln(v_all)", _log_all),
+    ),
+)
+
+NODE_CONTEXT = TableSchema(
+    name="node_context",
+    columns=(
+        *CONTEXT_ANNUAL.columns,
+        Col("wage_outlier", "bool"),
+        Col("ndfl_outlier", "bool"),
+        Col("n_members", "int16", range=(1, MAX_MEMBERS)),
+    ),
+    key=("territory_id", "year"),
+    extra_allowed=True,
+    checks=CONTEXT_ANNUAL.checks,
+)
+
+NODE_OKVED = TableSchema(name="node_okved", columns=OKVED_SHARES.columns, key=OKVED_SHARES.key)
+
+# Окна признаков: год, полугодие, квартал (``features.windows``).
+WINDOW_KINDS: tuple[str, ...] = ("year", "half", "quarter")
+WINDOW_PATTERN = r"\d{4}(H[12]|Q[1-4])?"
+CLR_TOL = 1e-9  # строка CLR в сумме 0 (float64)
+
+
+def _clr_rows_zero(prefix: str) -> Callable[[pd.DataFrame], pd.Series]:
+    def check(df: pd.DataFrame) -> pd.Series:
+        return df[[f"{prefix}_{p}" for p in PARTS]].sum(axis=1).abs() <= CLR_TOL
+
+    return check
+
+
+FEATURES_MEMBERS = TableSchema(
+    name="features_members",
+    columns=NODE_MEMBERS.columns,
+    key=NODE_MEMBERS.key,
+    checks=NODE_MEMBERS.checks,
+)
+
+FEATURES_NODES = TableSchema(
+    name="features_nodes",
+    columns=(
+        *NODES.columns,
+        Col("is_node", "bool"),
+        Col("drop_reason", "string", nullable=True),
+    ),
+    key=("territory_id",),
+    checks=(
+        *NODES.checks,
+        Check("причина указана ровно у не-узлов", lambda d: d["is_node"] == d["drop_reason"].isna()),
+    ),
+)
+
+FEATURES_WINDOWS = TableSchema(
+    name="features_windows",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("window", "string", pattern=WINDOW_PATTERN),
+        Col("window_kind", "category", values=WINDOW_KINDS, ordered=True),
+        Col("year", "int16", range=_YEAR_RANGE),
+        Col("n_months", "int8", range=(1, 12)),
+        Col("region_group", "int16", range=(1, 99)),
+        Col("level", "float64", range=(0.0, INF)),
+        Col("log_level", "float64"),
+        Col("log_level_rel", "float64"),
+        *(Col(f"sh_{p}", "float64", range=SHARE) for p in PARTS),
+        *(Col(f"clr_{p}", "float64") for p in PARTS),
+        *(Col(f"clr_rel_{p}", "float64") for p in PARTS),
+        Col("mp_pp_yoy", "float64", nullable=True),
+    ),
+    key=("territory_id", "window"),
+    checks=(
+        Check("шесть долей в сумме 1", _shares_sum_to_one),
+        Check("CLR строки в сумме 0", _clr_rows_zero("clr")),
+        Check("CLR относительно группы региона в сумме 0", _clr_rows_zero("clr_rel")),
+    ),
+)
+
+FEATURES_RHYTHM = TableSchema(
+    name="features_rhythm",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("summer_excess", "float64"),
+        Col("dec_peak", "float64"),
+        Col("own_summer", "float64"),
+        Col("own_amplitude", "float64", range=NONNEG),
+        Col("own_r", "float64", nullable=True, range=(-1.0, 1.0)),
+        Col("own_reliable", "bool"),
+        Col("own_amplitude_shrunk", "float64", nullable=True, range=NONNEG),
+        Col("own_peak_month", "int8", range=(1, 12)),
+        Col("north", "bool"),
+    ),
+    key=("territory_id",),
+)
+
+FEATURES_PLACE = TableSchema(
+    name="features_place",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("year", "int16", range=_YEAR_RANGE),
+        Col("region_group", "int16", range=(1, 99)),
+        *(_f(f"emp_sh_{g}", SHARE) for g in OKVED_GROUPS),
+        _f("emp_sh_unallocated", SHARE),
+        _f("wage"),
+        _f("log_wage_rel", None),
+        Col("wage_outlier", "bool"),
+        _f("urban_share", SHARE),
+        _f("urban_share_rel", None),
+        _f("age_old_share", SHARE),
+        _f("age_old_share_rel", None),
+        _f("pop_avg", (1.0, INF)),
+        _f("log_pop", None),
+        _f("log_pop_rel", None),
+        _f("market_access", (0.0, 1000.0)),
+        _f("market_access_rel", None),
+        _f("dist_capital_km"),
+        Col("north", "bool"),
+        Col("ndfl_ok", "bool"),
+        _f("ndfl_income_pc"),
+        _f("log_ndfl_rel", None),
+    ),
+    key=("territory_id", "year"),
+    checks=(
+        Check(
+            "доход 5-НДФЛ на жителя только при ndfl_ok", lambda d: d["ndfl_ok"] | d["ndfl_income_pc"].isna()
+        ),
+    ),
+)
+
+FEATURES_BASKET_MONTHLY = TableSchema(
+    name="features_basket_monthly",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        *_MONTH_COLS,
+        Col("region_group", "int16", range=(1, 99)),
+        *(Col(f"clr_{p}", "float64") for p in PARTS),
+        *(Col(f"clr_rel_{p}", "float64") for p in PARTS),
+        Col("n_replaced", "int8", range=(0, len(PARTS) - 1)),
+    ),
+    key=("territory_id", "date"),
+    checks=(
+        Check("месяц согласован: date, t, year, month", _month_consistent),
+        Check("CLR строки в сумме 0", _clr_rows_zero("clr")),
+        Check("CLR относительно группы региона в сумме 0", _clr_rows_zero("clr_rel")),
+    ),
+)
+
+FEATURES_RHYTHM_MONTHLY = TableSchema(
+    name="features_rhythm_monthly",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("category", "category", values=CATEGORY_CODES, ordered=True),
+        *_MONTH_COLS,
+        Col("log_value", "float64"),
+        Col("detrended", "float64"),
+        Col("own", "float64"),
+    ),
+    key=("territory_id", "category", "date"),
+    checks=(Check("месяц согласован: date, t, year, month", _month_consistent),),
+)
+
+NODE_SCHEMAS: dict[str, TableSchema] = {
+    s.name: s for s in (NODES, NODE_MEMBERS, NODE_PANEL, NODE_CONTEXT, NODE_OKVED)
+}
+FEATURE_SCHEMAS: dict[str, TableSchema] = {
+    s.name: s
+    for s in (
+        FEATURES_NODES,
+        FEATURES_MEMBERS,
+        FEATURES_WINDOWS,
+        FEATURES_RHYTHM,
+        FEATURES_PLACE,
+        FEATURES_BASKET_MONTHLY,
+        FEATURES_RHYTHM_MONTHLY,
+    )
 }

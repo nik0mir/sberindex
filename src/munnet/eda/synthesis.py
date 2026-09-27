@@ -33,12 +33,21 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from munnet import style
+from munnet import nodes, style
 from munnet.config import Config
 from munnet.contracts import YEARS
-from munnet.eda import s3_rhythm, s4_basket, stats, stories
-from munnet.eda.base import SYNTHESIS_ID, Fact, Finding, SectionContext, display_names, make_fact, to_markdown
-from munnet.eda.data import CONTEXT_YEAR, EdaData
+from munnet.eda import s2_level, s3_rhythm, s4_basket, stats, stories
+from munnet.eda.base import (
+    SYNTHESIS_ID,
+    SYNTHESIS_NUMBER,
+    Fact,
+    Finding,
+    SectionContext,
+    display_names,
+    make_fact,
+    to_markdown,
+)
+from munnet.eda.data import CONTEXT_YEAR, EdaData, node_view
 
 log = logging.getLogger(__name__)
 
@@ -525,14 +534,104 @@ def _join_labels(names: Sequence[str]) -> str:
 # --- Матрица решения (T14) -----------------------------------------------------------------------
 
 
-def decision_matrix(facts: Mapping[str, Fact], cfg: Config) -> pd.DataFrame:
+def decision_matrix(
+    facts: Mapping[str, Fact], cfg: Config, alt_maps: stories.AltMaps | None = None
+) -> pd.DataFrame:
     """T14: матрица решения по сюжетам Б.5 из фактов разделов и сводки (колонки ``stories.MATRIX_COLUMNS``).
 
     Веса — ``eda.matrix_weights`` (сумма 1, иначе ``ValueError``); пороги критериев отказа — ``eda.rejection``
     и ``eda.step_test_pp``; пороги баллов — ``eda.stories``. Знаменатель покрытия — факт ``syn.n_mo``.
+    ``alt_maps`` — другие оценки критериев (по умолчанию — без внутригородских территорий).
     """
     prm = stories.params(cfg)
-    return stories.evaluate(stories.build_stories(prm), facts, cfg["eda"]["matrix_weights"], prm, cfg["eda"])
+    return stories.evaluate(
+        stories.build_stories(prm), facts, cfg["eda"]["matrix_weights"], prm, cfg["eda"], alt_maps
+    )
+
+
+# --- Узлы сети (nodes.mode) ----------------------------------------------------------------------
+
+SEPARATE_MODE = "separate"
+# Начало фразы чувствительности (``stories.sensitivity_text``) для второй матрицы в режиме узлов.
+SEPARATE_WHERE = "С 247 внутригородскими территориями Москвы и Петербурга отдельными узлами"
+MODE_TEXT = nodes.MODE_TEXT
+NODE_RNG_STREAM = 1  # генератор узлов: default_rng([seed, номер сводки, 1]) — не сдвигает случайность сводки
+
+
+def node_mode(cfg: Config) -> str:
+    """Режим узлов сети ``nodes.mode``; нет секции ``nodes`` — ``separate`` (как в разведке до этапа 2)."""
+    return str(cfg["nodes"]["mode"]) if "nodes" in cfg.data else SEPARATE_MODE
+
+
+def node_values(view: EdaData, cfg: Config, rng: np.random.Generator) -> tuple[dict[str, Any], pd.DataFrame]:
+    """Критерии сюжетов на узлах сети — теми же функциями, что в разделах E2–E4 и сводке.
+
+    ``view`` — ``data.node_view`` (регион — группа региона узла, выбросы Москвы — пропуск). Ключи — хвосты
+    фактов ``stories.NODES`` («reliable_share_nodes»…). Второй результат — показатели узлов для прототипа
+    T15: размах своего ритма, сжатый на повторяемость (как ``own_amplitude`` E3), и ln(траты / доход 5-НДФЛ)
+    (как ``log_spend_to_ndfl`` E5). Не посчиталось — ключа нет, в лог предупреждение.
+    """
+    mo, wide = view.mo, view.panel_wide
+    out: dict[str, Any] = {"n_nodes": len(mo)}
+    ind = pd.DataFrame(index=pd.Index(mo["territory_id"], name="territory_id"))
+    ids = s3_rhythm.full_ids(mo)
+    out["n_full_nodes"] = len(ids)
+    try:
+        sp = s3_rhythm.SeasonParams.from_config(cfg)
+        model = s3_rhythm.fit_rhythm(s3_rhythm.series_matrix(wide, ids))
+        reliable = s3_rhythm.is_reliable(model.r, model.A, sp.reliable_r, sp.reliable_amplitude)
+        out["reliable_share_nodes"] = float(reliable.mean())
+        out["share_r06_nodes"] = float((model.r > sp.reliable_r).mean())
+        null_r = s3_rhythm.null_reproducibility(model.O, rng, sp.null_repeats)
+        amp = model.A.to_numpy()[None, :]
+        null = s3_rhythm.is_reliable(null_r, amp, sp.reliable_r, sp.reliable_amplitude)
+        out["null_reliable_share_nodes"] = float(null.mean())
+        ind["own_amplitude"] = s3_rhythm.shrunk_amplitude(model.A, model.r).reindex(ind.index)
+    except _SOFT_ERRORS as e:
+        log.warning("Сводка: свой ритм на узлах не посчитан: %s", e)
+    try:
+        ld = s2_level.level_drivers(mo)
+        out["partial_rho_access_nodes"] = ld["partial_rho_access_within"]
+        out["n_access_wage_nodes"] = ld["n_access_wage"]
+    except _SOFT_ERRORS as e:
+        log.warning("Сводка: уровень трат на узлах не посчитан: %s", e)
+    halves = s4_basket.half_year_growth(wide)
+    try:
+        g = s4_basket.growth_table(wide, mo, halves).set_index("code")
+        out["growth_half_consistency_nodes"] = float(g.loc["all", "half_consistency"])
+        b = s4_basket.basket_analysis(mo)
+        out["residual_share_nodes"] = b.clean.residual_share
+        out["residual_pc1_stability_nodes"] = b.stability
+        out["n_basket_nodes"] = b.n
+        m = s4_basket.marketplace_checks(wide, mo, view.national, halves)
+        out["mp_split_half_nodes"] = float(m["mp_split_half"])
+        out["rho_mp_pp_level_within_nodes"] = float(m["rho_mp_pp_level_within"])
+        out["mp_step_max_pp_nodes"] = float(m["mp_step_max_pp"])
+        r = mp_residual(mo, halves)
+        out["mp_split_half_resid_nodes"] = r.get("mp_split_half_resid", np.nan)
+        out["mp_r2_level_region_nodes"] = r.get("mp_r2_level_region", np.nan)
+        parts = part_stability(mo)
+        out["resid_part_stability_span_nodes"] = style.fmt_range(
+            parts.min(), parts.max(), style.fmt_num, decimals=2
+        )
+    except _SOFT_ERRORS as e:
+        log.warning("Сводка: корзина и маркетплейсы на узлах не посчитаны: %s", e)
+    ratio = mo.set_index("territory_id")[f"spend_to_ndfl_{CONTEXT_YEAR}"].astype("float64")
+    usable = mo.set_index("territory_id")["ndfl_ok"].astype(bool) & ratio.notna() & (ratio > 0)
+    out["n_ndfl_usable_nodes"] = int(usable.sum())
+    ind["log_spend_to_ndfl"] = np.log(ratio.where(usable)).reindex(ind.index)
+    clean = {k: v for k, v in out.items() if isinstance(v, str) or np.isfinite(v)}
+    return clean, ind.reset_index()
+
+
+def _node_facts(ctx: SectionContext, values: Mapping[str, Any], facts: Mapping[str, Fact], mode: str) -> None:
+    """Факты ``syn.*_nodes``: вид — как у основной оценки в разделе, пояснение — её же с пометкой узлов."""
+    for main, key in stories.NODES.items():
+        tail = key.split(".", 1)[1]
+        base = facts.get(main)
+        kind = base.kind if base is not None else ("str" if isinstance(values.get(tail), str) else "num3")
+        note = (base.note if base is not None else main) + f"; {stories.NODES_LABEL} ({MODE_TEXT[mode]})"
+        ctx.fact(tail, values.get(tail), kind, note)
 
 
 # --- Проверки сюжетов ----------------------------------------------------------------------------
@@ -1153,9 +1252,12 @@ def _story_facts(
     weights: Mapping[str, float],
     other: pd.DataFrame | None = None,
     extra_advice: Sequence[str] = (),
+    alt_label: str = stories.NO_INNER_LABEL,
+    where: str | None = None,
 ) -> None:
     """Факты матрицы: веса (в процентах итога), итог, роль, критерии отказа, обоснования баллов по каждому
-    сюжету; то же без внутригородских территорий (``other``) и фраза о чувствительности."""
+    сюжету; то же при другом решении по Москве и Петербургу (``other``: без внутригородских территорий или,
+    в режиме узлов, с 247 отдельными узлами; подпись ``alt_label``) и фраза о чувствительности."""
     for crit, w in weights.items():
         ctx.fact(
             f"weight_{crit}",
@@ -1189,25 +1291,24 @@ def _story_facts(
         ctx.fact(f"coverage_note_{k}", row.coverage_note, "str", f"{row.sid}: из чего балл покрытия")
         ctx.fact(f"manual_note_{k}", row.manual_note, "str", f"{row.sid}: экспертные баллы (stories.py)")
     if other is not None:
+        ctx.fact("alt_label", alt_label, "str", "другое решение по Москве и Петербургу: вторая матрица T14")
         for row in other.itertuples(index=False):
-            note = (
-                f"{row.sid} без внутригородских территорий (критерии и сигнал — без них, остальное — то же)"
-            )
-            ctx.fact(f"score_{row.key}_no_inner", row.score, "num2", f"{note}: итог")
-            ctx.fact(f"status_{row.key}_no_inner", row.status, "str", f"{note}: роль")
+            note = f"{row.sid}, {alt_label} (критерии, сигнал и покрытие — при нём, остальное — то же)"
+            ctx.fact(f"score_{row.key}_alt", row.score, "num2", f"{note}: итог")
+            ctx.fact(f"status_{row.key}_alt", row.status, "str", f"{note}: роль")
         best = stories.leader(other)
         ctx.fact(
-            "top_story_no_inner",
+            "top_story_alt",
             stories.NO_STORY if best is None else best["sid"],
             "str",
-            "без внутригородских: главный кандидат или, если критерии не прошёл никто, лучший по итогу",
+            f"{alt_label}: главный кандидат или, если критерии не прошёл никто, лучший по итогу",
         )
         n_inner = ctx.facts.get(f"{SECTION_ID}.n_inner")
         ctx.fact(
             "sensitivity",
-            stories.sensitivity_text(matrix, other, None if n_inner is None else int(n_inner.value)),
+            stories.sensitivity_text(matrix, other, None if n_inner is None else int(n_inner.value), where),
             "str",
-            "меняет ли выбор сюжета исключение внутригородских территорий Москвы и Петербурга",
+            "меняет ли выбор сюжета другое решение по Москве и Петербургу",
         )
     top, second = stories.pick_top(matrix)
     ctx.fact(
@@ -1481,10 +1582,10 @@ def summary_md(rp: RegionPlace, short: Mapping[str, str], t13: pd.DataFrame) -> 
             "по полугодию, и сравнивать с надёжностью, прежде чем называть «свойством места»."
         )
     means.append(
-        f"- Москва и{NB}Петербург дают {f('n_inner')} мелких соседних узлов, которые могут стать отдельным "
-        f"«кластером столиц». Оставить их отдельными узлами, свернуть в{NB}два узла с{NB}весами населения "
-        f"или исключить с{NB}оговоркой{NB}— решается до этапа 2 по{NB}T13; от этого зависит "
-        f"и{NB}выбор сюжета (раздел «Какой сюжет выбрать»)."
+        f"- Москва и{NB}Петербург дают {f('n_inner')} мелких соседних узлов, которые могли бы стать "
+        f"отдельным «кластером столиц». В{NB}сети они{NB}— {f('node_mode_text')} (параметр `nodes.mode`): "
+        f"матрица сюжетов посчитана на{NB}узлах сети, вторая матрица{NB}— {f('alt_label')} (раздел «Какой "
+        f"сюжет выбрать»)."
     )
     means.append(
         f"- Сюжет, чьи признаки почти целиком региональные, даст типы, похожие на{NB}карту регионов: это "
@@ -1801,9 +1902,35 @@ def run_synthesis(ctx: SectionContext, findings: list[Finding]) -> Finding:
             f"{s.sid}: пример МО — наибольшее отклонение от того, что дают контроли и регион",
         )
         ctx.fact(f"user_{s.key}", s.user or None, "str", f"{s.sid}: кому полезен и для какого решения")
+    # Узлы сети: матрица сюжетов и прототип — на узлах (nodes.mode), разделы и T13 — на МО панели
+    mode = node_mode(cfg)
+    ctx.fact("node_mode", mode, "str", "режим узлов сети nodes.mode (matrix T14 и прототип T15)")
+    ctx.fact("node_mode_text", MODE_TEXT[mode], "str", "режим узлов сети словами")
+    proto_data, proto_table, proto_halves = data, table, halves
+    if mode == SEPARATE_MODE:
+        ctx.fact("n_nodes", len(mo), "int", "узлов сети: все МО панели (nodes.mode = separate)")
+        ctx.fact("n_full_nodes", int(s3_rhythm.full_ids(mo).size), "int", "узлов с полным рядом")
+        ctx.fact("n_city_nodes", 0, "int", "узлов-городов (nodes.cities)")
+        ctx.fact("region_group_text", "по своему региону", "str", "как считается «относительно региона»")
+    else:
+        view, nd = node_view(data, cfg)
+        node_rng = np.random.default_rng([int(cfg["seed"]), SYNTHESIS_NUMBER, NODE_RNG_STREAM])
+        nvals, nind = node_values(view, cfg, node_rng)
+        _node_facts(ctx, nvals, _facts_of(findings, ctx), mode)
+        roles = nd.members["role"].astype(str)
+        ctx.fact("n_city_nodes", len(nd.city_ids), "int", "узлов-городов (nodes.cities)")
+        ctx.fact("n_city_members", int((roles == "city_member").sum()), "int", "МО панели в узлах-городах")
+        ctx.fact("n_excluded", int((roles == "excluded").sum()), "int", "МО панели вне узлов (режим exclude)")
+        ctx.fact("region_group_text", nodes.group_text(nd), "str", "как считается «относительно региона»")
+        proto_data = view
+        proto_table = view.mo.set_index("territory_id").join(nind.set_index("territory_id"))
+        proto_halves = s4_basket.half_year_growth(view.panel_wide)
+    proto_mo = proto_data.mo
     try:
         t15 = prototype_table(
-            prototype_sets(data, table, halves), groupings(mo, cfg).set_axis(mo["territory_id"]), cfg
+            prototype_sets(proto_data, proto_table, proto_halves),
+            groupings(proto_mo, cfg).set_axis(proto_mo["territory_id"]),
+            cfg,
         )
     except _SOFT_ERRORS as e:
         log.warning("Сводка: прототип типов не посчитан: %s", e)
@@ -1832,13 +1959,26 @@ def run_synthesis(ctx: SectionContext, findings: list[Finding]) -> Finding:
     ctx.fact("proto_k", k_proto, "int", "типов в быстром прототипе (k-means)")
     proto_line = prototype_text(t15, sids) if len(t15) else ""
 
-    # Матрица решения: со всеми МО и без внутригородских
+    # Матрица решения: на узлах сети и при другом решении по Москве и Петербургу
     facts_now = _facts_of(findings, ctx)
-    matrix = decision_matrix(facts_now, cfg)
-    other = decision_matrix(stories.substitute(facts_now), cfg)
-    _story_facts(ctx, matrix, stories.check_weights(eda["matrix_weights"]), other, [proto_line])
-    matrix["score_no_inner"] = other["score"].to_numpy()
-    matrix["status_no_inner"] = other["status"].to_numpy()
+    weights = stories.check_weights(eda["matrix_weights"])
+    if mode == SEPARATE_MODE:
+        matrix = decision_matrix(facts_now, cfg)
+        other = decision_matrix(stories.substitute(facts_now), cfg)
+        alt_label, where = stories.NO_INNER_LABEL, None
+    else:
+        missing = [k for k, v in stories.NODES.items() if k in facts_now and facts_now.get(v) is None]
+        missing += [k for k, v in stories.NODES.items() if v in facts_now and facts_now[v].value is None]
+        if missing:
+            log.warning("Сводка: на узлах не посчитаны %s — в матрице оценка разделов", sorted(set(missing)))
+        copies, sep_map = stories.separate_alternatives(facts_now)
+        main = {**stories.substitute(facts_now, stories.NODES), **copies}
+        matrix = decision_matrix(main, cfg, [(sep_map, stories.SEPARATE_LABEL)])
+        other = decision_matrix(facts_now, cfg)
+        alt_label, where = stories.SEPARATE_LABEL, SEPARATE_WHERE
+    _story_facts(ctx, matrix, weights, other, [proto_line], alt_label, where)
+    matrix["score_alt"] = other["score"].to_numpy()
+    matrix["status_alt"] = other["status"].to_numpy()
 
     # F16
     rp = classify(t13, prm)
@@ -1891,17 +2031,18 @@ def run_synthesis(ctx: SectionContext, findings: list[Finding]) -> Finding:
     num2 = {
         c: (lambda x: style.fmt_num(x, 2)) for c in [*(f"ami_{g}" for g in GROUPINGS), "ami_max", "ari_pair"]
     }
+    who = "МО" if mode == SEPARATE_MODE else "узлов сети"
     ctx.save_table(
         t15,
         tid="T15",
         slug="prototype",
         title=(
-            f"Быстрый прототип типов: k-means (k{NB}={NB}{k_proto}) по признакам сюжета у МО с полным рядом; "
-            "AMI типов с простыми делениями МО и ARI типов двух независимых замеров"
+            f"Быстрый прототип типов: k-means (k{NB}={NB}{k_proto}) по признакам сюжета у {who} "
+            f"с полным рядом; AMI типов с простыми делениями {who} и ARI типов двух независимых замеров"
         ),
         md_rows=len(t15),
         md_formats=num2,
-        md_labels=T15_LABELS,
+        md_labels=T15_LABELS if mode == SEPARATE_MODE else {**T15_LABELS, "n": "Узлов"},
         md_columns=["story", "features", "n", *(f"ami_{g}" for g in GROUPINGS), "ari_pair", "pair_label"],
     )
 

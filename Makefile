@@ -1,6 +1,7 @@
 # Запуск пайплайна: make all, отдельный этап: make data, другой конфиг: make CONFIG=configs/my.yaml cluster
 # Этап 1: make panel eda; один раздел разведки: make eda ONLY=e3 (несколько: ONLY=e3,e4; сводка и отчёт: ONLY=syn)
 # Windows без make: uv run --frozen python -m munnet panel eda (раздел: ... -m munnet eda --only e3)
+# Этап 2: make features (узлы сети и признаки узлов; режим узлов — nodes.mode в конфиге)
 CONFIG ?= configs/default.yaml
 ONLY ?=
 RUN = uv run --frozen python -m munnet --config $(CONFIG)
