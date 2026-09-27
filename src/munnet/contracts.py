@@ -875,6 +875,8 @@ def _source_lt_target(df: pd.DataFrame) -> pd.Series:
     return df["source"].astype("int64") < df["target"].astype("int64")
 
 
+# ``weight`` — сходство S_ij правила; у гравитации это ln S_ij = ln P_i + ln P_j − β·ln d (логарифм: сами
+# значения P_i·P_j/d^β различаются на много порядков), у остальных правил — само S_ij.
 NETWORK_EDGES = TableSchema(
     name="network_edges",
     columns=(

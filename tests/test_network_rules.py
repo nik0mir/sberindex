@@ -339,3 +339,35 @@ def test_reliability_is_at_chance_on_noise_and_high_with_structure():
         graph.edge_set(graph.knn_edges(R.cosine_matrix(y2), 5)),
     )
     assert j_noise < 0.2 < 0.5 < j_struct
+
+
+# --- Выбор с допуском ничьей и вычитание регионального ритма ----------------------------------------
+
+
+def test_tie_tolerance_changes_pareto_front_and_lexicographic_order():
+    from munnet.network import compare as C
+
+    crit = pd.DataFrame(
+        {"reliability": [0.150, 0.140, 0.08], "attr": [0.25, 0.27, 0.22]}, index=["cos", "dist", "rhythm"]
+    )
+    # без допуска оба на фронте (каждый лучше по одному критерию); с допуском надёжность — ничья, решает attr
+    assert C.pareto_front(crit) == ["cos", "dist"]
+    tol = pd.Series({"reliability": 0.02, "attr": 0.005})
+    assert C.pareto_front(crit, tol) == ["dist"]
+    assert C.lexicographic_set(crit, ["reliability", "attr"]) == ["cos"]
+    assert C.lexicographic_set(crit, ["reliability", "attr"], tol) == ["dist"]
+    # равенство в пределах допуска по всем критериям — ничья из двух правил
+    wide = pd.Series({"reliability": 0.02, "attr": 0.05})
+    assert C.lexicographic_set(crit, ["reliability", "attr"], wide) == ["cos", "dist"]
+    boot = pd.DataFrame(
+        {"replicate": [0, 0, 1, 1], "rule": ["cos", "dist"] * 2, "reliability": [0.1, 0.2, 0.1, 0.3]}
+    )
+    assert C.break_tie(["cos", "dist"], boot) == "dist"
+
+
+def test_regional_residual_removes_group_mean():
+    from munnet.network.compute import regional_residual
+
+    X = np.array([[1.0, 2.0], [3.0, 4.0], [10.0, 10.0]])
+    out = regional_residual(X, np.array([7, 7, 9]))
+    assert np.allclose(out, [[-1, -1], [1, 1], [0, 0]])

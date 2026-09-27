@@ -98,6 +98,10 @@ uv run --frozen python -m munnet eda --only syn       # сводка, общие
 
 ## Этап 2: узлы сети и признаки
 
+Обоснование пространства признаков — [docs/features.md](docs/features.md): что ловит каждый признак, как
+нормирован, покрытие, надёжность 2023 ~ 2024, η² группы региона, I Морана, дубли и что идёт в рёбра, атрибуты,
+слой и динамику этапа 3. Отчёт собирает этап `features`; руками не править.
+
 После этапов `panel` и `eda` (или сразу после `panel`: `features` читает только `data/processed`):
 
 ```bash
@@ -126,6 +130,7 @@ separate` (247 отдельных узлов) или `exclude` (без них). 
 | Экономика места по годам: занятость по ОКВЭД2, зарплата, горожане, возраст, население, доступность рынков, 5-НДФЛ | `features_place.parquet` | `territory_id`, `year` |
 | Ряды для рёбер: помесячные CLR корзины, ряды ln трат без тренда и свой ритм по категориям | `features_basket_monthly.parquet`, `features_rhythm_monthly.parquet` | `territory_id`, `date` (и `category`) |
 | Числа решения о сюжете на узлах, таблица признаков, типы | `outputs/features/checks.json`, `feature_table.csv`, `types_*.csv` | — |
+| Отчёт о пространстве признаков: смысл, нормировка, покрытие, надёжность, η², I Морана, роли в сети | [docs/features.md](docs/features.md) (числа — `outputs/features/report_facts.json`) | — |
 
 Схемы — `src/munnet/contracts.py` (`FEATURE_SCHEMAS`, `NODE_SCHEMAS`). Этап на реальных данных идёт около
 10 секунд; повторный прогон даёт побайтно те же файлы (случайность k-means — от `seed` конфига).

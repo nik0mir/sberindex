@@ -43,23 +43,39 @@ class GeoCache:
         return self._cache[key]
 
 
+def regional_residual(X: np.ndarray, groups: np.ndarray) -> np.ndarray:
+    """Ряд минус среднее своей группы региона в тот же месяц: остаётся ритм узла сверх регионального."""
+    X = np.asarray(X, dtype=np.float64)
+    _, g = np.unique(groups, return_inverse=True)
+    sums = np.zeros((g.max() + 1, X.shape[1]))
+    np.add.at(sums, g, X)
+    counts = np.bincount(g)[:, None]
+    return X - (sums / counts)[g]
+
+
+def rule_series(rule: RuleSpec, ns: NodeSet, months) -> list[np.ndarray]:
+    """Ряды своего ритма правила на месяцах ``months``; у ``relative`` — сверх среднего группы региона."""
+    Xs = ns.series(rule.categories, np.asarray(months))
+    return [regional_residual(x, ns.groups) for x in Xs] if rule.relative else Xs
+
+
 def similarity(rule: RuleSpec, ns: NodeSet, months, geo_cache: GeoCache | None = None) -> Similarity:
     """S правила ``rule`` на месяцах ``months`` (номера t). Правила географии от окна не зависят."""
     t0 = time.perf_counter()
     lag = sigma = None
     months = np.asarray(months)
     if rule.kind == "basket_cosine":
-        S = R.cosine_matrix(window_clr(ns, months))
+        S = R.cosine_matrix(window_clr(ns, months, relative=rule.relative))
     elif rule.kind == "basket_distance":
-        D = R.euclid_matrix(window_clr(ns, months))
+        D = R.euclid_matrix(window_clr(ns, months, relative=rule.relative))
         sigma = R.median_offdiag(D)
         S = R.gaussian_similarity(D, sigma)
     elif rule.kind == "rhythm_corr":
-        S = R.corr_multi(ns.series(rule.categories, months))
+        S = R.corr_multi(rule_series(rule, ns, months))
     elif rule.kind == "rhythm_lag":
-        S, lag = R.lagged_corr(ns.series(rule.categories, months), rule.max_lag)
+        S, lag = R.lagged_corr(rule_series(rule, ns, months), rule.max_lag)
     elif rule.kind == "rhythm_dtw":
-        D = R.dtw_multi(ns.series(rule.categories, months), rule.window)
+        D = R.dtw_multi(rule_series(rule, ns, months), rule.window)
         sigma = R.median_offdiag(D)
         S = R.gaussian_similarity(D, sigma)
     elif rule.kind == "road":
@@ -75,7 +91,7 @@ def similarity(rule: RuleSpec, ns: NodeSet, months, geo_cache: GeoCache | None =
 
 def spearman_similarity(rule: RuleSpec, ns: NodeSet, months) -> np.ndarray:
     """Корреляционное правило с ρ Спирмена вместо Пирсона — проверка на выбросы."""
-    return R.corr_multi(ns.series(rule.categories, np.asarray(months)), method="spearman")
+    return R.corr_multi(rule_series(rule, ns, np.asarray(months)), method="spearman")
 
 
 def series_null(
@@ -84,7 +100,7 @@ def series_null(
     """Нулевое распределение S правила по рядам: ряды всех категорий узла сдвинуты циклически на один
     случайный допустимый сдвиг (``rules.allowed_shifts``), сходство — со всеми несдвинутыми рядами."""
     months = np.asarray(months)
-    Xs = ns.series(rule.categories, months)
+    Xs = rule_series(rule, ns, months)
     shifts = R.allowed_shifts(len(months), rule.reach, p.shift_guard)
     stacked = np.stack(Xs, axis=0)  # категории × узлы × месяцы: сдвиг один на все категории узла
     parts = []

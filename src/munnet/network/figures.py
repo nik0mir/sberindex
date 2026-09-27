@@ -27,7 +27,11 @@ RULE_LABELS: dict[str, str] = {
     "rhythm_dtw": "DTW ритма",
     "geo_road": "Дороги",
     "geo_gravity": "Гравитация",
+    "basket_dist_abs": "Расстояние корзин без вычета региона",
+    "rhythm_corr_rel": "Корреляция ритма сверх региона",
 }
+# Вертикальный сдвиг подписи точки на рис. 2 (пункты): соседние точки подписываются выше и ниже.
+LABEL_DY: dict[str, float] = {"basket_cos": -12, "rhythm_corr_all": -12, "rhythm_dtw": 12}
 FAMILY_COLOR: dict[str, str] = {
     "basket": style.PALETTE["marketplace"],
     "rhythm": style.PALETTE["transport"],
@@ -138,14 +142,17 @@ def fig_pareto(out: Path, comparison: pd.DataFrame, chosen: str, p: NetworkParam
     """N02: надёжность (Жаккар сетей 2023 и 2024 годов) против доли рёбер, общих с дорожной сетью."""
     c = comparison.loc[~comparison["static"].astype(bool)].copy()
     c["family"] = c["kind"].map(family)
-    best = c.set_index("rule").loc[chosen]
-    others = c.loc[c["rule"] != chosen]
+    abl = c["ablation"].astype(bool) if "ablation" in c.columns else pd.Series(False, index=c.index)
+    cand = c.loc[c["rule"].isin(p.candidates)]
+    best = cand.set_index("rule").loc[chosen]
+    others = cand.loc[cand["rule"] != chosen]
     top = bool(
         (best["reliability"] >= others["reliability"]).all()
         and (best["geo_jaccard"] <= others["geo_jaccard"]).all()
     )
     title = (
-        f"{label(chosen)} относительно региона — самая надёжная сеть и почти не повторяет дороги"
+        f"{label(chosen)} относительно региона — самая надёжная из сетей-кандидатов "
+        "и почти не повторяет дороги"
         if top
         else "Надёжность сетей и совпадение с дорожной сетью"
     )
@@ -155,37 +162,31 @@ def fig_pareto(out: Path, comparison: pd.DataFrame, chosen: str, p: NetworkParam
         f"Жаккар рёбер kNN (k = {p.k}) сетей 2023 и 2024 годов против доли рёбер, общих с сетью "
         f"«{label(road['rule'])}»; случайный уровень Жаккара ≈ "
         f"{style.fmt_num(c['reliability_chance'].mean(), 3)}; размер точки — согласованность "
-        f"с экономикой места (от {style.fmt_num(lo, 2)} до {style.fmt_num(hi, 2)})"
+        f"с экономикой места (от {style.fmt_num(lo, 2)} до {style.fmt_num(hi, 2)}); пустые круги — абляции"
     )
-    # из двух точек ближе 0,02 по надёжности и 0,005 по Жаккару с дорогами нижняя подписывается ниже
-    below = set()
-    rows = list(c.itertuples())
-    for a_ in rows:
-        for b_ in rows:
-            dy, dx = abs(a_.reliability - b_.reliability), abs(a_.geo_jaccard - b_.geo_jaccard)
-            close = dy < 0.02 and dx < 0.005
-            if a_.rule != b_.rule and close and a_.reliability < b_.reliability:
-                below.add(a_.rule)
+    # сдвиг подписи по вертикали (пункты) для соседних точек, иначе подписи наезжают друг на друга
+    dy_label = LABEL_DY
     with style.use():
         fig, ax = style.new_figure("full")
-        for _, r in c.iterrows():
+        for idx, r in c.iterrows():
             col = FAMILY_COLOR[r["family"]]
             size = 60 + 540 * (float(r["attr_consistency"]) - lo) / (hi - lo if hi > lo else 1.0)
+            hollow = bool(abl.loc[idx])
             ax.scatter(
                 r["geo_jaccard"],
                 r["reliability"],
                 s=size,
-                color=col,
-                alpha=0.85,
-                edgecolor=style.ACCENT if r["rule"] == chosen else "white",
+                color="white" if hollow else col,
+                alpha=1.0 if hollow else 0.85,
+                edgecolor=col if hollow else style.ACCENT if r["rule"] == chosen else "white",
                 linewidth=1.6,
                 zorder=3,
             )
             ax.annotate(
                 label(r["rule"]),
                 (r["geo_jaccard"], r["reliability"]),
-                # подпись справа от круга (радиус в пунктах — √площади / 2); ниже соседа, если точки рядом
-                xytext=(4 + np.sqrt(size) / 2, -12 if r["rule"] in below else 2),
+                # подпись справа от круга (радиус в пунктах — √площади / 2)
+                xytext=(4 + np.sqrt(size) / 2, dy_label.get(r["rule"], 2)),
                 textcoords="offset points",
                 fontsize=style.POINT_LABEL_PT,
                 color=style.TEXT,
@@ -212,7 +213,8 @@ def fig_pareto(out: Path, comparison: pd.DataFrame, chosen: str, p: NetworkParam
         title=title,
         subtitle=subtitle,
         alt=alt,
-        check="у выбранного правила надёжность не ниже, а доля общих с дорогами рёбер не выше, чем у других",
+        check="у выбранного правила надёжность не ниже, а доля общих с дорогами рёбер не выше, чем у других "
+        "кандидатов (абляции не в счёт)",
     )
 
 

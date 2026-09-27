@@ -183,6 +183,35 @@ def _boot_pairs(boot: pd.DataFrame) -> dict:
     return out
 
 
+TEXT_COLUMNS: tuple[str, ...] = ("time_bucket", "top_hubs", "meaning")
+
+
+def _order_columns(comparison: pd.DataFrame) -> pd.DataFrame:
+    """Колонки сравнения: ключ и флаги, затем числа, текстовые колонки (имена хабов, смысл ребра) — в конце,
+    чтобы длинный текст не выглядел сдвигом колонок."""
+    head = ["rule", "kind", "ablation", "static"]
+    tail = [c for c in TEXT_COLUMNS if c in comparison.columns]
+    mid = [c for c in comparison.columns if c not in head and c not in tail]
+    return comparison[[c for c in head if c in comparison.columns] + mid + tail]
+
+
+def _modularity_vs_region(comparison: pd.DataFrame) -> dict:
+    """Поощряет ли модульность региональные блоки: ρ Спирмена по правилам между модульностью сверх нуля
+    и AMI сообществ с группой региона, долей рёбер внутри региона."""
+    from scipy.stats import spearmanr
+
+    c = comparison
+    return {
+        "n_rules": len(c),
+        "rho_ami": float(spearmanr(c["q_excess"], c["ami_region"])[0]),
+        "rho_within": float(spearmanr(c["q_excess"], c["within_region"])[0]),
+        "rho_reliability": float(
+            spearmanr(c.loc[~c["static"], "q_excess"], c.loc[~c["static"], "reliability"])[0]
+        ),
+        "max_rule": str(c.loc[c["q_excess"].idxmax(), "rule"]),
+    }
+
+
 def _time_bucket(seconds: float) -> str:
     """Время расчёта корзинкой: точные секунды от прогона к прогону разные, отчёт должен повторяться."""
     for limit, text in ((1, "< 1 с"), (10, "1–10 с"), (60, "10–60 с")):
@@ -234,14 +263,17 @@ def run(cfg: Config) -> None:
         results[name] = C.evaluate_rule(spec, ns, p, geo_cache, geo_edges, rng)
     comparison = pd.DataFrame([r.row for r in results.values()])
     comparison["time_bucket"] = comparison["seconds"].map(_time_bucket)
+    comparison = _order_columns(comparison)
 
     log.info("network: чувствительность к k, способы разрежения, сходство правил между собой")
     geo_by_k = {k: G.knn_edges(results[road_name].sim.S, k) for k in p.k_grid}
-    grid = pd.DataFrame([row for r in results.values() for row in C.k_grid_rows(r, ns, p, geo_by_k)])
-    spars = pd.DataFrame([row for r in results.values() for row in C.sparsify_rows(r, ns, p, geo_cache, rng)])
+    full = {n: r for n, r in results.items() if not r.spec.ablation}  # абляции — без сетки k и разрежений
+    grid = pd.DataFrame([row for r in full.values() for row in C.k_grid_rows(r, ns, p, geo_by_k)])
+    spars = pd.DataFrame([row for r in full.values() for row in C.sparsify_rows(r, ns, p, geo_cache, rng)])
     pairs_tab = C.pair_rows(results, p, rng)
-    boot = C.paired_bootstrap(results, ns, p, rng)
-    chosen, orders, sel = C.select(comparison, p)
+    log.info("network: бутстрап месяцев для критериев выбора и допуска ничьей")
+    boot = C.paired_bootstrap(results, ns, p, rng, geo_edges)
+    chosen, orders, sel = C.select(comparison, p, boot)
     by_k = C.select_by_k(grid, p)
     alts = C.alternatives(chosen, comparison, p)
     log.info("network: выбрано правило %s; Парето-фронт %s; альтернативы %s", chosen, sel["front"], alts)
@@ -314,8 +346,12 @@ def run(cfg: Config) -> None:
     write_csv(pairs_tab, out / "rule_pairs.csv")
     write_csv(orders, out / "selection_orders.csv")
     write_csv(by_k, out / "selection_by_k.csv")
-    write_csv(boot, out / "reliability_bootstrap.csv")
+    write_csv(boot, out / "selection_bootstrap.csv")
+    (out / "reliability_bootstrap.csv").unlink(missing_ok=True)  # прежнее имя таблицы бутстрапа
     write_csv(sel["criteria"], out / "selection_criteria.csv")
+    write_csv(sel["sets"], out / "selection_sets.csv")
+    tol = sel["tolerance"].rename("tolerance").rename_axis("criterion").reset_index()
+    write_csv(tol, out / "selection_tolerance.csv")
     write_csv(mode_tab, out / "modes.csv")
     write_csv(win_summary, out / "windows.csv")
     write_csv(win_noise, out / "windows_noise.csv")
@@ -348,7 +384,10 @@ def run(cfg: Config) -> None:
         "road": road_facts,
         "chosen": chosen,
         "alternatives": alts,
-        "selection": {k: v for k, v in sel.items() if k != "criteria"},
+        "selection": {k: sel[k] for k in ("front", "front_raw", "winners", "chosen")},
+        "tolerance": {k: float(v) for k, v in sel["tolerance"].items()},
+        "selection_sets": sel["sets"].to_dict(orient="records"),
+        "modularity_vs_region": _modularity_vs_region(comparison),
         "selection_by_k": {str(r["k"]): r["winner"] for _, r in by_k.iterrows()},
         "bootstrap_pairs": _boot_pairs(boot),
         "signal": signal_stats,

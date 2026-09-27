@@ -719,6 +719,12 @@ def test_node_mode_matrix_is_on_nodes(synthetic):
     assert facts["syn.node_mode"].value == "collapse"
     for key in stories.NODES.values():
         assert key in facts, key
+    # числа решения о сюжете — функцией этапа features на тех же узлах
+    for key in synthesis.DECISION_NOTES:
+        assert f"syn.decision_{key}" in facts, key
+    assert 0 <= facts["syn.decision_moved_share"].value <= 1
+    note = facts["syn.coverage_note_s1"].value  # знаменатель — узлы сети, а не МО
+    assert note.startswith("узлы сети") and "МО" not in note
     cover = facts["syn.coverage_note_s1"].value.replace(NB, " ")
     assert f"из {facts['syn.n_nodes'].value}" in cover
 

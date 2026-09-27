@@ -524,8 +524,27 @@ class Story:
     user: str = ""
 
 
-def build_stories(prm: Mapping[str, Any] | None = None) -> tuple[Story, ...]:
-    """Шесть сюжетов Б.5 с порогами баллов из ``prm`` (``params(cfg)``; None — ``DEFAULTS``)."""
+# Кто стоит в знаменателе покрытия и в подписях критериев: МО панели или узлы сети (``nodes.mode``).
+UNIT_MO, UNIT_NODES = "mo", "nodes"
+UNIT_WORDS: dict[str, dict[str, str]] = {
+    UNIT_MO: {"nom": "МО", "gen": "МО"},
+    UNIT_NODES: {"nom": "узлы сети", "gen": "узлов сети"},
+}
+
+
+def build_stories(prm: Mapping[str, Any] | None = None, unit: str = UNIT_MO) -> tuple[Story, ...]:
+    """Шесть сюжетов Б.5 с порогами баллов из ``prm`` (``params(cfg)``; None — ``DEFAULTS``).
+
+    ``unit`` — чьи доли и счётчики в подписях: ``mo`` (МО панели, факты разделов) или ``nodes`` (узлы сети,
+    факты ``NODES``): у матрицы на узлах знаменатель — узлы, и называть их «МО» нельзя.
+    """
+    if unit not in UNIT_WORDS:
+        raise ValueError(f"unit = {unit!r}: допустимы {sorted(UNIT_WORDS)}")
+    nom, gen = UNIT_WORDS[unit]["nom"], UNIT_WORDS[unit]["gen"]
+    if unit == UNIT_NODES:
+        s2_where = "внутри групп регионов на узлах сети (зарплата Москвы — выброс, не входит)"
+    else:
+        s2_where = "внутри регионов без внутригородских территорий (у них зарплата — по месту работы)"
     prm = params(None) if prm is None else prm
     bins = {k: tuple(float(x) for x in v) for k, v in prm["signal_bins"].items()}
     bands = tuple(float(x) for x in prm["coverage_bands"])
@@ -533,7 +552,7 @@ def build_stories(prm: Mapping[str, Any] | None = None) -> tuple[Story, ...]:
     def cover(fact_key: str, label: str) -> CoverageScore:
         return CoverageScore(fact_key, bands, label)
 
-    full = "МО с полным рядом за 24 месяца"
+    full = f"{nom} с полным рядом за 24 месяца"
     level23 = ("log_level_2023",)
     return (
         Story(
@@ -547,7 +566,7 @@ def build_stories(prm: Mapping[str, Any] | None = None) -> tuple[Story, ...]:
                 "explainability": (4, "«северяне тратят летом»"),
                 "data_risk": (2, "два цикла; курорты юга выпали; неясно, где совершена трата"),
             },
-            signal=BinScore("e3.reliable_share", bins["s1"], "доля МО с устойчивым своим ритмом"),
+            signal=BinScore("e3.reliable_share", bins["s1"], f"доля {gen} с устойчивым своим ритмом"),
             coverage=cover("e1.n_full", full),
             rejections=(
                 Rejection(
@@ -555,7 +574,7 @@ def build_stories(prm: Mapping[str, Any] | None = None) -> tuple[Story, ...]:
                     "e3.reliable_share",
                     ">=",
                     "rejection.s1_reliable_share_min",
-                    "доля МО с устойчивым своим ритмом",
+                    f"доля {gen} с устойчивым своим ритмом",
                     alts=(("e3.share_r06", "без условия на размах"),),
                 ),
                 Rejection(
@@ -589,18 +608,17 @@ def build_stories(prm: Mapping[str, Any] | None = None) -> tuple[Story, ...]:
             signal=BinScore(
                 "e2.partial_rho_access_within_no_inner",
                 bins["s2"],
-                "частный ρ уровня с доступностью рынков сверх зарплаты внутри регионов, без внутригородских",
+                f"частный ρ уровня с доступностью рынков сверх зарплаты {s2_where}",
                 use_abs=True,
             ),
-            coverage=cover("e2.n_access_wage", "МО с доступностью рынков и зарплатой"),
+            coverage=cover("e2.n_access_wage", f"{nom} с доступностью рынков и зарплатой"),
             rejections=(
                 Rejection(
                     "s2_partial",
                     "e2.partial_rho_access_within_no_inner",
                     "abs>=",
                     "rejection.s2_partial_rho_min",
-                    "частный ρ уровня с доступностью рынков сверх зарплаты внутри регионов без "
-                    "внутригородских территорий (у них зарплата — по месту работы)",
+                    f"частный ρ уровня с доступностью рынков сверх зарплаты {s2_where}",
                     alts=(
                         ("e2.partial_rho_access_within", "по всем МО"),
                         ("e2.partial_rho_access_within_lo", "нижняя граница интервала бутстрепа по всем МО"),
@@ -658,7 +676,7 @@ def build_stories(prm: Mapping[str, Any] | None = None) -> tuple[Story, ...]:
                 bins["s4_residual"],
                 "доля дисперсии CLR после очистки от уровня и региона",
             ),
-            coverage=cover("e4.n_basket", "МО с 12 месяцами обоих лет"),
+            coverage=cover("e4.n_basket", f"{nom} с 12 месяцами обоих лет"),
             rejections=(
                 Rejection(
                     "s4_residual",
@@ -760,14 +778,14 @@ def build_stories(prm: Mapping[str, Any] | None = None) -> tuple[Story, ...]:
                 ),
             },
             signal=BinScore("e5.suburb_ratio", bins["s6"], "траты к доходу 5-НДФЛ: пригороды к остальным"),
-            coverage=cover("e5.n_ndfl_usable", "МО с пригодным доходом 5-НДФЛ"),
+            coverage=cover("e5.n_ndfl_usable", f"{nom} с пригодным доходом 5-НДФЛ"),
             rejections=(
                 Rejection(
                     "s6_usable",
                     "e5.n_ndfl_usable",
                     ">=",
                     "rejection.s6_usable_min",
-                    "МО с пригодным доходом 5-НДФЛ",
+                    f"{nom} с пригодным доходом 5-НДФЛ",
                     role=ROLE_DATA,
                 ),
                 Rejection(

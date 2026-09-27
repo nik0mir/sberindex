@@ -151,7 +151,19 @@ features:
     tree_features: [log_wage_rel, urban_share_rel, age_old_share_rel, log_pop_rel, market_access_rel,
                     emp_sh_primary, emp_sh_industry, emp_sh_public, emp_sh_market_services,
                     emp_sh_trade_transport, north, dist_capital_km]
-    expected:                 # числа черновой проверки 26.09 (1774 МО без внутригородских, seed 0): сверка
+    reference:                # воспроизведено конвейером 27.09 (1776 узлов, collapse, seed 42): сверка при
+                              # повторных прогонах; расхождение больше допуска — предупреждение в логе, не ошибка
+      ami_region: 0.005
+      tree_kappa: 0.315
+      tree_kappa_clean: 0.121
+      ari_years: 0.317
+      moved_share: 0.233
+      noise_share: 0.077
+      offline_2023: 722
+      offline_2024: 18
+    reference_tol: 0.01       # допуск: |разница| ≤ 0,01 × max(1, |значение|) — 0,01 у долей, 1% у счётчиков
+    draft_26_09:              # черновые скрипты 26.09 вне конвейера (1774 МО без внутригородских, свой субъект
+                              # вместо группы региона, seed 0) — на них опиралось решение о сюжете; только история
       ami_region: 0.004
       tree_kappa: 0.31
       ari_years: 0.32
@@ -159,6 +171,24 @@ features:
       noise_share: 0.075
       offline_2023: 720
       offline_2024: 17
+  # Пространство признаков для этапа 3 (docs/features.md): роль признака — где он используется, чтобы один
+  # и тот же сигнал не вошёл дважды (в рёбра и в атрибуты). Выбор проверяется на данных правилами ниже,
+  # итог проверки — колонка «Проверка» в docs/features.md.
+  space:
+    edges: [clr_rel_food, clr_rel_marketplace, clr_rel_transport, clr_rel_health, clr_rel_cafe, clr_rel_other]
+                              # рёбра: корзина относительно группы региона (правило basket_dist, docs/network.md)
+    attributes: [log_level_rel, log_wage_rel, urban_share_rel, age_old_share_rel, log_pop_rel,
+                 market_access_rel, emp_sh_primary, emp_sh_industry, emp_sh_trade_transport,
+                 emp_sh_market_services, emp_sh_public]
+                              # атрибуты узлов: уровень трат и экономика места
+    layer: [own_summer, own_amplitude_shrunk]   # слой: северный годовой ритм; региональный по природе (Север),
+                              # поэтому проверяется только надёжность, а не η² группы региона
+    dynamics: [sh_marketplace, mp_pp_yoy]   # сдвиг к маркетплейсам: между окнами (этап dynamics), не атрибут
+    min_reliability: 0.5      # признак с надёжностью 2023 ~ 2024 ниже — описательный, не атрибут
+    max_abs_rho: 0.8          # |ρ| Спирмена двух признаков одной роли выше — пара почти дублирует друг друга
+    duplicate_rho: 0.999      # |ρ| выше — ранги совпадают, признаки взаимозаменяемы: оставить один
+  report: docs/features.md    # отчёт этапа features (собирается кодом, руками не править)
+  report_strict: true         # утверждение шаблона отчёта неверно на данных — ошибка (код 3), отчёт не пишется
 
 # Этап 2. Правила рёбер и сеть (python -m munnet network): data/processed/network_*.parquet, outputs/network/,
 # отчёт docs/network.md. Формулы правил — в src/munnet/network/rules.py и в отчёте.
@@ -180,6 +210,14 @@ network:
     rhythm_dtw:          # DTW z-нормированного своего ритма с окном Сакоэ — Чибы, ядро exp(−d²/σ²)
       kind: rhythm_dtw
       window: 2          # допустимый сдвиг, месяцев (dtaidistance: параметр window = сдвиг + 1)
+    basket_dist_abs:     # абляция: расстояние корзин без вычета центра региона (CLR как есть) — сколько
+      kind: basket_distance  # «отличия от географии» даёт само вычитание региона
+      relative: false
+      ablation: true
+    rhythm_corr_rel:     # абляция: корреляция ритма после вычета среднего ритма группы региона в каждом месяце
+      kind: rhythm_corr
+      relative: true
+      ablation: true
     geo_road:            # контроль «чистой географии»: дорожное расстояние (highway), ядро exp(−d²/σ²)
       kind: road
     geo_gravity:         # контроль: гравитация P_i·P_j / d^β, P — население, d — дорожное расстояние
@@ -218,15 +256,24 @@ network:
               emp_sh_primary, emp_sh_industry, emp_sh_trade_transport, emp_sh_market_services, emp_sh_public]
     relative: [emp_sh_primary, emp_sh_industry, emp_sh_trade_transport, emp_sh_market_services, emp_sh_public]
                              # эти берутся относительно группы региона (минус медиана группы), как *_rel
-  # Выбор основного правила. Критерии и их порядок объявлены до расчёта (27.09.2026, защита от подгонки):
+  # Выбор основного правила. Порядок критериев записан в конфиге; независимой отметки времени до расчёта нет
+  # (в git конфиг и результаты попали в один коммит). Основной набор (priority):
   # 1) надёжность — Жаккар рёбер kNN сетей 2023 и 2024 годов, больше — лучше;
   # 2) отличие от географии — 1 − Жаккар с сетью geo_road, больше — лучше;
   # 3) согласованность с атрибутами места — средняя ассортативность по attributes.columns, больше — лучше;
   # 4) простота — ранг simplicity, меньше — лучше.
-  # Правило: Парето-фронт по четырём критериям, на фронте — лексикографически по priority; чувствительность —
-  # выбор при всех 24 порядках критериев. Кандидаты — только правила по тратам (geo_* — контроль).
+  # Правило: Парето-фронт с допуском ничьей, на фронте — лексикографически по priority (равные в пределах
+  # допуска переходят к следующему критерию); чувствительность — все порядки критериев, сумма рангов (Борда)
+  # и другие наборы критериев (sets). Кандидаты — только правила по тратам (geo_* — контроль, абляции — нет).
   selection:
     priority: [reliability, geo_difference, attribute_consistency, simplicity]
+    sets:                    # другие разумные наборы (выбор показывается при каждом): modularity — модульность
+                             # Leiden сверх нуля с теми же степенями, probe_stability — ARI разбиений разных seed
+      plan: [reliability, modularity, attribute_consistency]   # PLAN.md: устойчивость, модульность, согласованность
+      extended: [reliability, geo_difference, attribute_consistency, simplicity, modularity, probe_stability]
+    tie: bootstrap_sd        # допуск ничьей (добавлен 27.09 после замечания судьи): разница критерия меньше его
+                             # стандартного отклонения по бутстрапу месяцев (медиана по правилам, где бутстрап
+                             # допустим: корзина и корреляция) — ничья; у простоты допуска нет
     candidates: [basket_cos, basket_dist, rhythm_corr, rhythm_lag, rhythm_dtw]
     simplicity: {basket_cos: 1, basket_dist: 1, rhythm_corr: 1, rhythm_lag: 2, rhythm_dtw: 3,
                  geo_road: 1, geo_gravity: 2}

@@ -50,6 +50,24 @@ MEANING: dict[str, str] = {
 }
 
 
+MEANING_VARIANT: dict[tuple[str, bool], str] = {
+    (
+        "basket_distance",
+        False,
+    ): "корзины двух МО похожи как есть, без сравнения с регионом (в том числе потому, "
+    "что МО из одного региона)",
+    ("rhythm_corr", True): "траты в двух МО колеблются одинаково сверх общего ритма своего региона",
+}
+
+
+def meaning(rule: RuleSpec) -> str:
+    """Смысл ребра одной фразой; у абляций — своя фраза (корзина без вычета региона, ритм сверх региона)."""
+    default_relative = rule.kind in ("basket_cosine", "basket_distance")
+    if rule.relative != default_relative:
+        return MEANING_VARIANT.get((rule.kind, rule.relative), MEANING[rule.kind])
+    return MEANING[rule.kind]
+
+
 def sparsify(S: np.ndarray, method: str, k: int, Q: np.ndarray | None, fdr_q: float) -> pd.DataFrame:
     """Рёбра по способу разрежения. ``threshold``: у правил по рядам — пары с q < fdr_q (значимые против
     циклического сдвига), у остальных — самые похожие пары в числе рёбер kNN того же k (порог-квантиль)."""
@@ -108,7 +126,7 @@ def evaluate_rule(
     edges = sparsify(S, p.method, p.k, Q, p.fdr_q)
     lists = G.knn_lists(S, p.k)
     info = ns.info
-    row: dict = {"rule": rule.name, "kind": rule.kind, "meaning": MEANING[rule.kind]}
+    row: dict = {"rule": rule.name, "kind": rule.kind, "meaning": meaning(rule), "ablation": rule.ablation}
     row.update(G.passport(edges, info, lists, p.attr_columns))
     row["assort_north"] = G.assortativity(G.to_igraph(ns.n, edges), ns.attrs["north"].to_numpy())
     row["sigma"] = sim.sigma
@@ -272,47 +290,105 @@ def pair_rows(results: dict[str, RuleResult], p: NetworkParams, rng) -> pd.DataF
                 "ari": float(adjusted_rand_score(ra.probe.membership, rb.probe.membership)),
             }
         )
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    if len(out):
+        from munnet.network.rules import bh_qvalues
+
+        out["rank_corr_q"] = bh_qvalues(out["rank_corr_p"].to_numpy())  # поправка на число пар правил
+    return out
 
 
-def paired_bootstrap(results: dict[str, RuleResult], ns: NodeSet, p: NetworkParams, rng) -> pd.DataFrame:
-    """Надёжность правил на одних и тех же бутстрап-выборках месяцев (внутри каждого года): парное сравнение
-    правил — доля повторов, где одно правило надёжнее другого. Только корзина и корреляция: у лагов и DTW
-    повтор месяцев ломает порядок во времени. Бутстрап-Жаккар смещён вниз (повторённые месяцы добавляют
-    шум), поэтому сравниваются правила между собой, а не с точечной оценкой."""
+def paired_bootstrap(
+    results: dict[str, RuleResult], ns: NodeSet, p: NetworkParams, rng, geo_edges: pd.DataFrame
+) -> pd.DataFrame:
+    """Критерии выбора на одних и тех же бутстрап-выборках месяцев (внутри каждого года): надёжность
+    (Жаккар сетей двух лет), отличие от географии и согласованность с местом (сеть на 24 выбранных месяцах),
+    модульность Leiden сверх нуля основной сети и ARI разбиений двух seed. Отсюда — парное сравнение правил
+    (доля повторов, где одно правило лучше) и допуск ничьей (стандартное отклонение критерия).
+
+    Только корзина и корреляция: у лагов и DTW повтор месяцев ломает порядок во времени. Бутстрап-Жаккар
+    смещён вниз (повторённые месяцы добавляют шум), поэтому сравниваются правила между собой, а не
+    с точечной оценкой."""
+    from sklearn.metrics import adjusted_rand_score
+
     rules = [r for r in results.values() if r.spec.is_basket or r.spec.kind == "rhythm_corr"]
+    geo_set = G.edge_set(geo_edges)
+    seeds = p.seeds[:2]
     rows = []
     for b in range(p.bootstrap):
         mb = {y: rng.choice(m, size=len(m), replace=True) for y, m in YEAR_MONTHS.items()}
+        both = np.concatenate([mb[y] for y in YEAR_MONTHS])
         for res in rules:
             e = [G.edge_set(G.knn_edges(similarity(res.spec, ns, mb[y]).S, p.k)) for y in YEAR_MONTHS]
-            rows.append({"replicate": b, "rule": res.spec.name, "reliability": G.jaccard(e[0], e[1])})
+            full = G.knn_edges(similarity(res.spec, ns, both).S, p.k)
+            g = G.to_igraph(ns.n, full)
+            attrs = [G.assortativity(g, ns.attrs[c].to_numpy(dtype=np.float64)) for c in p.attr_columns]
+            runs = [G.leiden(g, s, p.resolution) for s in seeds]
+            rows.append(
+                {
+                    "replicate": b,
+                    "rule": res.spec.name,
+                    "reliability": G.jaccard(e[0], e[1]),
+                    "geo_difference": 1.0 - G.jaccard(G.edge_set(full), geo_set),
+                    "attribute_consistency": float(np.nanmean(attrs)),
+                    "modularity": max(q for _, q in runs) - res.probe.q_null_mean,
+                    "probe_stability": float(adjusted_rand_score(runs[0][0], runs[1][0])),
+                }
+            )
     return pd.DataFrame(rows)
 
 
 # --- Выбор ---------------------------------------------------------------------------------------
 
+SELECTION_CRITERIA: tuple[str, ...] = (
+    "reliability",
+    "geo_difference",
+    "attribute_consistency",
+    "simplicity",
+    "modularity",
+    "probe_stability",
+)
 
-def criteria_table(comparison: pd.DataFrame, p: NetworkParams) -> pd.DataFrame:
-    """Критерии выбора кандидатов: больше — лучше (простота — минус ранг)."""
-    c = comparison.set_index("rule").loc[list(p.candidates)]
+
+def criteria_table(comparison: pd.DataFrame, p: NetworkParams, rules=None) -> pd.DataFrame:
+    """Все критерии выбора (больше — лучше; простота — минус ранг) для правил ``rules`` (по умолчанию —
+    кандидаты): надёжность, отличие от географии, согласованность с местом, простота, модульность сверх
+    нуля, устойчивость зонда (ARI разных seed)."""
+    c = comparison.set_index("rule").loc[list(rules or p.candidates)]
     return pd.DataFrame(
         {
             "reliability": c["reliability"],
             "geo_difference": c["geo_difference"],
             "attribute_consistency": c["attr_consistency"],
-            "simplicity": [-p.simplicity[r] for r in c.index],
+            "simplicity": [-p.simplicity.get(r, 1.0) for r in c.index],
+            "modularity": c["q_excess"],
+            "probe_stability": c["ari_seeds"],
         },
         index=c.index,
-    )
+    ).astype("float64")
 
 
-def pareto_front(crit: pd.DataFrame) -> list[str]:
-    """Правила, которых никто не доминирует (не хуже по всем критериям и лучше хотя бы по одному)."""
+def tie_tolerance(boot: pd.DataFrame, p: NetworkParams) -> pd.Series:
+    """Допуск ничьей по критерию: стандартное отклонение критерия по бутстрапу месяцев, медиана по
+    кандидатам, где бутстрап допустим; у простоты (целые ранги) — 0."""
+    tol = pd.Series(0.0, index=list(SELECTION_CRITERIA))
+    if boot.empty:
+        return tol
+    b = boot.loc[boot["rule"].isin(p.candidates)]
+    cols = [c for c in SELECTION_CRITERIA if c in b.columns]
+    sd = b.groupby("rule")[cols].std(ddof=1).median()
+    tol.loc[sd.index] = sd.to_numpy()
+    return tol
+
+
+def pareto_front(crit: pd.DataFrame, tol: pd.Series | None = None) -> list[str]:
+    """Правила, которых никто не доминирует. ``o`` доминирует ``r``, если по всем критериям ``o`` не хуже
+    ``r`` с учётом допуска (o ≥ r − допуск) и хотя бы по одному лучше сверх допуска (o − r > допуск)."""
+    t = pd.Series(0.0, index=crit.columns) if tol is None else tol.reindex(crit.columns).fillna(0.0)
     front = []
     for r in crit.index:
         dominated = any(
-            (crit.loc[o] >= crit.loc[r]).all() and (crit.loc[o] > crit.loc[r]).any()
+            (crit.loc[o] >= crit.loc[r] - t).all() and ((crit.loc[o] - crit.loc[r]) > t).any()
             for o in crit.index
             if o != r
         )
@@ -321,42 +397,92 @@ def pareto_front(crit: pd.DataFrame) -> list[str]:
     return front
 
 
+def lexicographic_set(crit: pd.DataFrame, order, tol: pd.Series | None = None) -> list[str]:
+    """Победители по критериям в порядке ``order``: на каждом шаге остаются правила, уступающие лучшему не
+    больше допуска; следующий критерий — только для них. Несколько правил в ответе — ничья."""
+    remaining = list(crit.index)
+    for c in order:
+        t = 0.0 if tol is None else float(tol.get(c, 0.0))
+        best = crit.loc[remaining, c].max()
+        remaining = [r for r in remaining if best - crit.loc[r, c] <= t]
+        if len(remaining) == 1:
+            break
+    return sorted(remaining, key=lambda r: [-crit.loc[r, c] for c in order])
+
+
 def lexicographic(crit: pd.DataFrame, order) -> str:
-    """Лучшее правило по критериям в порядке ``order`` (следующий критерий — только при равенстве)."""
-    ranked = crit.sort_values(list(order), ascending=False, kind="mergesort")
-    return str(ranked.index[0])
+    """Лучшее правило по критериям в порядке ``order`` без допуска (следующий — только при равенстве)."""
+    return lexicographic_set(crit, order)[0]
 
 
-def select(comparison: pd.DataFrame, p: NetworkParams) -> tuple[str, pd.DataFrame, dict]:
-    """Основное правило: Парето-фронт, на нём — лексикографически по ``priority``; таблица всех порядков."""
+def break_tie(winners: list[str], boot: pd.DataFrame) -> str:
+    """Ничья разрешается парным бутстрапом надёжности: правило, которое надёжнее соперников в большей доле
+    повторов; без бутстрапа — первый по порядку критериев."""
+    if len(winners) == 1 or boot.empty or not set(winners) <= set(boot["rule"]):
+        return winners[0]
+    wide = boot.pivot(index="replicate", columns="rule", values="reliability")
+    score = {r: float(np.mean([(wide[r] > wide[o]).mean() for o in winners if o != r])) for r in winners}
+    return max(winners, key=lambda r: (score[r], -winners.index(r)))
+
+
+def select_sets(crit: pd.DataFrame, p: NetworkParams, tol: pd.Series) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Выбор при каждом наборе критериев ``selection.sets`` — без допуска и с допуском ничьей: Парето-фронт,
+    победители при всех порядках критериев набора (« = » — ничья), сумма рангов (Борда)."""
+    rows, orders = [], []
+    for name, criteria in p.criteria_sets.items():
+        c = crit[list(criteria)]
+        for use_tol in (False, True):
+            t = tol if use_tol else None
+            front = pareto_front(c, t)
+            counts: dict[str, int] = {}
+            for order in itertools.permutations(criteria):
+                w = " = ".join(lexicographic_set(c.loc[front], order, t))
+                counts[w] = counts.get(w, 0) + 1
+                orders.append({"set": name, "tie": use_tol, "order": " > ".join(order), "winner": w})
+            borda = c.rank(ascending=False, method="min").sum(axis=1).sort_values(kind="mergesort")
+            rows.append(
+                {
+                    "set": name,
+                    "criteria": ", ".join(criteria),
+                    "tie": use_tol,
+                    "front": ", ".join(front),
+                    "winners": "; ".join(
+                        f"{w}: {n}" for w, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+                    ),
+                    "orders": int(sum(counts.values())),
+                    "borda": str(borda.index[0]),
+                    "borda_tie": bool((borda == borda.iloc[0]).sum() > 1),
+                    "all_basket": all(w.startswith("basket") for key in counts for w in key.split(" = ")),
+                }
+            )
+    return pd.DataFrame(rows), pd.DataFrame(orders)
+
+
+def select(comparison: pd.DataFrame, p: NetworkParams, boot: pd.DataFrame) -> tuple[str, pd.DataFrame, dict]:
+    """Основное правило: Парето-фронт основного набора с допуском ничьей, на нём — порядок ``priority``
+    (равные в пределах допуска переходят к следующему критерию); ничья по всем критериям разрешается
+    парным бутстрапом надёжности. Таблицы: наборы критериев и все порядки."""
     crit = criteria_table(comparison, p)
-    front = pareto_front(crit)
-    chosen = lexicographic(crit.loc[front], p.priority)
-    rows = []
-    for order in itertools.permutations(p.priority):
-        rows.append(
-            {
-                "order": " > ".join(order),
-                "winner": lexicographic(crit.loc[front], order),
-                "declared": order == p.priority,
-            }
-        )
-    orders = pd.DataFrame(rows)
-    # сумма рангов (Борда) — ещё одно разумное правило агрегирования
-    borda = crit.rank(ascending=False, method="min").sum(axis=1).sort_values(kind="mergesort")
+    tol = tie_tolerance(boot, p)
+    main = crit[list(p.priority)]
+    front = pareto_front(main, tol)
+    winners = lexicographic_set(main.loc[front], p.priority, tol)
+    chosen = break_tie(winners, boot)
+    sets, orders = select_sets(crit, p, tol)
     info = {
         "front": front,
+        "front_raw": pareto_front(main),
+        "winners": winners,
         "chosen": chosen,
-        "borda_winner": str(borda.index[0]),
-        "orders_same": int((orders["winner"] == chosen).sum()),
-        "orders_total": len(orders),
         "criteria": crit.reset_index().rename(columns={"index": "rule"}),
+        "tolerance": tol,
+        "sets": sets,
     }
     return chosen, orders, info
 
 
 def select_by_k(grid: pd.DataFrame, p: NetworkParams) -> pd.DataFrame:
-    """Выбор тем же правилом (Парето, затем порядок ``priority``) при каждом k из ``k_grid``."""
+    """Выбор основным набором без допуска (Парето, затем порядок ``priority``) при каждом k."""
     rows = []
     for k, g in grid.groupby("k"):
         g = g.set_index("rule").loc[list(p.candidates)]

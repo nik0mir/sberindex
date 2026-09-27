@@ -46,7 +46,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from munnet import nodes
+from munnet import features_report, nodes
 from munnet.config import Config
 from munnet.contracts import (
     CATEGORY_CODES,
@@ -111,6 +111,7 @@ class FeatureParams:
     reliable_amplitude: float
     null_repeats: int
     checks: Mapping[str, Any]
+    space: Mapping[str, Any]
     seed: int
 
     @classmethod
@@ -131,6 +132,7 @@ class FeatureParams:
             reliable_amplitude=float(season["reliable_amplitude"]),
             null_repeats=int(season["null_repeats"]),
             checks=dict(f.get("checks") or {}),
+            space=dict(f.get("space") or {}),
             seed=int(cfg["seed"]),
         )
         problems = []
@@ -575,62 +577,213 @@ def story_checks(
 
 # --- Таблица признаков ---------------------------------------------------------------------------
 
-COLLINEAR_RHO = 0.8  # |ρ| Спирмена больше — пара признаков почти дублирует друг друга
-# Признак -> (таблица, формула, какую разницу ловит). Надёжность 2023 ~ 2024 — ρ значений двух лет.
-FEATURE_DOCS: dict[str, tuple[str, str, str]] = {
+COLLINEAR_RHO = 0.8  # |ρ| Спирмена больше — пара признаков почти дублирует друг друга (умолчание space)
+
+
+@dataclass(frozen=True)
+class FeatureDoc:
+    """Описание признака для таблицы признаков и ``docs/features.md``."""
+
+    table: str  # таблица data/processed
+    group: str  # группа признаков (ключ ``FEATURE_GROUPS``)
+    label: str  # подпись для людей
+    formula: str  # формула словами
+    norm: str  # нормировка: CLR, относительно группы региона, логарифм…
+    captures: str  # какую экономическую разницу ловит
+
+
+FEATURE_GROUPS: dict[str, str] = {
+    "basket": "Корзина",
+    "level": "Уровень трат",
+    "marketplace": "Маркетплейсы",
+    "rhythm": "Годовой ритм",
+    "place": "Экономика места",
+}
+_REL = "относительно группы региона"
+_PART_LABELS = {
+    "food": "продовольствие",
+    "marketplace": "маркетплейсы",
+    "transport": "транспорт",
+    "health": "здоровье",
+    "cafe": "общепит",
+    "other": "«Прочее»",
+}
+_GROUP_LABELS = {
+    "primary": "сельское хозяйство и добыча",
+    "industry": "обработка и энергетика",
+    "trade_transport": "стройка, торговля, транспорт",
+    "market_services": "рыночные услуги",
+    "public": "госуправление, образование, здравоохранение",
+}
+FEATURE_DOCS: dict[str, FeatureDoc] = {
     **{
-        f"clr_rel_{q}": (
+        f"clr_rel_{q}": FeatureDoc(
             "features_windows",
-            f"CLR доли «{q}» за окно минус среднее CLR группы региона",
-            "состав корзины жителей сверх своего региона",
+            "basket",
+            f"Корзина: {_PART_LABELS[q]}",
+            f"CLR доли «{_PART_LABELS[q]}» за год минус среднее CLR группы региона",
+            f"CLR, {_REL}",
+            "на что жители тратят больше или меньше, чем соседи по региону",
         )
         for q in PARTS
     },
-    "log_level_rel": (
+    "log_level_rel": FeatureDoc(
         "features_windows",
-        "ln(средние траты в месяц) минус центр группы региона",
-        "уровень трат",
+        "level",
+        "Уровень трат",
+        "ln средних трат жителя в месяц минус центр группы региона",
+        f"логарифм, {_REL}",
+        "насколько жители тратят больше или меньше соседей по региону",
     ),
-    "sh_marketplace": (
+    "sh_marketplace": FeatureDoc(
         "features_windows",
-        "траты на маркетплейсы / «Все категории» за окно",
-        "онлайн-покупки",
+        "marketplace",
+        "Доля маркетплейсов",
+        "траты на маркетплейсы / «Все категории» за год",
+        "доля без нормировки",
+        "насколько покупки ушли в онлайн",
     ),
-    "mp_pp_yoy": (
+    "mp_pp_yoy": FeatureDoc(
         "features_windows",
-        "100 × (доля маркетплейсов окна − та же доля год назад)",
-        "сдвиг к онлайну",
+        "marketplace",
+        "Прирост доли маркетплейсов",
+        "доля маркетплейсов года минус доля того же окна годом раньше, п. п.",
+        "разность долей, п. п.",
+        "как быстро покупки уходят в онлайн",
     ),
-    "summer_excess": (
+    "summer_excess": FeatureDoc(
         "features_rhythm",
+        "rhythm",
+        "Летний избыток трат",
         "лето к прочим месяцам без декабря, ряд без тренда узла",
-        "сезонность",
+        "логарифм, без тренда узла",
+        "сезонность: завоз, отпуска, северное лето",
     ),
-    "dec_peak": ("features_rhythm", "декабрь к январю–ноябрю, ряд без тренда узла", "новогодний пик"),
-    "own_summer": (
+    "own_summer": FeatureDoc(
         "features_rhythm",
-        "летний избыток своего ритма (после общего ритма месяца)",
-        "северное лето",
+        "rhythm",
+        "Летний избыток своего ритма",
+        "то же после вычета общего ритма месяца (сдвиг на одно число для всех узлов)",
+        "логарифм, без тренда узла и общего ритма",
+        "лето сильнее или слабее, чем у типичного узла",
     ),
-    "own_amplitude_shrunk": ("features_rhythm", "размах своего профиля × max(r, 0)", "сила своего ритма"),
+    "dec_peak": FeatureDoc(
+        "features_rhythm",
+        "rhythm",
+        "Декабрьский пик",
+        "декабрь к январю–ноябрю, ряд без тренда узла",
+        "логарифм, без тренда узла",
+        "новогодний пик трат",
+    ),
+    "own_amplitude_shrunk": FeatureDoc(
+        "features_rhythm",
+        "rhythm",
+        "Сила своего ритма",
+        "размах своего годового профиля × max(r, 0), r — повторяемость 2023 ~ 2024",
+        "логарифм, сжатие на повторяемость",
+        "есть ли у узла устойчивый свой годовой ритм",
+    ),
     **{
-        f"emp_sh_{g}": (
+        f"emp_sh_{g}": FeatureDoc(
             "features_place",
-            f"работники группы «{g}» / все работники (без МСП)",
-            "структура занятости",
+            "place",
+            f"Занятость: {_GROUP_LABELS[g]}",
+            "работники разделов ОКВЭД2 группы / все работники крупных и средних организаций",
+            "доля",
+            "чем зарабатывает место",
         )
         for g in OKVED_GROUPS
     },
-    "log_wage_rel": (
+    "log_wage_rel": FeatureDoc(
         "features_place",
-        "ln зарплаты минус медиана группы региона (без выбросов)",
-        "заработки",
+        "place",
+        "Зарплата",
+        "ln средней зарплаты минус медиана группы региона (без выбросов)",
+        f"логарифм, {_REL}",
+        "заработки на месте",
     ),
-    "urban_share": ("features_place", "городское население / всё население", "урбанизация"),
-    "age_old_share": ("features_place", "старше трудоспособного возраста / всё население", "старение"),
-    "log_pop": ("features_place", "ln среднегодового населения", "размер"),
-    "market_access": ("features_place", "индекс доступности рынков СберИндекса", "доступ к рынкам"),
-    "log_ndfl_rel": ("features_place", "ln дохода 5-НДФЛ на жителя минус медиана группы (ndfl_ok)", "доходы"),
+    "urban_share": FeatureDoc(
+        "features_place",
+        "place",
+        "Доля горожан",
+        "городское население / всё население",
+        "доля",
+        "урбанизация",
+    ),
+    "urban_share_rel": FeatureDoc(
+        "features_place",
+        "place",
+        "Доля горожан к региону",
+        "доля горожан минус медиана группы региона",
+        f"доля, {_REL}",
+        "урбанизация сверх своего региона",
+    ),
+    "age_old_share": FeatureDoc(
+        "features_place",
+        "place",
+        "Доля старше трудоспособного возраста",
+        "старше трудоспособного возраста / всё население",
+        "доля",
+        "старение",
+    ),
+    "age_old_share_rel": FeatureDoc(
+        "features_place",
+        "place",
+        "Доля старших к региону",
+        "доля старше трудоспособного возраста минус медиана группы региона",
+        f"доля, {_REL}",
+        "старение сверх своего региона",
+    ),
+    "log_pop": FeatureDoc(
+        "features_place", "place", "Население", "ln среднегодового населения", "логарифм", "размер"
+    ),
+    "log_pop_rel": FeatureDoc(
+        "features_place",
+        "place",
+        "Население к региону",
+        "ln населения минус медиана группы региона",
+        f"логарифм, {_REL}",
+        "крупнее или мельче соседей по региону",
+    ),
+    "market_access": FeatureDoc(
+        "features_place",
+        "place",
+        "Доступность рынков",
+        "индекс доступности рынков СберИндекса",
+        "индекс 0–1000",
+        "доступ к рынкам",
+    ),
+    "market_access_rel": FeatureDoc(
+        "features_place",
+        "place",
+        "Доступность рынков к региону",
+        "индекс минус медиана группы региона",
+        f"индекс, {_REL}",
+        "центр или периферия своего региона",
+    ),
+    "log_ndfl_rel": FeatureDoc(
+        "features_place",
+        "place",
+        "Доход 5-НДФЛ",
+        "ln дохода 5-НДФЛ на жителя минус медиана группы региона (только ndfl_ok)",
+        f"логарифм, {_REL}",
+        "доходы по месту работы",
+    ),
+}
+# Версии одного показателя (относительно региона и как есть): их связь не считается дублированием.
+SAME_VARIABLE: tuple[frozenset[str], ...] = (
+    frozenset({"urban_share", "urban_share_rel"}),
+    frozenset({"age_old_share", "age_old_share_rel"}),
+    frozenset({"log_pop", "log_pop_rel"}),
+    frozenset({"market_access", "market_access_rel"}),
+)
+ROLES: tuple[str, ...] = ("edges", "attributes", "layer", "dynamics")
+ROLE_TEXT: dict[str, str] = {
+    "edges": "рёбра",
+    "attributes": "атрибут",
+    "layer": "слой (ритм)",
+    "dynamics": "динамика",
+    "outside": "вне пространства",
 }
 
 
@@ -645,16 +798,56 @@ def rhythm_by_year(monthly: pd.DataFrame, summer_months: Sequence[int]) -> dict[
     return {"summer_excess": summer, "dec_peak": pd.DataFrame(dec, index=D.index, columns=list(YEARS))}
 
 
+def _same_variable(x: str, y: str) -> bool:
+    return any({x, y} <= pair for pair in SAME_VARIABLE)
+
+
+def _verdict(row: pd.Series, space: Mapping[str, Any], eta2_max: float) -> tuple[bool, str]:
+    """Проверка места признака в пространстве: (выполнено, почему) по правилам ``features.space``."""
+    rel_min = float(space.get("min_reliability", 0.5))
+    rho_max = float(space.get("max_abs_rho", COLLINEAR_RHO))
+    dup = float(space.get("duplicate_rho", 0.999))
+    rel, rho, eta2 = row["reliability"], row["max_abs_rho_role"], row["eta2_region_group"]
+    role = row["role"]
+    if role == "outside":
+        reasons = []
+        if row["max_abs_rho"] >= dup:
+            reasons.append(f"ранги совпадают с {row['max_abs_rho_with']}")
+        if np.isfinite(rel) and rel < rel_min:
+            reasons.append("ненадёжен")
+        if np.isfinite(eta2) and eta2 > eta2_max:
+            reasons.append("почти целиком региональный")
+        return True, "; ".join(reasons) or "для интерпретации"
+    problems = []
+    if np.isfinite(rel) and rel < rel_min:
+        problems.append("надёжность ниже порога")
+    if role == "attributes" and np.isfinite(rho) and rho > rho_max:
+        problems.append(f"дублирует {row['max_abs_rho_role_with']}")
+    if role == "attributes" and np.isfinite(eta2) and eta2 > eta2_max:
+        problems.append("почти целиком региональный")
+    if role == "layer" and np.isfinite(eta2) and eta2 > eta2_max and not problems:
+        return True, "региональный по природе: это слой, а не атрибут типов"
+    if problems:
+        return False, "; ".join(problems)
+    return True, "повторяемость встроена в признак" if not np.isfinite(rel) else "правила выполнены"
+
+
 def feature_table(
     windows: pd.DataFrame,
     rhythm: pd.DataFrame,
     place: pd.DataFrame,
     n_nodes: int,
     by_year_rhythm: Mapping[str, pd.DataFrame] | None = None,
+    coords: pd.DataFrame | None = None,
+    space: Mapping[str, Any] | None = None,
+    moran: Mapping[str, Any] | None = None,
+    eta2_max: float = 0.6,
 ) -> pd.DataFrame:
-    """Таблица признаков: формула, покрытие, надёжность (ρ Спирмена двух независимых замеров: 2023 ~ 2024,
-    а у прироста доли маркетплейсов — январь–июнь ~ июль–декабрь 2024 года), η² группы региона, наибольший
-    |ρ| Спирмена с другими признаками (2024 год, контекст 2023 года) и с каким."""
+    """Таблица признаков ``FEATURE_DOCS``: формула, нормировка, покрытие, надёжность (ρ Спирмена двух
+    независимых замеров: 2023 ~ 2024, а у прироста доли маркетплейсов — январь–июнь ~ июль–декабрь 2024 года),
+    η² группы региона, I Морана (k ближайших узлов по ``coords``, перестановочный тест; ``moran``: ``k``,
+    ``permutations``, ``rng``), наибольший |ρ| с другими признаками (2024 год, контекст 2023 года; версии
+    одного показателя не считаются), роль в пространстве ``space`` и проверка правил роли."""
     y0, y1 = YEARS
     y = windows.loc[windows["window_kind"].astype(str) == "year"]
     by_year = {yr: y.loc[y["year"] == yr].set_index("territory_id") for yr in YEARS}
@@ -666,11 +859,16 @@ def feature_table(
     }
     rh = rhythm.set_index("territory_id")
     ry = dict(by_year_rhythm or {})
+    space = dict(space or {})
+    role_of = {f: r for r in ROLES for f in space.get(r, [])}
+    unknown = sorted(set(role_of) - set(FEATURE_DOCS))
+    if unknown:
+        raise ValueError(f"features.space: неизвестные признаки {unknown}; допустимы {sorted(FEATURE_DOCS)}")
     wide = pd.DataFrame(index=by_year[y1].index)
     rows = []
-    for name, (table, formula, what) in FEATURE_DOCS.items():
+    for name, doc in FEATURE_DOCS.items():
         basis = f"{y0} ~ {y1}"
-        if table == "features_windows":
+        if doc.table == "features_windows":
             cur = by_year[y1][name]
             a, b = by_year[y0][name], cur
             if a.isna().all() and f"{y1}H1" in halves.index.get_level_values(0):
@@ -678,7 +876,7 @@ def feature_table(
                 basis = f"{y1}: январь–июнь ~ июль–декабрь"
             rel = stats.spearman(a, b.reindex(a.index))[0]
             grp = by_year[y1]["region_group"]
-        elif table == "features_rhythm":
+        elif doc.table == "features_rhythm":
             cur = rh[name].astype("float64")
             per_year = ry.get(name)
             rel = stats.spearman(per_year[y0], per_year[y1])[0] if per_year is not None else float("nan")
@@ -693,27 +891,55 @@ def feature_table(
             )
             grp = base["region_group"]
         wide[name] = cur.reindex(wide.index).astype("float64")
-        rows.append(
-            {
-                "feature": name,
-                "table": table,
-                "formula": formula,
-                "captures": what,
-                "coverage": int(cur.notna().sum()),
-                "coverage_share": float(cur.notna().sum() / n_nodes) if n_nodes else float("nan"),
-                "reliability": rel,
-                "reliability_basis": basis,
-                "eta2_region_group": stats.eta2(cur.astype("float64"), grp.reindex(cur.index)),
-            }
-        )
+        row = {
+            "feature": name,
+            "group": doc.group,
+            "label": doc.label,
+            "table": doc.table,
+            "formula": doc.formula,
+            "norm": doc.norm,
+            "captures": doc.captures,
+            "role": role_of.get(name, "outside"),
+            "coverage": int(cur.notna().sum()),
+            "coverage_share": float(cur.notna().sum() / n_nodes) if n_nodes else float("nan"),
+            "reliability": rel,
+            "reliability_basis": basis,
+            "eta2_region_group": stats.eta2(cur.astype("float64"), grp.reindex(cur.index)),
+            "moran_i": float("nan"),
+            "moran_p": float("nan"),
+        }
+        if coords is not None and moran is not None:
+            xy = coords.reindex(cur.index)
+            m = stats.morans_i(cur, xy, int(moran["k"]), int(moran["permutations"]), moran["rng"])
+            row["moran_i"], row["moran_p"] = m.I, m.p
+        rows.append(row)
     out = pd.DataFrame(rows).set_index("feature")
-    corr = wide.rank().corr()
+    corr = wide.rank().corr().abs()
     for name in out.index:
-        others = corr[name].drop(name).abs()
+        others = corr[name].drop(name)
+        others = others[[not _same_variable(name, o) for o in others.index]]
         if others.notna().any():
             out.loc[name, "max_abs_rho"] = float(others.max())
             out.loc[name, "max_abs_rho_with"] = str(others.idxmax())
-    out["collinear_08"] = out["max_abs_rho"] > COLLINEAR_RHO
+        role = out.loc[name, "role"]
+        same_role = [o for o in others.index if out.loc[o, "role"] == role and role != "outside"]
+        if same_role and others[same_role].notna().any():
+            out.loc[name, "max_abs_rho_role"] = float(others[same_role].max())
+            out.loc[name, "max_abs_rho_role_with"] = str(others[same_role].idxmax())
+        edges = [o for o in others.index if out.loc[o, "role"] == "edges"]
+        if role == "attributes" and edges:
+            out.loc[name, "max_abs_rho_edges"] = float(others[edges].max())
+            out.loc[name, "max_abs_rho_edges_with"] = str(others[edges].idxmax())
+    for col in ("max_abs_rho", "max_abs_rho_role", "max_abs_rho_edges"):
+        if col not in out.columns:
+            out[col] = np.nan
+    for col in ("max_abs_rho_with", "max_abs_rho_role_with", "max_abs_rho_edges_with"):
+        if col not in out.columns:
+            out[col] = None
+    out["collinear_08"] = out["max_abs_rho"] > float(space.get("max_abs_rho", COLLINEAR_RHO))
+    checks = [_verdict(r, space, eta2_max) for _, r in out.iterrows()]
+    out["check_ok"] = [c[0] for c in checks]
+    out["check_note"] = [c[1] for c in checks]
     return out.reset_index()
 
 
@@ -755,12 +981,60 @@ def _range(values: Sequence[dict[str, Any]], key: str) -> list[float] | None:
     return [min(v), max(v)] if v else None
 
 
+@dataclass(frozen=True)
+class StoryInputs:
+    """Входы ``story_checks``: узлы сети, узлы с полным рядом, группы и субъекты, траты, признаки места,
+    ln уровня по годам. Одни и те же у этапа features и у сводки разведки (``decision_numbers``)."""
+
+    table: pd.DataFrame
+    ids: pd.Index
+    full: pd.Index
+    groups: pd.Series
+    regions: pd.Series
+    wide: pd.DataFrame
+    windows: pd.DataFrame
+    place: pd.DataFrame
+    log_level: pd.DataFrame
+
+
+def story_inputs(nd: nodes.NodeData, p: FeatureParams) -> StoryInputs:
+    """Узлы сети (``min_months``), их траты, окна корзины и признаки места — вход проверок сюжета."""
+    table = select_nodes(nd.nodes, p.min_months)
+    ids = pd.Index(np.sort(table.loc[table["is_node"], "territory_id"].to_numpy()), name="territory_id")
+    groups = table.set_index("territory_id")["region_group"].astype("int16")
+    wide = nd.panel_wide.loc[nd.panel_wide["territory_id"].isin(ids)].reset_index(drop=True)
+    counts = wide.groupby("territory_id").size()
+    full = pd.Index(np.sort(counts.index[counts == N_MONTHS].to_numpy()), name="territory_id")
+    windows = window_features(wide, groups, p)
+    y = windows.loc[windows["window_kind"].astype(str) == "year"]
+    return StoryInputs(
+        table=table,
+        ids=ids,
+        full=full,
+        groups=groups,
+        regions=table.set_index("territory_id")["region_code"],
+        wide=wide,
+        windows=windows,
+        place=place_features(nd.context_annual, table, ids, p),
+        log_level=y.pivot(index="territory_id", columns="window", values="log_level"),
+    )
+
+
+def decision_numbers(nd: nodes.NodeData, cfg: Config) -> dict[str, Any]:
+    """Числа решения о сюжете (``story_checks``, seed конфига) — для сводки разведки: те же функции и входы,
+    что у этапа features, поэтому числа совпадают с ``outputs/features/checks.json`` (раздел ``story``)."""
+    p = FeatureParams.from_config(cfg)
+    s = story_inputs(nd, p)
+    values, _ = story_checks(s.wide, s.full, s.groups, s.regions, s.place, s.log_level, p, p.seed)
+    return values
+
+
 def run(cfg: Config) -> None:
     """Признаки узлов: ``data/processed/features_*.parquet`` и ``outputs/features/``."""
     p = FeatureParams.from_config(cfg)
     nd = nodes.load_node_data(cfg)
-    table = select_nodes(nd.nodes, p.min_months)
-    ids = pd.Index(np.sort(table.loc[table["is_node"], "territory_id"].to_numpy()), name="territory_id")
+    s = story_inputs(nd, p)
+    table, ids, groups, wide, windows, place = s.table, s.ids, s.groups, s.wide, s.windows, s.place
     log.info(
         "features: режим узлов %s, узлов сети %d из %d (ряд не короче %d мес.)",
         nd.mode,
@@ -768,8 +1042,6 @@ def run(cfg: Config) -> None:
         len(table),
         p.min_months,
     )
-    groups = table.set_index("territory_id")["region_group"].astype("int16")
-    wide = nd.panel_wide.loc[nd.panel_wide["territory_id"].isin(ids)].reset_index(drop=True)
     singles = groups.reindex(ids).value_counts()
     if (singles == 1).any():
         log.warning(
@@ -777,10 +1049,8 @@ def run(cfg: Config) -> None:
             int((singles == 1).sum()),
         )
 
-    windows = window_features(wide, groups, p)
     rng = np.random.default_rng([p.seed, 2])  # этап 2 плана: свой поток случайности
     rhythm = rhythm_features(wide, table, p, rng)
-    place = place_features(nd.context_annual, table, ids, p)
     monthly = basket_monthly(wide, groups, p)
 
     processed = cfg.dir("processed")
@@ -793,10 +1063,9 @@ def run(cfg: Config) -> None:
     write_table(rhythm.monthly, FEATURES_RHYTHM_MONTHLY, processed / "features_rhythm_monthly.parquet")
 
     out_dir = cfg.dir("outputs") / OUTPUT_SUBDIR
-    full = pd.Index(rhythm.features["territory_id"], name="territory_id")
-    regions = table.set_index("territory_id")["region_code"]
-    y = windows.loc[windows["window_kind"].astype(str) == "year"]
-    log_level = y.pivot(index="territory_id", columns="window", values="log_level")
+    full, regions, log_level = s.full, s.regions, s.log_level
+    if not full.equals(pd.Index(rhythm.features["territory_id"], name="territory_id")):
+        raise ValueError("features: узлы с полным рядом у ритма и у проверок сюжета разошлись")
     n_seeds = int(p.checks.get("seeds", 1))
     runs, tables = [], {}
     for i in range(max(n_seeds, 1)):
@@ -805,7 +1074,13 @@ def run(cfg: Config) -> None:
         if i == 0:
             tables = tabs
     main = runs[0]
-    expected = dict(p.checks.get("expected") or {})
+    reference = {k: float(v) for k, v in (p.checks.get("reference") or {}).items()}
+    draft = {k: float(v) for k, v in (p.checks.get("draft_26_09") or {}).items()}
+    tol = float(p.checks.get("reference_tol", 0.01))
+
+    def diff(ref: Mapping[str, float]) -> dict[str, float]:
+        return {k: float(main[k]) - v for k, v in ref.items() if main.get(k) is not None}
+
     checks = {
         "node_mode": nd.mode,
         "node_mode_text": nodes.MODE_TEXT[nd.mode],
@@ -826,18 +1101,51 @@ def run(cfg: Config) -> None:
         "story_seed_range": {
             k: _range(runs, k) for k, v in main.items() if isinstance(v, (int, float)) and k not in NO_RANGE
         },
-        "expected_draft_26_09": expected,
-        "diff_vs_draft": {
-            k: float(main[k]) - float(v) for k, v in expected.items() if k in main and main[k] is not None
+        "reference": reference,
+        "reference_tol": tol,
+        "diff_vs_reference": diff(reference),
+        "reference_ok": {k: abs(d) <= tol * max(1.0, abs(reference[k])) for k, d in diff(reference).items()},
+        "draft_26_09": {
+            "note": (
+                "черновые скрипты 26.09 вне конвейера: 1774 МО без внутригородских территорий, регион — свой "
+                "субъект, seed 0; на них опиралось решение о сюжете (PLAN.md, этап 1); не контрольные числа"
+            ),
+            "values": draft,
+            "diff": diff(draft),
         },
     }
     write_json(_rounded(checks), out_dir / "checks.json")
     for name, t in tables.items():
         _write_csv(t, out_dir / f"{name}.csv")
+    coords = table.set_index("territory_id")[["x_aea", "y_aea"]]
+    moran = {
+        "k": int(cfg["eda"]["knn_main"]),
+        "permutations": int(cfg["eda"]["permutations"]),
+        "rng": np.random.default_rng([p.seed, 3]),
+    }
+    eta2_max = float(cfg["eda"]["synthesis"]["eta2_regional"])
     ft = feature_table(
-        windows, rhythm.features, place, len(ids), rhythm_by_year(rhythm.monthly, p.summer_months)
+        windows,
+        rhythm.features,
+        place,
+        len(ids),
+        rhythm_by_year(rhythm.monthly, p.summer_months),
+        coords,
+        p.space,
+        moran,
+        eta2_max,
     )
     _write_csv(ft, out_dir / "feature_table.csv")
-    for k, v in sorted(checks["diff_vs_draft"].items()):
-        log.info("features: %s = %.4g (черновик 26.09: %.4g, разница %+.4g)", k, main[k], expected[k], v)
+    features_report.write_report(cfg, p, s, ft, checks, rhythm, moran, eta2_max)
+    for k, d in sorted(checks["diff_vs_reference"].items()):
+        ok = checks["reference_ok"][k]
+        (log.info if ok else log.warning)(
+            "features: %s = %.4g (сверка: %.4g, разница %+.4g%s; черновик 26.09: %s)",
+            k,
+            main[k],
+            reference[k],
+            d,
+            "" if ok else ", больше допуска",
+            draft.get(k, "—"),
+        )
     log.info("features: выходы — %s/features_*.parquet, %s", processed, out_dir)

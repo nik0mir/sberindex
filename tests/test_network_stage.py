@@ -109,7 +109,18 @@ def test_selection_and_tables(run_net):
     assert set(comp["rule"]) == set(p.rules)
     facts = json.loads((out / "facts.json").read_text(encoding="utf-8"))
     assert facts["chosen"] in p.candidates
-    assert facts["selection"]["orders_total"] == 24
+    sets = pd.read_csv(out / "selection_sets.csv")
+    assert set(sets["set"]) == set(p.criteria_sets) and set(sets["tie"]) == {True, False}
+    main = sets.loc[sets["set"] == "main"]
+    assert (main["orders"] == 24).all()  # 4! порядков основного набора
+    assert set(facts["tolerance"]) >= {"reliability", "attribute_consistency"}
+    assert facts["tolerance"]["simplicity"] == 0.0
+    pairs = pd.read_csv(out / "rule_pairs.csv")
+    assert (pairs["rank_corr_q"] >= pairs["rank_corr_p"] - 1e-12).all()  # поправка не уменьшает p
+    # абляции есть в сравнении, но не в выборе; текстовые колонки — в конце таблицы
+    assert {"basket_dist_abs", "rhythm_corr_rel"} <= set(comp["rule"])
+    assert list(comp.columns[-3:]) == ["time_bucket", "top_hubs", "meaning"]
+    assert set(pd.read_csv(out / "selection_criteria.csv")["rule"]) == set(p.candidates)
     road = comp.set_index("rule").loc["geo_road"]
     assert road["geo_jaccard"] == 1.0  # контроль совпадает сам с собой
     for name in ("sensitivity_k", "sparsify", "rule_pairs", "selection_orders", "modes", "windows_noise"):

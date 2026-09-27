@@ -23,6 +23,8 @@ SERIES_KINDS: tuple[str, ...] = ("rhythm_corr", "rhythm_lag", "rhythm_dtw")
 GEO_KINDS: tuple[str, ...] = ("road", "gravity")
 SPARSIFY: tuple[str, ...] = ("knn", "mutual_knn", "threshold")
 CRITERIA: tuple[str, ...] = ("reliability", "geo_difference", "attribute_consistency", "simplicity")
+# Все критерии, из которых собираются наборы ``selection.sets``: основные и два критерия зонда кластеров.
+ALL_CRITERIA: tuple[str, ...] = (*CRITERIA, "modularity", "probe_stability")
 WINDOW_KINDS_NET: tuple[str, ...] = ("quarter", "half", "rolling")
 
 
@@ -35,6 +37,8 @@ class RuleSpec:
     window: int = 0
     beta: float = 2.0
     min_km: float = 1.0
+    relative: bool = False  # корзина — минус центр группы региона; ритм — минус среднее группы по месяцу
+    ablation: bool = False  # абляция: только основные измерения, без сетки k и способов разрежения
 
     @property
     def is_series(self) -> bool:
@@ -76,6 +80,7 @@ class NetworkParams:
     attr_columns: tuple[str, ...]
     attr_relative: tuple[str, ...]
     priority: tuple[str, ...]
+    criteria_sets: Mapping[str, tuple[str, ...]]
     candidates: tuple[str, ...]
     simplicity: Mapping[str, float]
     modes: tuple[str, ...]
@@ -112,6 +117,8 @@ class NetworkParams:
                 window=int(spec.get("window", 0)),
                 beta=float(spec.get("beta", 2.0)),
                 min_km=float(spec.get("min_km", 1.0)),
+                relative=bool(spec.get("relative", kind in BASKET_KINDS)),
+                ablation=bool(spec.get("ablation", False)),
             )
         if not any(r.kind == "road" for r in rules.values()):
             problems.append("rules: нужна контрольная сеть вида road (отличие от географии)")
@@ -139,6 +146,10 @@ class NetworkParams:
             attr_columns=tuple(str(c) for c in attrs["columns"]),
             attr_relative=tuple(str(c) for c in attrs.get("relative") or ()),
             priority=tuple(str(c) for c in sel["priority"]),
+            criteria_sets={
+                str(k): tuple(str(c) for c in v)
+                for k, v in {"main": sel["priority"], **(sel.get("sets") or {})}.items()
+            },
             candidates=tuple(str(c) for c in sel["candidates"]),
             simplicity={str(k): float(v) for k, v in (sel.get("simplicity") or {}).items()},
             modes=tuple(str(m) for m in net.get("modes") or ()),
@@ -158,6 +169,10 @@ class NetworkParams:
             problems.append(f"sparsify.k = {p.k} должно входить в k_grid {list(p.k_grid)}")
         if sorted(p.priority) != sorted(CRITERIA):
             problems.append(f"selection.priority: нужны ровно {list(CRITERIA)}")
+        for name, crit in p.criteria_sets.items():
+            bad = sorted(set(crit) - set(ALL_CRITERIA))
+            if bad or not crit:
+                problems.append(f"selection.sets.{name}: {bad}; допустимы {list(ALL_CRITERIA)}")
         unknown = sorted(set(p.candidates) - set(rules))
         if unknown or not p.candidates:
             problems.append(f"selection.candidates: нет правил {unknown}")

@@ -33,7 +33,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from munnet import nodes, style
+from munnet import features, nodes, style
 from munnet.config import Config
 from munnet.contracts import YEARS
 from munnet.eda import s2_level, s3_rhythm, s4_basket, stats, stories
@@ -535,17 +535,21 @@ def _join_labels(names: Sequence[str]) -> str:
 
 
 def decision_matrix(
-    facts: Mapping[str, Fact], cfg: Config, alt_maps: stories.AltMaps | None = None
+    facts: Mapping[str, Fact],
+    cfg: Config,
+    alt_maps: stories.AltMaps | None = None,
+    unit: str = stories.UNIT_MO,
 ) -> pd.DataFrame:
     """T14: матрица решения по сюжетам Б.5 из фактов разделов и сводки (колонки ``stories.MATRIX_COLUMNS``).
 
     Веса — ``eda.matrix_weights`` (сумма 1, иначе ``ValueError``); пороги критериев отказа — ``eda.rejection``
     и ``eda.step_test_pp``; пороги баллов — ``eda.stories``. Знаменатель покрытия — факт ``syn.n_mo``.
-    ``alt_maps`` — другие оценки критериев (по умолчанию — без внутригородских территорий).
+    ``alt_maps`` — другие оценки критериев (по умолчанию — без внутригородских территорий); ``unit`` — чьи
+    доли в подписях: МО панели или узлы сети (``stories.build_stories``).
     """
     prm = stories.params(cfg)
     return stories.evaluate(
-        stories.build_stories(prm), facts, cfg["eda"]["matrix_weights"], prm, cfg["eda"], alt_maps
+        stories.build_stories(prm, unit), facts, cfg["eda"]["matrix_weights"], prm, cfg["eda"], alt_maps
     )
 
 
@@ -622,6 +626,55 @@ def node_values(view: EdaData, cfg: Config, rng: np.random.Generator) -> tuple[d
     ind["log_spend_to_ndfl"] = np.log(ratio.where(usable)).reindex(ind.index)
     clean = {k: v for k, v in out.items() if isinstance(v, str) or np.isfinite(v)}
     return clean, ind.reset_index()
+
+
+# Числа решения о сюжете (PLAN.md, этап 1): ключ ``features.story_checks`` -> (вид факта, пояснение).
+DECISION_NOTES: dict[str, tuple[str, str]] = {
+    "k": ("int", "типов k-means в проверке решения о сюжете (features.checks.k)"),
+    "ami_region": ("num3", "AMI типов корзины относительно группы региона (2024) с группой региона"),
+    "tree_kappa": (
+        "num3",
+        "каппа неглубокого дерева «экономика места 2023 года -> тип корзины относительно региона»",
+    ),
+    "tree_kappa_clean": ("num3", "то же для типов корзины, очищенной от уровня и региона (С4)"),
+    "ari_years": ("num2", "ARI типов 2023 и 2024 годов (k-means по каждому году)"),
+    "moved_share": ("pct", "доля узлов, сменивших тип корзины относительно региона 2023 -> 2024"),
+    "noise_share": ("pct", "то же на шуме: нечётные против чётных месяцев одного года, среднее двух лет"),
+    "offline_2023": ("int", "узлов «офлайн»-типа в общей шкале, 2023 год"),
+    "offline_2024": ("int", "то же, 2024 год"),
+}
+CHECKS_FILE = ("features", "checks.json")  # outputs/features/checks.json этапа features
+CHECKS_TOL = 1e-9
+
+
+def decision_facts(ctx: SectionContext, nd: nodes.NodeData) -> dict[str, Any]:
+    """Факты ``syn.decision_*``: числа решения о сюжете на узлах сети — функцией этапа features
+    (``features.decision_numbers``) на тех же узлах и с тем же seed. Разведка идёт раньше этапа features,
+    поэтому числа считаются здесь, а не читаются из ``checks.json``; если файл уже есть, числа сверяются
+    с его разделом ``story`` и расхождение попадает в лог предупреждением."""
+    try:
+        values = features.decision_numbers(nd, ctx.cfg)
+    except (*_SOFT_ERRORS, KeyError) as e:
+        log.warning("Сводка: числа решения о сюжете не посчитаны: %s", e)
+        values = {}
+    for key, (kind, note) in DECISION_NOTES.items():
+        ctx.fact(f"decision_{key}", values.get(key), kind, f"{note}; {MODE_TEXT[nd.mode]}")
+    path = ctx.cfg.dir("outputs").joinpath(*CHECKS_FILE)
+    if path.exists() and values:
+        import json
+
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        story = saved.get("story", {})
+        if saved.get("node_mode") == nd.mode:
+            off = [
+                k
+                for k in DECISION_NOTES
+                if k in story
+                and abs(float(story[k]) - float(values[k])) > CHECKS_TOL * max(1.0, abs(story[k]))
+            ]
+            if off:
+                log.warning("Сводка: числа решения о сюжете расходятся с %s: %s", path, off)
+    return values
 
 
 def _node_facts(ctx: SectionContext, values: Mapping[str, Any], facts: Mapping[str, Fact], mode: str) -> None:
@@ -1908,6 +1961,7 @@ def run_synthesis(ctx: SectionContext, findings: list[Finding]) -> Finding:
     ctx.fact("node_mode_text", MODE_TEXT[mode], "str", "режим узлов сети словами")
     proto_data, proto_table, proto_halves = data, table, halves
     if mode == SEPARATE_MODE:
+        decision_facts(ctx, node_view(data, cfg)[1])
         ctx.fact("n_nodes", len(mo), "int", "узлов сети: все МО панели (nodes.mode = separate)")
         ctx.fact("n_full_nodes", int(s3_rhythm.full_ids(mo).size), "int", "узлов с полным рядом")
         ctx.fact("n_city_nodes", 0, "int", "узлов-городов (nodes.cities)")
@@ -1922,6 +1976,7 @@ def run_synthesis(ctx: SectionContext, findings: list[Finding]) -> Finding:
         ctx.fact("n_city_members", int((roles == "city_member").sum()), "int", "МО панели в узлах-городах")
         ctx.fact("n_excluded", int((roles == "excluded").sum()), "int", "МО панели вне узлов (режим exclude)")
         ctx.fact("region_group_text", nodes.group_text(nd), "str", "как считается «относительно региона»")
+        decision_facts(ctx, nd)
         proto_data = view
         proto_table = view.mo.set_index("territory_id").join(nind.set_index("territory_id"))
         proto_halves = s4_basket.half_year_growth(view.panel_wide)
@@ -1973,7 +2028,7 @@ def run_synthesis(ctx: SectionContext, findings: list[Finding]) -> Finding:
             log.warning("Сводка: на узлах не посчитаны %s — в матрице оценка разделов", sorted(set(missing)))
         copies, sep_map = stories.separate_alternatives(facts_now)
         main = {**stories.substitute(facts_now, stories.NODES), **copies}
-        matrix = decision_matrix(main, cfg, [(sep_map, stories.SEPARATE_LABEL)])
+        matrix = decision_matrix(main, cfg, [(sep_map, stories.SEPARATE_LABEL)], stories.UNIT_NODES)
         other = decision_matrix(facts_now, cfg)
         alt_label, where = stories.SEPARATE_LABEL, SEPARATE_WHERE
     _story_facts(ctx, matrix, weights, other, [proto_line], alt_label, where)

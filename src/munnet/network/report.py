@@ -150,6 +150,7 @@ def build_facts(out: Path, p: NetworkParams, figs: list[FigureInfo]) -> dict[str
         if pd.notna(r["reliability_chance"]) and r["reliability_chance"] > 0:
             _fact(facts, f"rel_ratio_{r['rule']}", float(r["reliability"] / r["reliability_chance"]), "int")
         _fact(facts, f"label_{r['rule']}", label(r["rule"]), "str")
+        _fact(facts, f"ari3_{r['rule']}", float(r["ari_seeds"]), "num3")
     for tid, m in js.get("city_members", {}).items():
         _fact(facts, f"members_{tid}", m, "int")
     for key in ("n_nodes", "n_excluded", "n_no_road"):
@@ -160,10 +161,38 @@ def build_facts(out: Path, p: NetworkParams, figs: list[FigureInfo]) -> dict[str
     _fact(facts, "chosen_label", label(js["chosen"]), "str")
     _fact(facts, "alt_labels", ", ".join(f"«{label(a)}»" for a in js["alternatives"]), "str")
     sel = js["selection"]
-    _fact(facts, "orders_same", sel["orders_same"], "int")
-    _fact(facts, "orders_total", sel["orders_total"], "int")
+    orders = pd.read_csv(out / "selection_orders.csv")
+    main = orders.loc[(orders["set"] == "main") & orders["tie"].astype(bool)]
+    _fact(facts, "orders_same", int((main["winner"] == js["chosen"]).sum()), "int")
+    _fact(facts, "orders_total", len(main), "int")
     _fact(facts, "front", ", ".join(f"«{label(a)}»" for a in sel["front"]), "str")
-    _fact(facts, "borda_label", label(sel["borda_winner"]), "str")
+    sets = pd.read_csv(out / "selection_sets.csv")
+    for _, r in sets.iterrows():
+        key = f"set_{r['set']}_{'tie' if bool(r['tie']) else 'raw'}"
+        _fact(facts, f"{key}_front", _labels(r["front"]), "str")
+        _fact(facts, f"{key}_winners", _winners_text(r["winners"]), "str")
+        _fact(facts, f"{key}_borda", label(r["borda"]), "str")
+    _fact(
+        facts,
+        "sets_all_basket_tie",
+        int(sets.loc[sets["tie"].astype(bool), "all_basket"].astype(bool).all()),
+        "int",
+    )
+    _fact(facts, "sets_borda_same", int((sets["borda"] == js["chosen"]).all()), "int")
+    for crit, v in js["tolerance"].items():
+        _fact(facts, f"tol_{crit}", v, "num3")
+    mod = js["modularity_vs_region"]
+    _fact(facts, "mod_rho_ami", mod["rho_ami"], "num2")
+    _fact(facts, "mod_rho_within", mod["rho_within"], "num2")
+    _fact(facts, "mod_rho_reliability", mod["rho_reliability"], "num2")
+    _fact(facts, "mod_n_rules", mod["n_rules"], "int")
+    _fact(facts, "mod_max_label", label(mod["max_rule"]), "str")
+    boot = pd.read_csv(out / "selection_bootstrap.csv")
+    _fact(facts, "n_boot", int(boot["replicate"].nunique()), "int")
+    for crit in ("reliability", "attribute_consistency", "modularity"):
+        w = boot.pivot(index="replicate", columns="rule", values=crit)
+        if {"basket_cos", "basket_dist"} <= set(w.columns):
+            _fact(facts, f"boot_n_dist_better_{crit}", int((w["basket_dist"] > w["basket_cos"]).sum()), "int")
     by_k = js.get("selection_by_k", {})
     _fact(facts, "k_same", sum(1 for w in by_k.values() if w == js["chosen"]), "int")
     _fact(facts, "k_total", len(by_k), "int")
@@ -244,6 +273,8 @@ def build_facts(out: Path, p: NetworkParams, figs: list[FigureInfo]) -> dict[str
         facts, "pair_n_sig", int((pairs["rank_corr_p"] <= 1 / (1 + prm["mantel_permutations"])).sum()), "int"
     )
     _fact(facts, "pair_n", len(pairs), "int")
+    _fact(facts, "pair_n_sig_q", int((pairs["rank_corr_q"] < 0.05).sum()), "int")
+    _fact(facts, "pair_q_min", float(pairs["rank_corr_q"].min()), "num3")
     modes = pd.read_csv(out / "modes.csv")
     for _, r in modes.iterrows():
         for col in modes.columns:
@@ -289,6 +320,32 @@ def build_facts(out: Path, p: NetworkParams, figs: list[FigureInfo]) -> dict[str
     for f in figs:
         _fact(facts, f"fig_{f.fid}_title", f.title, "str")
     return facts
+
+
+CRITERIA_LABELS: dict[str, str] = {
+    "reliability": "надёжность",
+    "geo_difference": "отличие от географии",
+    "attribute_consistency": "согласованность с местом",
+    "simplicity": "простота",
+    "modularity": "модульность сверх нуля",
+    "probe_stability": "устойчивость зонда (ARI seed)",
+}
+SET_LABELS: dict[str, str] = {"main": "основной", "plan": "из PLAN.md", "extended": "расширенный"}
+
+
+def _labels(text: str) -> str:
+    """«basket_cos, basket_dist» -> «Косинус корзин», «Расстояние корзин»."""
+    return ", ".join(f"«{label(r.strip())}»" for r in str(text).split(",") if r.strip())
+
+
+def _winners_text(text: str) -> str:
+    """«basket_dist: 4; basket_cos = basket_dist: 2» -> подписи правил и число порядков."""
+    parts = []
+    for item in str(text).split(";"):
+        rules, n = item.rsplit(":", 1)
+        names = " = ".join(f"«{label(r.strip())}»" for r in rules.split("="))
+        parts.append(f"{names} — {int(n)}")
+    return "; ".join(parts)
 
 
 # --- Проверяемые утверждения текста --------------------------------------------------------------
@@ -337,6 +394,58 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
     ),
     "Спирмен меняет рёбра ритма меньше, чем смена года": lambda f: (
         _v(f, "spearman_jaccard_rhythm_corr") > _v(f, "reliability_rhythm_corr")
+    ),
+    "с допуском ничьей при любом наборе критериев побеждает правило по корзине": lambda f: (
+        _v(f, "sets_all_basket_tie") == 1
+    ),
+    "по сумме рангов (Борда) при всех наборах выбрано расстояние корзин": lambda f: (
+        _v(f, "sets_borda_same") == 1
+    ),
+    "расстояние согласованнее с местом, чем косинус, во всех повторах бутстрапа": lambda f: (
+        _v(f, "boot_n_dist_better_attribute_consistency") == _v(f, "n_boot")
+        and _v(f, "boot_n_dist_better_reliability") == _v(f, "n_boot")
+    ),
+    "модульность выше всего у дорожной сети и почти не меняется от вычитания региона": lambda f: (
+        f[f"{SECTION}.mod_max_label"].value == RULE_LABELS["geo_road"]
+        and abs(_v(f, "q_excess_basket_dist_abs") - _v(f, "q_excess_basket_dist")) < 0.03
+        and _v(f, "ami_region_basket_dist_abs") > 10 * _v(f, "ami_region_basket_dist")
+    ),
+    "вычитание региона у корзины: меньше географии и выше согласованность, но ниже надёжность": lambda f: (
+        _v(f, "geo_jaccard_basket_dist_abs") > 2 * _v(f, "geo_jaccard_basket_dist")
+        and _v(f, "within_region_basket_dist_abs") > 2 * _v(f, "within_region_basket_dist")
+        and _v(f, "attr_consistency_basket_dist") > _v(f, "attr_consistency_basket_dist_abs")
+        and _v(f, "reliability_basket_dist_abs") > _v(f, "reliability_basket_dist")
+    ),
+    "и без вычета региона корзина ближе к географии меньше, чем ритм": lambda f: (
+        _v(f, "geo_jaccard_basket_dist_abs") < _v(f, "geo_jaccard_rhythm_corr")
+        and _v(f, "ami_region_basket_dist_abs") < _v(f, "ami_region_rhythm_corr")
+    ),
+    "вычитание региона у ритма убирает географию, но снижает надёжность ниже корзины": lambda f: (
+        _v(f, "geo_jaccard_rhythm_corr_rel") < _v(f, "geo_jaccard_rhythm_corr")
+        and _v(f, "reliability_rhythm_corr_rel") < _v(f, "reliability_rhythm_corr")
+        and _v(f, "reliability_rhythm_corr_rel") < _v(f, "reliability_basket_dist")
+    ),
+    "поправка Бенджамини — Хохберга не меняет вывод теста Мантела": lambda f: (
+        _v(f, "pair_n_sig_q") == _v(f, "pair_n_sig")
+    ),
+    "косинус и расстояние: надёжность и география в пределах допуска, согласованность за расстоянием, "
+    "модульность за косинусом": lambda f: (
+        abs(_v(f, "reliability_basket_dist") - _v(f, "reliability_basket_cos")) < _v(f, "tol_reliability")
+        and abs(_v(f, "geo_jaccard_basket_dist") - _v(f, "geo_jaccard_basket_cos"))
+        < _v(f, "tol_geo_difference")
+        and _v(f, "attr_consistency_basket_dist") - _v(f, "attr_consistency_basket_cos")
+        > _v(f, "tol_attribute_consistency")
+        and _v(f, "q_excess_basket_cos") - _v(f, "q_excess_basket_dist") > _v(f, "tol_modularity")
+    ),
+    "в основном наборе с допуском фронт — только расстояние корзин": lambda f: (
+        f[f"{SECTION}.front"].value == "«" + RULE_LABELS["basket_dist"] + "»"
+    ),
+    "лаговая корреляция на фронте расширенного набора без допуска — из-за разницы меньше допуска": lambda f: (
+        RULE_LABELS["rhythm_lag"] in str(f[f"{SECTION}.set_extended_raw_front"].value)
+        and 0 < _v(f, "ari_seeds_rhythm_lag") - _v(f, "ari_seeds_basket_cos") < _v(f, "tol_probe_stability")
+    ),
+    "без вычета региона корзина надёжнее ритма": lambda f: (
+        _v(f, "reliability_basket_dist_abs") > _v(f, "reliability_rhythm_corr")
     ),
     "выбор одинаков при всех k": lambda f: _v(f, "k_same") == _v(f, "k_total"),
     "надёжность растёт с k у всех правил по тратам": lambda f: all(
@@ -466,6 +575,7 @@ def table_pairs(out: Path) -> str:
             "Жаккар рёбер": s["jaccard"].map(lambda v: _fmt(v, "num2")),
             "ρ сходств пар": s["rank_corr"].map(lambda v: _fmt(v, "num2")),
             "p (Мантел)": s["rank_corr_p"].map(lambda v: _fmt(v, "num2")),
+            "q (Бенджамини — Хохберг)": s["rank_corr_q"].map(lambda v: _fmt(v, "num3")),
             "ARI сообществ": s["ari"].map(lambda v: _fmt(v, "num2")),
         }
     )
@@ -481,9 +591,57 @@ def table_selection(out: Path) -> str:
             "Отличие от географии": c["geo_difference"].map(lambda v: _fmt(v, "num3")),
             "Согласованность с местом": c["attribute_consistency"].map(lambda v: _fmt(v, "num2")),
             "Простота (ранг)": (-c["simplicity"]).astype(int),
+            "Модульность сверх нуля": c["modularity"].map(lambda v: _fmt(v, "num2")),
+            "Устойчивость зонда (ARI seed)": c["probe_stability"].map(lambda v: _fmt(v, "num2")),
         }
     )
     return _md(df)
+
+
+def table_selection_sets(out: Path) -> str:
+    s = pd.read_csv(out / "selection_sets.csv")
+    df = pd.DataFrame(
+        {
+            "Набор": s["set"].map(SET_LABELS),
+            "Критерии": s["criteria"].map(
+                lambda t: ", ".join(CRITERIA_LABELS[c.strip()] for c in t.split(","))
+            ),
+            "Допуск ничьей": s["tie"].map(lambda t: "да" if bool(t) else "нет"),
+            "Парето-фронт": s["front"].map(_labels),
+            "Победители при всех порядках (число порядков)": s["winners"].map(_winners_text),
+            "Борда": s["borda"].map(lambda r: f"«{label(r)}»"),
+        }
+    )
+    return _md(df)
+
+
+def table_tolerance(out: Path) -> str:
+    t = pd.read_csv(out / "selection_tolerance.csv")
+    df = pd.DataFrame(
+        {
+            "Критерий": t["criterion"].map(CRITERIA_LABELS),
+            "Допуск ничьей (SD по бутстрапу месяцев)": t["tolerance"].map(lambda v: _fmt(v, "num3")),
+        }
+    )
+    return _md(df)
+
+
+def table_ablation(out: Path) -> str:
+    c = pd.read_csv(out / "comparison.csv").set_index("rule")
+    pairs = [("basket_dist_abs", "basket_dist"), ("rhythm_corr", "rhythm_corr_rel")]
+    spec = [
+        ("reliability", "Надёжность: Жаккар сетей 2023 и 2024", "num2"),
+        ("geo_jaccard", "Жаккар с сетью «Дороги»", "num3"),
+        ("within_region", "Рёбер внутри группы региона", "pct"),
+        ("ami_region", "AMI сообществ с группой региона", "num2"),
+        ("assort_north", "Ассортативность по Северу", "num2"),
+        ("attr_consistency", "Согласованность с экономикой места", "num2"),
+        ("q_excess", "Модульность сверх нуля", "num2"),
+        ("edge_km_median", "Длина ребра, медиана, км", "int"),
+    ]
+    cols = [r for pair in pairs for r in pair if r in c.index]
+    rows = [[text, *[_fmt(c.loc[r, m], kind) for r in cols]] for m, text, kind in spec]
+    return _md(pd.DataFrame(rows, columns=["Измерение", *[label(r) for r in cols]]))
 
 
 def table_attributes(out: Path) -> str:
@@ -557,6 +715,9 @@ TABLES: dict[str, Callable[[Path], str]] = {
     "sparsify": table_sparsify,
     "pairs": table_pairs,
     "selection": table_selection,
+    "selection_sets": table_selection_sets,
+    "tolerance": table_tolerance,
+    "ablation": table_ablation,
     "attributes": table_attributes,
     "modes": table_modes,
     "windows": table_windows,

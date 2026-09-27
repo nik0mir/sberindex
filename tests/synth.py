@@ -108,6 +108,9 @@ def make_config(root: Path) -> Config:
     }
     data["eda"]["report"] = str(root / "docs" / "eda.md")
     data["eda"]["report_images"] = str(root / "docs" / "img" / "eda")
+    data["features"]["report"] = str(root / "docs" / "features.md")
+    # утверждения отчёта features сформулированы по реальным данным; синтетика их не обязана выполнять
+    data["features"]["report_strict"] = False
     return Config(data=data, path=DEFAULT_CONFIG)
 
 

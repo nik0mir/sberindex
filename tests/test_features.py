@@ -179,6 +179,9 @@ def test_checks_json_has_story_numbers(run_synth):
         assert key in story and key in checks["story_seed_range"]
     assert 0 <= story["moved_share"] <= 1 and -1 <= story["ari_years"] <= 1
     assert checks["node_mode"] == "collapse" and checks["n_nodes"] <= checks["n_nodes_all"]
+    # сверочные числа конфига и черновик 26.09 записаны раздельно, у черновика — пояснение
+    assert set(checks["reference_ok"]) == set(checks["reference"]) and checks["draft_26_09"]["note"]
+    assert set(checks["draft_26_09"]["diff"]) == set(checks["draft_26_09"]["values"])
     ft = pd.read_csv(out / "feature_table.csv")
     assert {"coverage", "reliability", "eta2_region_group", "max_abs_rho", "collinear_08"} <= set(ft.columns)
     for name in ("types_relative", "types_fixed", "types_transitions"):
@@ -204,3 +207,70 @@ def test_params_reject_bad_values():
         params(min_months=30)
     with pytest.raises(ValueError, match="region_center"):
         params(region_center="mode")
+
+
+# --- Отчёт docs/features.md ----------------------------------------------------------------------
+
+
+def test_report_is_written_from_facts(run_synth):
+    report = Path(run_synth["features"]["report"])
+    text = report.read_text(encoding="utf-8")
+    assert text.startswith("# Признаки узлов сети") and "{{" not in text and "<!--" not in text
+    facts = json.loads(
+        (Path(run_synth["paths"]["outputs"]) / "features" / "report_facts.json").read_text(encoding="utf-8")
+    )
+    assert facts["feat.n_nodes"]["text"] in text
+    ft = pd.read_csv(Path(run_synth["paths"]["outputs"]) / "features" / "feature_table.csv")
+    assert {"role", "moran_i", "check_ok", "check_note", "max_abs_rho_edges"} <= set(ft.columns)
+    roles = dict(zip(ft["feature"], ft["role"], strict=True))
+    assert (
+        roles["clr_rel_food"] == "edges" and roles["own_summer"] == "layer" and roles["dec_peak"] == "outside"
+    )
+
+
+def _claims_true(ft: pd.DataFrame) -> pd.DataFrame:
+    """Таблица признаков, где выполнены все утверждения шаблона (как на реальных данных 27.09)."""
+    t = ft.set_index("feature").copy()
+    t["max_abs_rho"] = 0.3
+    t.loc[["summer_excess", "own_summer"], "max_abs_rho"] = 1.0
+    t.loc["summer_excess", "max_abs_rho_with"] = "own_summer"
+    t.loc["own_summer", "max_abs_rho_with"] = "summer_excess"
+    t.loc[["clr_rel_food", "clr_rel_cafe"], "max_abs_rho"] = 0.85
+    t.loc["dec_peak", "reliability"] = 0.25
+    t.loc[[f"clr_rel_{q}" for q in PARTS], "eta2_region_group"] = 0.0
+    t.loc[["market_access", "age_old_share", "own_summer"], "eta2_region_group"] = 0.7
+    t["max_abs_rho_edges"] = np.where(t["role"] == "attributes", 0.2, np.nan)
+    t.loc["log_level_rel", "max_abs_rho_edges"] = 0.73
+    return t.reset_index()
+
+
+def test_report_claims_are_checked(run_synth):
+    from munnet import features_report
+
+    ft = pd.read_csv(Path(run_synth["paths"]["outputs"]) / "features" / "feature_table.csv")
+    checks = {"story": {"tree_kappa": 0.3, "tree_kappa_clean": 0.1, "moved_share": 0.2, "noise_share": 0.07}}
+    p = params()
+    good = _claims_true(ft)
+    assert features_report.check_claims(good, checks, p, 0.6) == []
+    bad = good.set_index("feature")
+    bad.loc["dec_peak", "reliability"] = 0.9  # декабрьский пик стал надёжным — текст «это шум» неверен
+    problems = features_report.check_claims(bad.reset_index(), checks, p, 0.6)
+    assert problems == ["декабрьский пик ненадёжен"]
+    worse = {"story": {**checks["story"], "tree_kappa": 0.05}}
+    assert "каппа корзины к региону > очищенной" in features_report.check_claims(good, worse, p, 0.6)
+
+
+def test_strict_report_stops_on_wrong_claims(tmp_path):
+    from munnet.contracts import QCError
+
+    make_processed(tmp_path)
+    cfg = make_config(tmp_path)
+    data = copy.deepcopy(cfg.data)
+    data["features"]["report_strict"] = True
+    cfg = Config(data=data, path=cfg.path)
+    report = Path(cfg["features"]["report"])
+    # синтетика не выполняет утверждений, сформулированных по реальным данным (например, доступность рынков
+    # в ней не региональна): строгий режим останавливает этап и не пишет отчёт с неверным текстом
+    with pytest.raises(QCError, match="утверждения шаблона"):
+        features.run(cfg)
+    assert not report.exists()
