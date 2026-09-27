@@ -25,7 +25,7 @@ import pandas as pd
 
 from munnet.network import graph as G
 from munnet.network.compute import GeoCache, Similarity, qvalues, series_null, similarity, spearman_similarity
-from munnet.network.data import NodeSet, window_clr
+from munnet.network.data import NodeSet, check_columns, window_clr
 from munnet.network.params import NetworkParams, RuleSpec
 
 log = logging.getLogger(__name__)
@@ -66,6 +66,18 @@ def meaning(rule: RuleSpec) -> str:
     if rule.relative != default_relative:
         return MEANING_VARIANT.get((rule.kind, rule.relative), MEANING[rule.kind])
     return MEANING[rule.kind]
+
+
+def check_null_sd(g, values: np.ndarray, permutations: int, rng: np.random.Generator) -> float:
+    """Разброс ассортативности при случайной перестановке значений признака по узлам с данными (та же
+    сеть): случайный уровень — около 0 с этим стандартным отклонением."""
+    keep = np.flatnonzero(np.isfinite(values))
+    vals = []
+    for _ in range(permutations):
+        v = np.full(len(values), np.nan)
+        v[keep] = rng.permutation(values[keep])
+        vals.append(G.assortativity(g, v))
+    return float(np.nanstd(vals, ddof=1)) if vals else float("nan")
 
 
 def sparsify(S: np.ndarray, method: str, k: int, Q: np.ndarray | None, fdr_q: float) -> pd.DataFrame:
@@ -128,7 +140,13 @@ def evaluate_rule(
     info = ns.info
     row: dict = {"rule": rule.name, "kind": rule.kind, "meaning": meaning(rule), "ablation": rule.ablation}
     row.update(G.passport(edges, info, lists, p.attr_columns))
-    row["assort_north"] = G.assortativity(G.to_igraph(ns.n, edges), ns.attrs["north"].to_numpy())
+    g_main = G.to_igraph(ns.n, edges)
+    row["assort_north"] = G.assortativity(g_main, ns.attrs["north"].to_numpy())
+    for col in check_columns(p):  # проверка вне пространства атрибутов: не входит в согласованность и выбор
+        vals = ns.attrs[col].to_numpy(dtype=np.float64)
+        row[f"check_{col}"] = G.assortativity(g_main, vals)
+        row[f"check_{col}_null_sd"] = check_null_sd(g_main, vals, p.check_permutations, rng)
+        row[f"check_{col}_n"] = int(np.isfinite(vals).sum())
     row["sigma"] = sim.sigma
     row["seconds"] = sim.seconds
 

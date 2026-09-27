@@ -120,6 +120,10 @@ def test_selection_and_tables(run_net):
     # абляции есть в сравнении, но не в выборе; текстовые колонки — в конце таблицы
     assert {"basket_dist_abs", "rhythm_corr_rel"} <= set(comp["rule"])
     assert list(comp.columns[-3:]) == ["time_bucket", "top_hubs", "meaning"]
+    # проверка вне пространства атрибутов: доход 5-НДФЛ и его остаток сверх зарплаты, со случайным уровнем
+    for col in ("check_log_ndfl_rel", "check_log_ndfl_rel_resid"):
+        assert col in comp.columns and (comp[f"{col}_null_sd"] > 0).all()
+    assert facts["modularity_vs_region"]["n_rules"] == int((~comp["static"].astype(bool)).sum())
     assert set(pd.read_csv(out / "selection_criteria.csv")["rule"]) == set(p.candidates)
     road = comp.set_index("rule").loc["geo_road"]
     assert road["geo_jaccard"] == 1.0  # контроль совпадает сам с собой

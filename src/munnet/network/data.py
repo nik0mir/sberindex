@@ -125,6 +125,11 @@ def _cube(monthly: pd.DataFrame, ids: np.ndarray, value: str, categories) -> dic
     return out
 
 
+def check_columns(p: NetworkParams) -> list[str]:
+    """Проверочные колонки атрибутов: признаки ``attributes.check`` и их остатки на ``check_residual_on``."""
+    return [c for col in p.check_columns for c in (col, f"{col}_resid" if p.check_residual_on else None) if c]
+
+
 def _attributes(place: pd.DataFrame, ids: np.ndarray, p: NetworkParams, center: str) -> pd.DataFrame:
     pl = place.loc[place["year"] == p.attr_year].set_index("territory_id").reindex(ids)
     out = pd.DataFrame(index=ids)
@@ -135,6 +140,16 @@ def _attributes(place: pd.DataFrame, ids: np.ndarray, p: NetworkParams, center: 
         if col in p.attr_relative:
             v = features.relative_values(v, pl["region_group"], center)
         out[col] = v
+    for col in p.check_columns:  # проверочные признаки вне пространства атрибутов (как есть)
+        if col not in pl.columns:
+            raise ValueError(f"network.attributes.check: нет признака {col} в features_place")
+        out[col] = pl[col].astype("float64")
+        base = p.check_residual_on
+        if base:  # то же сверх атрибута base: остаток МНК на узлах, где есть оба признака
+            y, x = out[col], out[base] if base in out.columns else pl[base].astype("float64")
+            ok = y.notna() & x.notna()
+            slope, icpt = np.polyfit(x[ok], y[ok], 1)
+            out[f"{col}_resid"] = (y - (icpt + slope * x)).where(ok)
     out["north"] = pl["north"].astype("float64")
     return out.reset_index(drop=True)
 

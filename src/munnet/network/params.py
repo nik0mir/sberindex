@@ -79,6 +79,9 @@ class NetworkParams:
     attr_year: int
     attr_columns: tuple[str, ...]
     attr_relative: tuple[str, ...]
+    check_columns: tuple[str, ...]
+    check_permutations: int
+    check_residual_on: str
     priority: tuple[str, ...]
     criteria_sets: Mapping[str, tuple[str, ...]]
     candidates: tuple[str, ...]
@@ -145,6 +148,9 @@ class NetworkParams:
             attr_year=int(attrs["year"]),
             attr_columns=tuple(str(c) for c in attrs["columns"]),
             attr_relative=tuple(str(c) for c in attrs.get("relative") or ()),
+            check_columns=tuple(str(c) for c in attrs.get("check") or ()),
+            check_permutations=int(attrs.get("check_permutations", 200)),
+            check_residual_on=str(attrs.get("check_residual_on") or ""),
             priority=tuple(str(c) for c in sel["priority"]),
             criteria_sets={
                 str(k): tuple(str(c) for c in v)

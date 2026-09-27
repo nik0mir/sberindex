@@ -196,20 +196,35 @@ def _order_columns(comparison: pd.DataFrame) -> pd.DataFrame:
 
 
 def _modularity_vs_region(comparison: pd.DataFrame) -> dict:
-    """Поощряет ли модульность региональные блоки: ρ Спирмена по правилам между модульностью сверх нуля
-    и AMI сообществ с группой региона, долей рёбер внутри региона."""
+    """Поощряет ли модульность региональные блоки: ρ Спирмена модульности сверх нуля с AMI сообществ
+    с группой региона, долей рёбер внутри региона и надёжностью — по одному набору правил: без статичных
+    сетей географии (у них надёжность тождественно 1). ``max_rule`` — по всем правилам."""
     from scipy.stats import spearmanr
 
-    c = comparison
+    c = comparison.loc[~comparison["static"].astype(bool)]
     return {
         "n_rules": len(c),
         "rho_ami": float(spearmanr(c["q_excess"], c["ami_region"])[0]),
         "rho_within": float(spearmanr(c["q_excess"], c["within_region"])[0]),
-        "rho_reliability": float(
-            spearmanr(c.loc[~c["static"], "q_excess"], c.loc[~c["static"], "reliability"])[0]
-        ),
-        "max_rule": str(c.loc[c["q_excess"].idxmax(), "rule"]),
+        "rho_reliability": float(spearmanr(c["q_excess"], c["reliability"])[0]),
+        "max_rule": str(comparison.loc[comparison["q_excess"].idxmax(), "rule"]),
     }
+
+
+def _check_info(ns: NodeSet, p: NetworkParams) -> dict:
+    """Проверочные признаки: число узлов с данными и ρ Спирмена с атрибутом ``check_residual_on``."""
+    from scipy.stats import spearmanr
+
+    out = {}
+    for col in p.check_columns:
+        v = ns.attrs[col]
+        info = {"n": int(v.notna().sum())}
+        base = p.check_residual_on
+        if base and base in ns.attrs.columns:
+            ok = v.notna() & ns.attrs[base].notna()
+            info.update({"base": base, "rho_base": float(spearmanr(v[ok], ns.attrs[base][ok])[0])})
+        out[col] = info
+    return out
 
 
 def _time_bucket(seconds: float) -> str:
@@ -388,6 +403,7 @@ def run(cfg: Config) -> None:
         "tolerance": {k: float(v) for k, v in sel["tolerance"].items()},
         "selection_sets": sel["sets"].to_dict(orient="records"),
         "modularity_vs_region": _modularity_vs_region(comparison),
+        "check": _check_info(ns, p),
         "selection_by_k": {str(r["k"]): r["winner"] for _, r in by_k.iterrows()},
         "bootstrap_pairs": _boot_pairs(boot),
         "signal": signal_stats,

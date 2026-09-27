@@ -247,9 +247,10 @@ description: >-
 
 ## 8. Перезапуск этапов без следов
 
-Выходы идут во временную папку, `data/raw` читается по абсолютному пути; отчёт разведки `eda.report`
-и его картинки `eda.report_images` по умолчанию пишутся в `docs/` — их тоже уводим во временную папку
-(одной командой Bash: переменные между вызовами не сохраняются):
+Выходы идут во временную папку, `data/raw` читается по абсолютному пути; отчёты этапов по умолчанию
+пишутся в `docs/` — `eda.report` и `eda.report_images`, `features.report`, `network.report`
+и `network.report_images`, — их тоже уводим во временную папку (одной командой Bash: переменные между вызовами
+не сохраняются):
 
 ```bash
 T=$(mktemp -d); command -v cygpath >/dev/null && T=$(cygpath -m "$T")
@@ -260,9 +261,11 @@ cfg = yaml.safe_load(open("configs/default.yaml", encoding="utf-8"))
 cfg["paths"]["raw"] = str(pathlib.Path("data/raw").resolve())
 for k in ("interim", "processed", "outputs"):
     cfg["paths"][k] = str(t / k)
-if "eda" in cfg:  # иначе этап eda перепишет docs/eda.md и docs/img/eda репозитория
-    cfg["eda"]["report"] = str(t / "docs" / "eda.md")
-    cfg["eda"]["report_images"] = str(t / "docs" / "img" / "eda")
+for stage in ("eda", "features", "network"):  # иначе этапы перепишут отчёты и картинки в docs/ репозитория
+    if stage in cfg and "report" in cfg[stage]:
+        cfg[stage]["report"] = str(t / "docs" / f"{stage}.md")
+    if stage in cfg and "report_images" in cfg[stage]:
+        cfg[stage]["report_images"] = str(t / "docs" / "img" / stage)
 with open(t / "check.yaml", "w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
 EOF

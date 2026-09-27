@@ -151,6 +151,13 @@ def build_facts(out: Path, p: NetworkParams, figs: list[FigureInfo]) -> dict[str
             _fact(facts, f"rel_ratio_{r['rule']}", float(r["reliability"] / r["reliability_chance"]), "int")
         _fact(facts, f"label_{r['rule']}", label(r["rule"]), "str")
         _fact(facts, f"ari3_{r['rule']}", float(r["ari_seeds"]), "num3")
+        for col in comp.columns:  # проверка вне пространства атрибутов (5-НДФЛ)
+            if col.startswith("check_") and pd.notna(r[col]):
+                kind = "int" if col.endswith("_n") else "num3" if col.endswith(("_sd", "_resid")) else "num2"
+                _fact(facts, f"{col}_{r['rule']}", float(r[col]), kind)
+                sd = r.get(f"{col}_null_sd")
+                if not col.endswith(("_n", "_sd")) and pd.notna(sd) and sd > 0:
+                    _fact(facts, f"{col}_z_{r['rule']}", float(r[col] / sd), "int")
     for tid, m in js.get("city_members", {}).items():
         _fact(facts, f"members_{tid}", m, "int")
     for key in ("n_nodes", "n_excluded", "n_no_road"):
@@ -181,6 +188,10 @@ def build_facts(out: Path, p: NetworkParams, figs: list[FigureInfo]) -> dict[str
     _fact(facts, "sets_borda_same", int((sets["borda"] == js["chosen"]).all()), "int")
     for crit, v in js["tolerance"].items():
         _fact(facts, f"tol_{crit}", v, "num3")
+    for col, info in js.get("check", {}).items():
+        _fact(facts, f"check_{col}_nodes", info["n"], "int")
+        if "rho_base" in info:
+            _fact(facts, f"check_{col}_rho_base", info["rho_base"], "num2")
     mod = js["modularity_vs_region"]
     _fact(facts, "mod_rho_ami", mod["rho_ami"], "num2")
     _fact(facts, "mod_rho_within", mod["rho_within"], "num2")
@@ -447,6 +458,26 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
     "без вычета региона корзина надёжнее ритма": lambda f: (
         _v(f, "reliability_basket_dist_abs") > _v(f, "reliability_rhythm_corr")
     ),
+    "по 5-НДФЛ рёбра расстояния корзин связывают похожие МО сильнее, чем у остальных кандидатов": lambda f: (
+        _v(f, "check_log_ndfl_rel_basket_dist")
+        > max(
+            _v(f, f"check_log_ndfl_rel_{r}")
+            for r in ("basket_cos", "rhythm_corr", "rhythm_lag", "rhythm_dtw")
+        )
+        and _v(f, "check_log_ndfl_rel_z_basket_dist") > 10
+    ),
+    "сверх зарплаты 5-НДФЛ у корзины на уровне случая, у ритма и дорог — выше случая": lambda f: (
+        abs(_v(f, "check_log_ndfl_rel_resid_basket_dist"))
+        < 2 * _v(f, "check_log_ndfl_rel_resid_null_sd_basket_dist")
+        and _v(f, "check_log_ndfl_rel_resid_rhythm_corr")
+        > 3 * _v(f, "check_log_ndfl_rel_resid_null_sd_rhythm_corr")
+        and _v(f, "check_log_ndfl_rel_resid_geo_road")
+        > 3 * _v(f, "check_log_ndfl_rel_resid_null_sd_geo_road")
+    ),
+    "доход 5-НДФЛ тесно связан с зарплатой": lambda f: _v(f, "check_log_ndfl_rel_rho_base") > 0.7,
+    "модульность по одним правилам: слабо и отрицательно с AMI региона, сильно с надёжностью": lambda f: (
+        -0.5 < _v(f, "mod_rho_ami") < 0 and _v(f, "mod_rho_reliability") > 0.5
+    ),
     "выбор одинаков при всех k": lambda f: _v(f, "k_same") == _v(f, "k_total"),
     "надёжность растёт с k у всех правил по тратам": lambda f: all(
         _v(f, f"k{a}_reliability_{r}") < _v(f, f"k{b}_reliability_{r}")
@@ -709,6 +740,29 @@ def table_window_kinds(out: Path) -> str:
     return _md(df)
 
 
+def table_check(out: Path) -> str:
+    c = pd.read_csv(out / "comparison.csv").set_index("rule")
+    rows = []
+    for rule, r in c.iterrows():
+        if "check_log_ndfl_rel" not in c.columns:
+            break
+        rows.append(
+            [
+                label(rule),
+                _fmt(r["check_log_ndfl_rel"], "num2"),
+                _fmt(r["check_log_ndfl_rel_resid"], "num3"),
+                _fmt(r["check_log_ndfl_rel_resid_null_sd"], "num3"),
+            ]
+        )
+    cols = [
+        "Правило",
+        "Ассортативность по доходу 5-НДФЛ",
+        "То же сверх зарплаты (остаток)",
+        "Случайный уровень: ± стандартное отклонение",
+    ]
+    return _md(pd.DataFrame(rows, columns=cols))
+
+
 TABLES: dict[str, Callable[[Path], str]] = {
     "comparison": table_comparison,
     "grid": table_grid,
@@ -718,6 +772,7 @@ TABLES: dict[str, Callable[[Path], str]] = {
     "selection_sets": table_selection_sets,
     "tolerance": table_tolerance,
     "ablation": table_ablation,
+    "check": table_check,
     "attributes": table_attributes,
     "modes": table_modes,
     "windows": table_windows,
