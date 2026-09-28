@@ -1,4 +1,4 @@
-"""Контракты таблиц этапов panel, eda и features: схемы, проверка, запись и чтение parquet.
+"""Контракты таблиц этапов panel, eda, features, network и cluster: схемы, проверка, запись и чтение parquet.
 
 Схемы описывают выходы этапа panel (spec_final, часть А.4). ``validate`` проверяет набор колонок, типы,
 пропуски, диапазоны, допустимые значения, шаблоны строк, уникальность ключа и межколоночные правила и
@@ -943,3 +943,47 @@ NETWORK_NODES = TableSchema(
 NETWORK_SCHEMAS: dict[str, TableSchema] = {
     s.name: s for s in (NETWORK_EDGES, NETWORK_WINDOWS, NETWORK_WINDOW_NODES, NETWORK_NODES)
 }
+
+# --- Схемы выходов этапа cluster ----------------------------------------------------------------
+# Кандидат — пара «метод, K» (``<метод>_k<K>``); метка −1 — шум HDBSCAN; метки кандидата 0…K−1 по убыванию
+# размера кластера. Итоговый тип узла — 1…K (``cluster_final``).
+
+CANDIDATE_PATTERN = r"[a-z][a-z_]*_k\d{2}"
+
+
+def _final_consistent(df: pd.DataFrame) -> pd.Series:
+    return (df["type"] >= 1) & (df["type"] <= df["k"])
+
+
+CLUSTER_LABELS = TableSchema(
+    name="cluster_labels",
+    columns=(
+        Col("candidate", "string", pattern=CANDIDATE_PATTERN),
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("method", "string", pattern=RULE_NAME_PATTERN),
+        Col("k", "int16", range=(0, 999)),
+        Col("param", "float64", nullable=True),
+        Col("label", "int16", range=(-1, 998)),
+        Col("feasible", "bool"),
+        Col("is_method_winner", "bool"),
+        Col("is_final", "bool"),
+    ),
+    key=("candidate", "territory_id"),
+)
+
+CLUSTER_FINAL = TableSchema(
+    name="cluster_final",
+    columns=(
+        Col("territory_id", "int32", range=POSITIVE_INT),
+        Col("type", "int16", range=(1, 999)),
+        Col("k", "int16", range=(1, 999)),
+        Col("method", "string", pattern=RULE_NAME_PATTERN),
+        Col("candidate", "string", pattern=CANDIDATE_PATTERN),
+        Col("type_jaccard", "float64", range=SHARE),
+        Col("is_city_node", "bool"),
+    ),
+    key=("territory_id",),
+    checks=(Check("тип в 1…K", _final_consistent),),
+)
+
+CLUSTER_SCHEMAS: dict[str, TableSchema] = {s.name: s for s in (CLUSTER_LABELS, CLUSTER_FINAL)}
