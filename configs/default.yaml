@@ -492,6 +492,12 @@ icvi:                       # индексы качества (модуль icvi
                                # own — только свой кластер
                                # (Doklady, 2025, формула (15)); z-оценки для выбора — по pair; читает
                                # icvi.options(cfg), результат передаётся в evaluate и random_baseline
+  # Этап evaluate (python -m munnet evaluate), НЕ ПРЕДРЕГИСТРАЦИЯ: параметры отчёта о качестве, в выбор не входят.
+  bootstrap: 100               # подвыборок узлов для интервалов: те же выборки, что clustering.stability
+                               # (доля — clustering.stability.subsample, без возвращения); метки не пересчитываются
+  ci_level: 0.95               # уровень интервала; отклонения подвыборок × √(m/(n − m)) от значения на всех узлах
+  report: docs/icvi.md         # отчёт этапа (собирается кодом, руками не править)
+  report_images: docs/img/icvi
 
 dynamics:
   window_months: 12

@@ -113,9 +113,10 @@ def test_config_directions_match_module_directions():
     assert {n: s.better for n, s in specs.items()} == icvi.BETTER
 
 
-def test_run_is_deferred_until_cluster():
-    with pytest.raises(NotImplementedError, match="после cluster"):
-        icvi.run(load_config())
+def test_run_delegates_to_stage_module():
+    import munnet.icvi_stage
+
+    assert callable(munnet.icvi_stage.run)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -673,3 +674,42 @@ def test_float_labels_must_be_whole_numbers():
     for bad in (y + 0.5, np.where(y == 0, np.nan, 1.0)):
         with pytest.raises(ValueError, match="метки должны быть целыми числами"):
             icvi.silhouette(x, bad)
+
+
+# ---------------------------------------------------------------------------------------------
+# Составные части для этапа evaluate
+
+
+def test_s_dbw_parts_sum_to_index():
+    x = np.array([0, 1, 2, 1.3, 7, 9.7])[:, None]
+    y = np.array([0, 0, 0, 1, 1, 1])
+    parts = icvi.s_dbw_parts(x, y)
+    assert parts["scat"] + parts["dens_bw"] == pytest.approx(icvi.s_dbw(x, y))
+    assert parts["scat"] == pytest.approx(0.5 * (2 / 3 + 36.78 / 3) / (76.28 / 6))
+    assert parts["stdev"] == pytest.approx(0.5 * math.sqrt(2 / 3 + 12.26))
+    assert parts["undefined"] is False
+    own = icvi.s_dbw_parts(x, y, density="own")
+    assert own["dens_bw"] == pytest.approx(1 / 3)
+
+
+def test_unifiability_matrix_matches_avi_and_avu():
+    tri = [(0, 1), (0, 2), (1, 2)]
+    edges = [(i + s, j + s, 1.0) for s in (0, 3, 6) for i, j in tri] + [(2, 3, 1.0), (5, 6, 1.0)]
+    a = _from_edges(9, edges)
+    y = np.repeat([5, 7, 9], 3)
+    u, iso, types = icvi.unifiability(a, y)
+    assert types.tolist() == [5, 7, 9]
+    np.testing.assert_allclose(iso, [6 / 7, 6 / 8, 6 / 7])
+    assert np.isnan(np.diag(u)).all()
+    assert u[0, 1] == pytest.approx(0.5) and u[1, 2] == pytest.approx(0.5) and u[0, 2] == 0
+    np.testing.assert_allclose(u, u.T)
+    assert np.nansum(u) / 3 == pytest.approx(icvi.avu(a, y))
+    assert iso.mean() == pytest.approx(icvi.avi(a, y))
+
+
+def test_anui_formula():
+    """ANUI = AVI / (1 + AVI · AVU) (Doklady, 2025, формула (22); Howie и др., 2023, формула (38))."""
+    assert icvi.anui(0.8, 0.5) == pytest.approx(0.8 / 1.4)
+    assert math.isnan(icvi.anui(float("nan"), 0.5))
+    a, y = two_triangles()
+    assert icvi.anui(icvi.avi(a, y), icvi.avu(a, y)) == pytest.approx((6 / 7) / (1 + 6 / 7))

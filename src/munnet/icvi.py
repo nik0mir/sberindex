@@ -706,5 +706,56 @@ def zscore(value: float, mean: float, sd: float, better: str) -> float:
     return float(z if better == "max" else -z)
 
 
+def s_dbw_parts(X: np.ndarray, labels: np.ndarray, *, density: str = S_DBW_DENSITY) -> dict[str, Any]:
+    """Слагаемые S_Dbw для разбора вырождения: ``scat``, ``dens_bw``, радиус ``stdev`` и флаг ``undefined``
+    (отношение плотностей бесконечно). ``scat + dens_bw`` = ``s_dbw`` при ``undefined = False``."""
+    prep = _prepare(labels, X, None, ["s_dbw"])
+    nan = {"scat": float("nan"), "dens_bw": float("nan"), "stdev": float("nan"), "undefined": True}
+    if _degenerate(prep, "s_dbw") is not None:
+        return nan
+    f, perms, k = prep.features, prep.codes[None, :], prep.k
+    h = _onehot(perms, k)
+    cent = (h @ f.x).reshape(1, k, -1) / prep.sizes[:, None]
+    var = np.clip((h @ f.x2).reshape(1, k, -1) / prep.sizes[:, None] - cent**2, 0.0, None)
+    norm_sigma = np.linalg.norm(var, axis=2)
+    scat = float(norm_sigma.mean() / f.norm_var)
+    total, flags = _s_dbw_batch(f, perms, prep.sizes, k, _check_density(density))
+    return {
+        "scat": scat,
+        "dens_bw": float("nan") if flags[0] else float(total[0] - scat),
+        "stdev": float(np.sqrt(norm_sigma.sum()) / k),
+        "undefined": bool(flags[0]),
+    }
+
+
+def unifiability(A: sp.spmatrix, labels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Матрица объединяемости U (K × K, диагональ NaN), изолируемость кластеров и их метки по возрастанию.
+
+    Формулы — как в ``avi`` и ``avu``: AVU = Σ U / K, AVI = среднее изолируемости. Большая U_kl — кластеры
+    k и l отдают друг другу почти всё внешнее: кандидаты на слияние.
+    """
+    prep = _prepare(labels, None, A, ["avu"])
+    uniq = np.unique(np.asarray(labels)[prep.keep])
+    m = _cluster_matrix(prep.graph, prep.codes[None, :], prep.k)[0]
+    diag = np.diag(m)
+    vol = m.sum(axis=1)
+    out = vol - diag
+    den = out[:, None] + out[None, :] - m
+    with np.errstate(divide="ignore", invalid="ignore"):
+        u = np.where(den > 0, m / den, 0.0)
+        iso = np.where(vol > 0, diag / vol, np.nan)
+    np.fill_diagonal(u, np.nan)
+    return u, iso, uniq
+
+
+def anui(avi_value: float, avu_value: float) -> float:
+    """ANUI = AVI / (1 + AVI · AVU), больше — лучше; справочно (в правило выбора не входит). Shalileh и др.,
+    Doklady Mathematics, 2025, с. 555, формула (22); Howie и др., PVLDB, 2023, с. 3175, формула (38)."""
+    return float(avi_value / (1 + avi_value * avu_value))
+
+
 def run(cfg: Config) -> None:
-    raise NotImplementedError("этап evaluate запускается после cluster (PLAN.md, этап 4)")
+    """Этап evaluate: все индексы для кандидатов этапа cluster, базис, интервалы, согласие, отчёт."""
+    from munnet import icvi_stage
+
+    icvi_stage.run(cfg)
