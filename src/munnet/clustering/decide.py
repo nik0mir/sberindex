@@ -84,13 +84,38 @@ def icvi_variants(cp: ClusterParams) -> dict[str, dict]:
         "s_dbw_own": {"z_features": [z if z != "z_s_dbw" else "z_s_dbw_own" for z in zf]},
         "nan_worst": {"nan_worst": True},
         "noise_cluster": {"z_features": [f"{z}_nc" for z in zf], "z_graph": [f"{z}_nc" for z in zg]},
+        # добавлено после предрегистрации (по итогам этапа evaluate, docs/icvi.md): метрики, сравнимые
+        # между K,
+        # вместо z-оценок — AVI с поправкой на случайность, сырая MQ, сырой SW
+        "raw_graph": {"z_graph": ["raw_avi_adj", "raw_mq"]},
+        "raw_graph_avu": {"z_graph": ["raw_avi_adj", "raw_mq", "z_avu"]},
+        "raw_sw": {"z_features": ["raw_sw"]},
+        "raw_all": {"z_features": ["raw_sw"], "z_graph": ["raw_avi_adj", "raw_mq"]},
     }
+    return out
+
+
+RAW_CHECKS: tuple[str, ...] = ("raw_graph", "raw_graph_avu", "raw_sw", "raw_all")
+
+
+def with_raw_columns(cands: pd.DataFrame) -> pd.DataFrame:
+    """Метрики, сравнимые между K (все — больше лучше): AVI с поправкой на случайность (AVI − E)/(1 − E),
+    где E —
+    среднее того же случайного базиса, что у z-оценки (``avi_base_mean``); сырая MQ; сырой SW."""
+    out = cands.copy()
+    if {"avi", "avi_base_mean"} <= set(out.columns):
+        out["raw_avi_adj"] = (out["avi"] - out["avi_base_mean"]) / (1.0 - out["avi_base_mean"])
+    if "mq" in out.columns:
+        out["raw_mq"] = out["mq"]
+    if "sw" in out.columns:
+        out["raw_sw"] = out["sw"]
     return out
 
 
 def icvi_checks(cands: pd.DataFrame, cp: ClusterParams, main: S.TwoLevel, every: S.TwoLevel) -> pd.DataFrame:
     """Для каждой проверки по свойствам индексов: победитель уровня K каждого метода и итог; меняется ли."""
     rows = []
+    cands = with_raw_columns(cands)
     base1 = {m: ch.winner for m, ch in every.level1.items()}
     for name, kw in icvi_variants(cp).items():
         cols = [

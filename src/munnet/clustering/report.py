@@ -25,6 +25,7 @@ import pandas as pd
 from scipy.stats import kendalltau
 
 from munnet import style
+from munnet.clustering import decide as DE
 from munnet.clustering import figures as FG
 from munnet.clustering.params import CRITERIA, USES, ClusterParams
 from munnet.config import Config
@@ -67,6 +68,10 @@ ICVI_LABELS: dict[str, str] = {
     "s_dbw_own": "(г) S_Dbw в варианте own",
     "nan_worst": "(д) неопределённая метрика — худший ранг",
     "noise_cluster": "(е) шум HDBSCAN — отдельный кластер",
+    "raw_graph": "(з) качество на G: AVI с поправкой на случайность и сырая MQ",
+    "raw_graph_avu": "(и) то же и z AVU",
+    "raw_sw": "(к) качество в X: сырой SW",
+    "raw_all": "(л) сырой SW и AVI с поправкой, сырая MQ",
 }
 VARIANT_LABELS: dict[str, str] = {
     "graph_basket_cos": "G — сеть «Косинус корзин»",
@@ -362,7 +367,31 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
     )
     _fact(f, "kef_ari_max", float(kf["ari_final"].max()), "num2")
     _fact(f, "kef_z_feasible_ari_max", float(zf["ari_final"].max()) if len(zf) else float("nan"), "num2")
-    ic = o.icvi
+    raw = o.icvi.loc[o.icvi["check"].isin(DE.RAW_CHECKS)]
+    r3 = raw.loc[raw["level"] == 3]
+    _fact(f, "raw_n", r3["check"].nunique(), "int")
+    _fact(f, "raw_l2_changed", int(raw.loc[raw["level"] == 2, "changed"].astype(bool).sum()), "int")
+    _fact(f, "raw_l3_changed", int(r3["changed"].astype(bool).sum()), "int")
+    r3c = r3.loc[r3["changed"].astype(bool)]
+    _fact(
+        f,
+        "raw_l3_changes",
+        "; ".join(
+            f"{ICVI_LABELS[r['check']]} — {FG.mlabel(r['method'])}, K = {int(r['k'])}"
+            for _, r in r3c.iterrows()
+        )
+        or "нет",
+        "str",
+    )
+    _fact(f, "raw_l3_winner_graph", FG.mlabel(r3.set_index("check").loc["raw_graph", "method"]), "str")
+    _fact(f, "raw_l3_winner_sw", FG.mlabel(r3.set_index("check").loc["raw_sw", "method"]), "str")
+    rc = DE.with_raw_columns(c)
+    lw = winners_of(o)["leiden"]
+    for key, cand in (("hybrid", fin), ("leiden", lw)):
+        _fact(f, f"avi_adj_{key}", float(rc.loc[cand, "raw_avi_adj"]), "num3")
+        _fact(f, f"mq_raw_{key}", float(rc.loc[cand, "raw_mq"]), "num3")
+        _fact(f, f"sw_raw_{key}", float(rc.loc[cand, "raw_sw"]), "num3")
+    ic = o.icvi.loc[~o.icvi["check"].isin(DE.RAW_CHECKS)]
     l2c = ic.loc[ic["level"] == 2]
     _fact(f, "icvi_n", l2c["check"].nunique(), "int")
     _fact(f, "icvi_l2_changed", int(l2c["changed"].astype(bool).sum()), "int")
@@ -640,6 +669,12 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
     "типы не повторяют регионы (AMI < 0,1)": lambda f: _v(f, "ami_region") < 0.1,
     "сеть — меньшая часть разброса KEFRiN": lambda f: _v(f, "kefrin_graph_share") < 0.5,
     "шесть проверок по свойствам индексов": lambda f: _v(f, "icvi_n") == 6,
+    "сравнимые между K метрики графа среди всех семейств выбирают Leiden, итог не меняют": lambda f: (
+        _v(f, "raw_l2_changed") == 0
+        and _v(f, "raw_l3_winner_graph") == "Leiden"
+        and _v(f, "avi_adj_leiden") > _v(f, "avi_adj_hybrid")
+    ),
+    "сырой SW оставляет гибрид": lambda f: _v(f, "raw_l3_winner_sw") == FG.mlabel("hybrid"),
 }
 
 
