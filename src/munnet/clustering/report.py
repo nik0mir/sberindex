@@ -58,6 +58,7 @@ CHECK_LABELS: dict[str, str] = {
     "tie_x2": "допуски ничьей × 2",
     "joint": "один шаг по всем парам «метод, K»",
     "all_eligible": "все семейства допускаются к итогу",
+    "tie_chain": "цепочка равенств с допуском устойчивости (толкование)",
 }
 ICVI_LABELS: dict[str, str] = {
     "no_avu": "(а) качество на G без AVU",
@@ -137,6 +138,9 @@ class Out:
         self.avu = read("avu_matrix")
         self.small = read("small_clusters") if (out / "small_clusters.csv").exists() else pd.DataFrame()
         self.timing = read("timing")
+        self.grid = read("threshold_grid")
+        self.reslim = read("resolution_limit")
+        self.kef = read("kefrin_curve")
         self.rules = (out / "tree_rules.txt").read_text(encoding="utf-8")
 
     @property
@@ -268,10 +272,96 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
     main_l2 = o.levels.loc[o.levels["level"] == 2]
     _fact(f, "main_l2_n", len(main_l2), "int")
     ch = o.checks
-    _fact(f, "n_checks", len(ch) - 1, "int")
-    _fact(f, "n_checks_same", int(ch.loc[ch["check"] != "main", "same_as_main"].astype(bool).sum()), "int")
-    _fact(f, "orders_same", int((o.orders["winner"] == fin).sum()), "int")
-    _fact(f, "orders_total", len(o.orders), "int")
+    el = ch.loc[(ch["scope"] == "eligible") & (ch["check"] != "main")]
+    _fact(f, "n_checks", len(el), "int")
+    _fact(f, "n_checks_same", int(el["same_as_main"].astype(bool).sum()), "int")
+    oe = o.orders.loc[o.orders["scope"] == "eligible"]
+    _fact(f, "orders_same", int((oe["winner"] == fin).sum()), "int")
+    _fact(f, "orders_total", len(oe), "int")
+    al = ch.loc[(ch["scope"] == "all") & (ch["check"] != "main")]
+    _fact(f, "all_n_checks", len(al), "int")
+    _fact(f, "all_n_same", int(al["same_as_main"].astype(bool).sum()), "int")
+    changed = al.loc[~al["same_as_main"].astype(bool)]
+    _fact(
+        f,
+        "all_changed",
+        "; ".join(
+            f"{CHECK_LABELS[r['check']]} — {FG.mlabel(r['method'])}, K = {int(r['k'])}"
+            for _, r in changed.iterrows()
+        )
+        or "нет",
+        "str",
+    )
+    _fact(f, "all_joint_winner", FG.mlabel(al.set_index("check").loc["joint", "method"]), "str")
+    _fact(f, "all_joint_k", int(al.set_index("check").loc["joint", "k"]), "int")
+    for scope in ("all", "all_level2"):
+        od = o.orders.loc[o.orders["scope"] == scope]
+        for m in ("hybrid", "leiden", "louvain", "spectral"):
+            _fact(f, f"lex_{scope}_{m}", int((od["method"] == m).sum()), "int")
+    b2 = ch.loc[(ch["scope"] == "all_level2") & (ch["check"] == "borda")]
+    _fact(f, "borda_l2_winner", FG.mlabel(b2["method"].iloc[0]), "str")
+    lw = o.levels_all.loc[o.levels_all["level"] == 2].set_index("cand")
+    front = lw.loc[lw["on_front"].astype(bool)]
+    ranks = front[[f"crit_{c}" for c in CRITERIA]].rank(ascending=False, method="min").sum(axis=1)
+    _fact(f, "borda_hybrid", float(ranks.get(fin, np.nan)), "int")
+    _fact(f, "borda_leiden", float(ranks.get(winners_of(o)["leiden"], np.nan)), "int")
+    # сетка порогов
+    g = o.grid
+    gs = g.loc[g["chain"] == "strict"]
+    _fact(f, "grid_cells", len(gs), "int")
+    _fact(f, "grid_same_eligible", int((gs["winner_eligible"] == fin).sum()), "int")
+    _fact(f, "grid_same_all", int((gs["winner_all"] == fin).sum()), "int")
+    s55 = gs.loc[np.isclose(gs["max_share"], 0.55)]
+    _fact(f, "grid55_all_winner", FG.mlabel(o.cands.loc[s55["winner_all"].iloc[0], "method"]), "str")
+    _fact(f, "grid55_all_k", int(o.cands.loc[s55["winner_all"].iloc[0], "k"]), "int")
+    gt = g.loc[(g["chain"] == "tolerance") & np.isclose(g["max_share"], 0.55)]
+    _fact(f, "grid55_tol_hybrid_k", int(gt["hybrid_k"].iloc[0]), "int")
+    _fact(
+        f,
+        "grid50_same_all_share",
+        int((gs.loc[np.isclose(gs["max_share"], 0.5), "winner_all"] == fin).all()),
+        "int",
+    )
+    _fact(
+        f,
+        "hybrid_k3_k4_stab_diff",
+        float(c.loc["hybrid_k04", "stability"] - c.loc["hybrid_k03", "stability"]),
+        "num3",
+    )
+    # предел разрешения
+    rl = o.reslim
+    _fact(f, "rl_threshold", float(rl["threshold_gamma1"].iloc[0]), "int")
+    _fact(f, "rl_threshold_max", float(rl["threshold"].max()), "int")
+    _fact(f, "rl_min_inner", float(rl["min_inner_weight"].min()), "int")
+    _fact(f, "rl_n_below", int(rl["n_below"].sum()), "int")
+    _fact(f, "rl_disconnected", int(rl["n_disconnected"].sum()), "int")
+    _fact(f, "rl_n_cands", len(rl), "int")
+    # KEFRiN в варианте статьи
+    kf = o.kef
+    _fact(
+        f,
+        "kef_inputs_feasible",
+        int(kf.loc[kf["features"] == "inputs", "feasible"].astype(bool).sum()),
+        "int",
+    )
+    z1 = kf.loc[(kf["features"] == "zscore") & np.isclose(kf["xi_over_rho"], 1.0)]
+    _fact(f, "kef_z1_feasible", int(z1["feasible"].astype(bool).sum()), "int")
+    _fact(f, "kef_z1_minshare_k4", float(z1.loc[z1["k"] == 4, "min_share"].iloc[0]), "pct")
+    _fact(f, "kef_z1_graph_share", float(z1["graph_share"].iloc[0]), "pct")
+    zf = kf.loc[(kf["features"] == "zscore") & kf["feasible"].astype(bool)]
+    _fact(f, "kef_z_feasible", len(zf), "int")
+    _fact(
+        f,
+        "kef_z_feasible_list",
+        "; ".join(
+            f"ξ/ρ = {style.fmt_num(x, 0)}, K = {int(k)}"
+            for x, k in zip(zf["xi_over_rho"], zf["k"], strict=True)
+        )
+        or "нет",
+        "str",
+    )
+    _fact(f, "kef_ari_max", float(kf["ari_final"].max()), "num2")
+    _fact(f, "kef_z_feasible_ari_max", float(zf["ari_final"].max()) if len(zf) else float("nan"), "num2")
     ic = o.icvi
     l2c = ic.loc[ic["level"] == 2]
     _fact(f, "icvi_n", l2c["check"].nunique(), "int")
@@ -479,9 +569,33 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
     "мелкие недопустимые типы почти все задаёт доступность рынков": lambda f: (
         _v(f, "n_small_market") >= 0.9 * _v(f, "n_small")
     ),
-    "все предрегистрированные проверки сохраняют победителя": lambda f: (
+    "среди методов с двумя источниками все проверки дают тот же итог": lambda f: (
         _v(f, "n_checks_same") == _v(f, "n_checks") and _v(f, "orders_same") == _v(f, "orders_total")
     ),
+    "среди всех семейств меняет победителя только один шаг — спектральная": lambda f: (
+        _v(f, "all_n_same") == _v(f, "all_n_checks") - 1
+        and _v(f, "all_joint_winner") == FG.mlabel("spectral")
+    ),
+    "лексикографически (только второй уровень) Leiden 12, гибрид 6, Louvain 6": lambda f: (
+        _v(f, "lex_all_level2_leiden") == 12
+        and _v(f, "lex_all_level2_hybrid") == 6
+        and _v(f, "lex_all_level2_louvain") == 6
+    ),
+    "Борда: ничья гибрида и Leiden": lambda f: _v(f, "borda_hybrid") == _v(f, "borda_leiden"),
+    "при 55% среди всех семейств побеждает спектральная с K = 3": lambda f: (
+        _v(f, "grid55_all_winner") == FG.mlabel("spectral") and _v(f, "grid55_all_k") == 3
+    ),
+    "при 50% итог тот же при любом наименьшем типе": lambda f: _v(f, "grid50_same_all_share") == 1,
+    "гибрид K = 3 и K = 4 разводит разница устойчивости меньше допуска": lambda f: (
+        0 < _v(f, "hybrid_k3_k4_stab_diff") < _v(f, "tie_stability") and _v(f, "grid55_tol_hybrid_k") == 3
+    ),
+    "ни одно сообщество Leiden и Louvain не упирается в предел разрешения": lambda f: (
+        _v(f, "rl_n_below") == 0
+    ),
+    "все сообщества Leiden и Louvain связны": lambda f: _v(f, "rl_disconnected") == 0,
+    "KEFRiN на общем X недопустим при любом весе сети": lambda f: _v(f, "kef_inputs_feasible") == 0,
+    "KEFRiN по статье (z, ρ = ξ = 1) недопустим": lambda f: _v(f, "kef_z1_feasible") == 0,
+    "допустимые разбиения KEFRiN далеки от итога": lambda f: _v(f, "kef_z_feasible_ari_max") < 0.5,
     "проверки по свойствам индексов итог не меняют": lambda f: (
         _v(f, "icvi_l2_changed") == 0 and _v(f, "icvi_l3_changed") == 0
     ),
@@ -653,26 +767,134 @@ def table_level2_all(o: Out) -> str:
     return _md(pd.DataFrame(rows, columns=cols))
 
 
+def winners_of(o: Out) -> dict[str, str]:
+    return o.winners
+
+
 def table_sensitivity(o: Out) -> str:
+    """Проверки на двух уровнях: среди методов с двумя источниками (основное правило) и среди всех
+    семейств."""
+    ch = o.checks
     rows = []
-    for _, r in o.checks.iterrows():
+    cell = lambda r: (  # noqa: E731
+        f"{FG.mlabel(r['method'])}, K = {int(r['k'])}" + ("" if bool(r["same_as_main"]) else " **(другой)**")
+    )
+    for check in [c for c in CHECK_LABELS if c not in ("main", "all_eligible")]:
+        el = ch.loc[(ch["scope"] == "eligible") & (ch["check"] == check)]
+        al = ch.loc[(ch["scope"] == "all") & (ch["check"] == check)]
+        if el.empty and al.empty:
+            continue
         rows.append(
             [
-                CHECK_LABELS.get(r["check"], r["check"]),
-                f"{FG.mlabel(r['method'])}, K = {int(r['k'])}",
-                "да" if bool(r["same_as_main"]) else "**нет**",
+                CHECK_LABELS.get(check, check),
+                cell(el.iloc[0]) if len(el) else style.NA_TEXT,
+                cell(al.iloc[0]) if len(al) else style.NA_TEXT,
             ]
         )
-    fin = o.final["candidate"]
-    n_same = int((o.orders["winner"] == fin).sum())
-    rows.append(
+    lex = []
+    for scope in ("eligible", "all", "all_level2"):
+        od = o.orders.loc[o.orders["scope"] == scope]
+        cnt = od.groupby("winner").size().sort_values(ascending=False)
+        lex.append(
+            "; ".join(
+                f"{FG.mlabel(o.cands.loc[w, 'method'])}, K = {int(o.cands.loc[w, 'k'])} — {n}"
+                for w, n in cnt.items()
+            )
+        )
+    rows.append(["24 лексикографических порядка (на обоих уровнях)", lex[0], lex[1]])
+    rows.append(["24 порядка только при выборе метода (K — по основному правилу)", style.NA_TEXT, lex[2]])
+    b2 = ch.loc[(ch["scope"] == "all_level2") & (ch["check"] == "borda")].iloc[0]
+    rows.append(["Борда только при выборе метода", style.NA_TEXT, cell(b2)])
+    cols = ["Проверка", "Среди методов с двумя источниками (итог)", "Среди всех семейств"]
+    return _md(pd.DataFrame(rows, columns=cols))
+
+
+def table_grid(o: Out) -> str:
+    g = o.grid
+    c = o.cands
+    lab = lambda w: f"{FG.mlabel(c.loc[w, 'method'])}, K = {int(c.loc[w, 'k'])}"  # noqa: E731
+    rows = []
+    for (smin, smax), d in g.groupby(["min_share", "max_share"]):
+        st = d.loc[d["chain"] == "strict"].iloc[0]
+        tl = d.loc[d["chain"] == "tolerance"].iloc[0]
+        rows.append(
+            [
+                style.fmt_pct(smin, 1),
+                style.fmt_pct(smax, 0),
+                str(int(st["n_feasible"])),
+                str(st["hybrid_feasible_k"]).replace(",", ", "),
+                lab(st["winner_eligible"]),
+                lab(st["winner_all"]),
+                lab(tl["winner_eligible"]),
+                lab(tl["winner_all"]),
+            ]
+        )
+    cols = [
+        "Наименьший тип",
+        "Крупнейший тип",
+        "Допустимых",
+        "Допустимые K гибрида",
+        "Итог (два источника)",
+        "Все семейства",
+        "Итог, цепочка с допуском",
+        "Все семейства, цепочка с допуском",
+    ]
+    return _md(pd.DataFrame(rows, columns=cols))
+
+
+def table_resolution(o: Out) -> str:
+    rl = o.reslim
+    rows = [
         [
-            "24 лексикографических порядка критериев",
-            f"{FG.mlabel(o.final['method'])}, K = {o.final['k']} — в {n_same} из {len(o.orders)}",
-            "да" if n_same == len(o.orders) else "**нет**",
+            f"{FG.mlabel(r['method'])}, K = {int(r['k'])}",
+            _n(r["gamma"], 2),
+            _n(r["threshold"], 0),
+            _n(r["min_inner_weight"], 0),
+            str(int(r["n_below"])),
+            str(int(r["n_disconnected"])),
         ]
-    )
-    return _md(pd.DataFrame(rows, columns=["Проверка", "Победитель", "Тот же, что в основном правиле"]))
+        for _, r in rl.iterrows()
+    ]
+    cols = [
+        "Разбиение",
+        "γ",
+        "Порог √(2m/γ)",
+        "Наименьший вес внутри сообщества",
+        "Сообществ ниже порога",
+        "Несвязных сообществ",
+    ]
+    return _md(pd.DataFrame(rows, columns=cols))
+
+
+def table_kefrin(o: Out) -> str:
+    kf = o.kef
+    rows = []
+    for (feat, x), d in kf.groupby(["features", "xi_over_rho"], sort=False):
+        feas = d.loc[d["feasible"].astype(bool), "k"].astype(int).tolist()
+        k4 = d.loc[d["k"] == 4].iloc[0]
+        rows.append(
+            [
+                "общий X (robust)" if feat == "inputs" else "z-оценка, как у авторов",
+                _n(x, 2),
+                style.fmt_pct(d["graph_share"].iloc[0], 0),
+                ", ".join(map(str, feas)) or "нет",
+                style.fmt_pct(k4["min_share"], 1),
+                style.fmt_pct(k4["max_share"], 0),
+                _n(k4["ari_final"]),
+                _n(d["ari_final"].max()),
+            ]
+        )
+    cols = [
+        "Признаки",
+        "ξ/ρ",
+        "Доля сети в разбросе",
+        "Допустимые K",
+        "K = 4: наименьший тип",
+        "K = 4: крупнейший тип",
+        "K = 4: ARI с итогом",
+        "Наибольший ARI с итогом (K = 3–12)",
+    ]
+    return _md(pd.DataFrame(rows, columns=cols))
 
 
 def table_icvi_checks(o: Out, cp: ClusterParams) -> str:
@@ -916,7 +1138,9 @@ def table_methods_final(o: Out, cp: ClusterParams, f: Mapping[str, Fact]) -> str
             "плотные компактные группы в малой размерности",
         ),
         "leiden": (
-            "гарантирует связные сообщества; допустим при всех K (табл. 2)",
+            f"все сообщества связны на G ({t('rl_disconnected')} несвязных у {t('rl_n_cands')} разбиений, "
+            f"раздел 5); "
+            "допустим при всех K (табл. 2)",
             f"устойчивость к удалению рёбер {t('pert_leiden')} против {t('pert_hybrid')} у гибрида (табл. 2)",
             "сигнал только в графе (синтетика SBM: ARI " + t("sbm_low_leiden") + ", табл. 1)",
         ),
@@ -1034,6 +1258,9 @@ TABLES: dict[str, Callable] = {
     "synthetic_sbm": lambda o, cp, f: table_synthetic_sbm(o),
     "methods_final": table_methods_final,
     "small": lambda o, cp, f: table_small(o),
+    "grid": lambda o, cp, f: table_grid(o),
+    "resolution": lambda o, cp, f: table_resolution(o),
+    "kefrin": lambda o, cp, f: table_kefrin(o),
 }
 
 

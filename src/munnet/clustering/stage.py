@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
+from munnet.clustering import analysis as AN
 from munnet.clustering import compute as CO
 from munnet.clustering import decide as DE
 from munnet.clustering import methods as M
@@ -433,6 +434,17 @@ def run(cfg: Config) -> None:
         t = time.perf_counter()
         pert = edge_perturbation(pool, cp, res, winners)
         timing["edge_perturbation"] = time.perf_counter() - t
+        t = time.perf_counter()
+        kef = pd.DataFrame(pool.map(AN.kefrin_task, AN.kefrin_tasks(cp, res.labels[final])))
+        if len(kef):
+            shares = {
+                (f, x): AN.kefrin_graph_share(inp, x, f)
+                for f, x in kef[["features", "xi_over_rho"]].drop_duplicates().itertuples(index=False)
+            }
+            kef["graph_share"] = [
+                shares[(f, x)] for f, x in zip(kef["features"], kef["xi_over_rho"], strict=True)
+            ]
+        timing["kefrin_curve"] = time.perf_counter() - t
     fm, fk = str(cands.loc[final, "method"]), int(cands.loc[final, "k"])
     log.info("cluster: итог — %s; проверки: %s", final, dec.checks[["check", "winner"]].values.tolist())
     levels = DE.level_table(dec.main, cands)
@@ -442,6 +454,8 @@ def run(cfg: Config) -> None:
         pert.groupby("cand")["ari"].agg(["mean", "std", "min"]).reset_index() if len(pert) else pd.DataFrame()
     )
     extra = extra_selection(cands, res, cp)
+    grid = AN.threshold_grid(res, cp)
+    reslim = AN.resolution_limit(res) if cp.impl.get("resolution_limit", True) else pd.DataFrame()
 
     # 3. Варианты входов (предрегистрация) и проверка с усечёнными хвостами X (вне предрегистрации)
     t = time.perf_counter()
@@ -518,6 +532,9 @@ def run(cfg: Config) -> None:
     write_csv(dec.checks, out / "sensitivity.csv")
     write_csv(dec.orders, out / "sensitivity_orders.csv")
     write_csv(extra, out / "extra_checks.csv")
+    write_csv(grid, out / "threshold_grid.csv")
+    write_csv(reslim, out / "resolution_limit.csv")
+    write_csv(kef, out / "kefrin_curve.csv")
     write_csv(dec.icvi, out / "sensitivity_icvi.csv")
     write_csv(dec.edges, out / "k_edges.csv")
     write_csv(avu_matrix(inp.A, final_labels), out / "avu_matrix.csv")

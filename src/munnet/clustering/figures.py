@@ -243,7 +243,8 @@ def fig_methods(out: Path, table: pd.DataFrame, final_method: str) -> FigureInfo
     if len(set(best.values())) == 1:
         title = f"{mlabel(next(iter(best.values())))} — лучший по всем четырём критериям"
     subtitle = (
-        "Победитель уровня K каждого метода; качество — средний ранг z-оценок ICVI среди десяти методов "
+        "Победитель уровня K каждого метода; качество — средний ранг z-оценок ICVI среди победителей "
+        "методов с допустимым K "
         "(1 — лучший), устойчивость — средний ARI с бутстрап-разбиениями, объяснимость — каппа дерева "
         "глубины 3; "
         "серым — метод без допустимого K"
@@ -463,7 +464,7 @@ def fig_agreement(out: Path, ari: pd.DataFrame, cands: pd.DataFrame) -> FigureIn
         ax.set_xticks(range(len(names)), lab, rotation=60, ha="right")
         ax.set_yticks(range(len(names)), lab)
         style.finish(fig, title, subtitle, SRC_BOTH)
-    alt = "Матрица ARI между разбиениями десяти методов"
+    alt = "Матрица ARI между победителями методов с допустимым K"
     data = A.reset_index()
     return _save(
         fig,

@@ -45,6 +45,7 @@ def run_rule(
     z_features=None,
     z_graph=None,
     nan_worst: bool = False,
+    stab_tol: float = 0.0,
 ) -> S.TwoLevel:
     tol = {c: cp.tie.get(c, 0.0) * tol_scale for c in criteria}
     return S.two_level(
@@ -58,6 +59,7 @@ def run_rule(
         aggregator,
         order,
         nan_worst,
+        stab_tol,
     )
 
 
@@ -163,45 +165,77 @@ class Decision:
     edges: pd.DataFrame  # K на краю сетки, K по сырой MQ
 
 
-def decide(cands: pd.DataFrame, cp: ClusterParams) -> Decision:
-    main = run_rule(cands, cp)
-    every = run_rule(cands, cp, methods=cp.methods)
-    rows = [{"check": "main", "winner": main.winner}]
+SCOPES: dict[str, str] = {"eligible": "методы с двумя источниками", "all": "все семейства"}
+
+
+def check_rows(cands: pd.DataFrame, cp: ClusterParams, scope: str) -> tuple[list[dict], list[dict]]:
+    """Весь набор проверок чувствительности на одном уровне: ``eligible`` — методы с двумя источниками
+    (``final_eligible``, основное правило), ``all`` — все семейства (проверка ``all_eligible``; набор
+    проверок на
+    этом уровне добавлен после предрегистрации: там есть из чего выбирать). ``tie_chain`` — толкование цепочки
+    равенств с допуском устойчивости (добавлено после предрегистрации)."""
+    methods = cp.eligible_methods if scope == "eligible" else cp.methods
+    rule = lambda **kw: run_rule(cands, cp, methods=methods, **kw).winner  # noqa: E731
+    rows = [{"check": "main", "winner": rule()}]
     if "borda" in cp.aggregators:
-        rows.append({"check": "borda", "winner": run_rule(cands, cp, aggregator=S.AGG_BORDA).winner})
+        rows.append({"check": "borda", "winner": rule(aggregator=S.AGG_BORDA)})
     if "copeland_all" in cp.aggregators:
-        rows.append(
-            {"check": "copeland_all", "winner": run_rule(cands, cp, aggregator=S.AGG_COPELAND_ALL).winner}
-        )
+        rows.append({"check": "copeland_all", "winner": rule(aggregator=S.AGG_COPELAND_ALL)})
     orows = []
     if "lexicographic_all_orders" in cp.aggregators:
         for order in S.all_orders(CRITERIA):
-            w = run_rule(cands, cp, aggregator=S.AGG_LEX, order=order).winner
-            orows.append({"order": " > ".join(order), "winner": w})
+            orows.append({"order": " > ".join(order), "winner": rule(aggregator=S.AGG_LEX, order=order)})
     for name, crit in cp.sets.items():
-        rows.append({"check": f"set_{name}", "winner": run_rule(cands, cp, criteria=crit).winner})
+        rows.append({"check": f"set_{name}", "winner": rule(criteria=crit)})
     for scale in cp.tie_scale:
-        rows.append({"check": f"tie_x{scale:g}", "winner": run_rule(cands, cp, tol_scale=scale).winner})
+        rows.append({"check": f"tie_x{scale:g}", "winner": rule(tol_scale=scale)})
     if cp.joint:
         ch = S.one_step(
-            cands,
-            cp.eligible_methods,
-            CRITERIA,
-            z_cols(cp, "features"),
-            z_cols(cp, "graph"),
-            cp.directions,
-            cp.tie,
+            cands, methods, CRITERIA, z_cols(cp, "features"), z_cols(cp, "graph"), cp.directions, cp.tie
         )
         rows.append({"check": "joint", "winner": None if ch is None else ch.winner})
-    if cp.all_eligible:
-        rows.append({"check": "all_eligible", "winner": every.winner})
+    rows.append({"check": "tie_chain", "winner": rule(stab_tol=float(cp.tie["stability"]))})
+    if cp.all_eligible and scope == "eligible":
+        rows.append({"check": "all_eligible", "winner": run_rule(cands, cp, methods=cp.methods).winner})
+    for r in (*rows, *orows):
+        r["scope"] = scope
+    return rows, orows
+
+
+def decide(cands: pd.DataFrame, cp: ClusterParams) -> Decision:
+    main = run_rule(cands, cp)
+    every = run_rule(cands, cp, methods=cp.methods)
+    rows, orows = [], []
+    for scope, ref in (("eligible", main.winner), ("all", every.winner)):
+        r, o = check_rows(cands, cp, scope)
+        for x in (*r, *o):
+            x["same_as_main"] = x["winner"] == ref
+        rows += r
+        orows += o
+    # толкование «только второй уровень»: K каждого метода — по основному правилу, агрегатор меняется только
+    # при выборе метода (так порядки считал судья критерия 3; добавлено после предрегистрации)
+    winners = [ch.winner for ch in every.level1.values()]
+    sub = cands.loc[winners]
+    crit = S.criteria_table(sub, z_cols(cp, "features"), z_cols(cp, "graph"), list(CRITERIA))
+    tol = {c: cp.tie.get(c, 0.0) for c in CRITERIA}
+    for order in S.all_orders(CRITERIA) if "lexicographic_all_orders" in cp.aggregators else ():
+        w = S.choose(crit, sub, cp.directions, tol, S.AGG_LEX, order).winner
+        orows.append(
+            {
+                "order": " > ".join(order),
+                "winner": w,
+                "scope": "all_level2",
+                "same_as_main": w == every.winner,
+            }
+        )
+    w = S.choose(crit, sub, cp.directions, tol, S.AGG_BORDA).winner
+    rows.append({"check": "borda", "winner": w, "scope": "all_level2", "same_as_main": w == every.winner})
     checks = pd.DataFrame(rows)
     orders = pd.DataFrame(orows)
     for df in (checks, orders):
         if len(df):
             df["method"] = df["winner"].map(lambda c: None if c is None else cands.loc[c, "method"])
             df["k"] = df["winner"].map(lambda c: None if c is None else int(cands.loc[c, "k"]))
-            df["same_as_main"] = df["winner"] == main.winner
     return Decision(
         main=main,
         all_methods=every,

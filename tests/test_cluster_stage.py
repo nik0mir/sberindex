@@ -112,9 +112,28 @@ def test_selection_intermediate_and_sensitivity(run_cluster):
     win2 = levels.loc[(levels["level"] == 2) & levels["winner"]]
     assert bool(win2["on_front"].iloc[0])
     checks = pd.read_csv(out / "sensitivity.csv")
-    expected = {"main", "borda", "copeland_all", "set_icvi_only", "set_plan", "tie_x0", "tie_x2"}
-    assert expected | {"joint", "all_eligible"} <= set(checks["check"])
-    assert len(pd.read_csv(out / "sensitivity_orders.csv")) == 24
+    expected = {
+        "main",
+        "borda",
+        "copeland_all",
+        "set_icvi_only",
+        "set_plan",
+        "tie_x0",
+        "tie_x2",
+        "joint",
+        "tie_chain",
+    }
+    for scope in ("eligible", "all"):  # весь набор проверок — на обоих уровнях
+        assert expected <= set(checks.loc[checks["scope"] == scope, "check"]), scope
+    assert "all_eligible" in set(checks["check"])
+    orders = pd.read_csv(out / "sensitivity_orders.csv")
+    assert orders.groupby("scope").size().to_dict() == {"all": 24, "all_level2": 24, "eligible": 24}
+    grid = pd.read_csv(out / "threshold_grid.csv")
+    assert len(grid) == 2 * 5 * 3 and set(grid["chain"]) == {"strict", "tolerance"}
+    rl = pd.read_csv(out / "resolution_limit.csv")
+    assert (rl["threshold"] > 0).all() and set(rl["method"]) <= {"leiden", "louvain"}
+    kef = pd.read_csv(out / "kefrin_curve.csv")
+    assert set(kef["features"]) == {"inputs", "zscore"} and kef["graph_share"].between(0, 1).all()
     icvi = pd.read_csv(out / "sensitivity_icvi.csv")
     assert {"no_avu", "avi_mq_one", "no_s_dbw", "s_dbw_own", "nan_worst", "noise_cluster"} <= set(
         icvi["check"]

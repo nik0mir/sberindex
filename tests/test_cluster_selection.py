@@ -193,3 +193,12 @@ def test_quality_rank_metric_groups_and_nan_policy():
     assert S.quality_rank(z, nan_worst=True)["c"] == pytest.approx((1 + 1 + 0) / 3)
     assert S.n_defined(z, ["avi", "mq", "avu"]).tolist() == [3, 3, 2]
     assert S.n_defined(z, [("avi", "mq"), "avu"]).tolist() == [2, 2, 1]
+
+
+def test_tie_break_with_stability_tolerance_goes_to_smaller_k():
+    crit = pd.DataFrame({"quality_features": [1.0, 0.0], "quality_graph": [0.0, 1.0]}, index=["a", "b"])
+    d = {"quality_features": "max", "quality_graph": "max"}
+    z = {"quality_features": 0.0, "quality_graph": 0.0}
+    m = meta(crit.index, stability=[0.901, 0.909], k=[3, 4])
+    assert S.choose(crit, m, d, z).winner == "b"  # без допуска — выше устойчивость
+    assert S.choose(crit, m, d, z, stab_tol=0.02).winner == "a"  # с допуском — равны, меньше K

@@ -184,8 +184,17 @@ def lexicographic_set(
 # --- Разрешение равенств -------------------------------------------------------------------------
 
 
-def tie_break(cands: Sequence, meta: pd.DataFrame) -> object:
-    """Из равных по очкам: выше устойчивость, затем проще, затем меньше K, затем имя кандидата."""
+def tie_break(cands: Sequence, meta: pd.DataFrame, stab_tol: float = 0.0) -> object:
+    """Из равных по очкам: выше устойчивость, затем проще, затем меньше K, затем имя кандидата.
+
+    ``stab_tol`` — толкование «выше устойчивость»: 0 (основное, как в коде с первого прогона) — сравнение
+    без допуска; больше 0 — устойчивость в пределах допуска от лучшей считается равной (проверка)."""
+    if stab_tol > 0 and len(cands) > 1:
+        st = pd.Series({c: float(meta.loc[c, "stability"]) for c in cands}).fillna(-np.inf)
+        cands = [c for c in cands if st[c] >= st.max() - stab_tol]
+        return sorted(cands, key=lambda c: (float(meta.loc[c, "simplicity"]), int(meta.loc[c, "k"]), str(c)))[
+            0
+        ]
 
     def key(c):
         r = meta.loc[c]
@@ -212,6 +221,7 @@ def choose(
     tol: Mapping[str, float],
     aggregator: str = AGG_COPELAND,
     order: Sequence[str] | None = None,
+    stab_tol: float = 0.0,
 ) -> Choice:
     """Победитель набора ``crit`` (строки — допустимые кандидаты, колонки — критерии). ``meta`` — колонки
     ``stability``, ``simplicity``, ``k`` для цепочки равенств. Агрегаторы: ``copeland`` (основной: фронт →
@@ -235,7 +245,7 @@ def choose(
         raise ValueError(f"choose: неизвестный агрегатор {aggregator}")
     top = scores.max()
     tied = [a for a in scores.index if scores[a] == top]
-    winner = tie_break(tied, meta)
+    winner = tie_break(tied, meta, stab_tol)
     return Choice(winner=winner, front=front, scores=scores, criteria=crit, aggregator=aggregator, tied=tied)
 
 
@@ -260,6 +270,7 @@ def two_level(
     aggregator: str = AGG_COPELAND,
     order: Sequence[str] | None = None,
     nan_worst: bool = False,
+    stab_tol: float = 0.0,
 ) -> TwoLevel:
     """Уровень 1 — K внутри каждого метода из ``methods`` среди его допустимых кандидатов; уровень 2 — метод
     среди победителей уровня 1. ``cands``: колонки ``method``, ``k``, ``feasible``, ``simplicity``,
@@ -272,13 +283,13 @@ def two_level(
         if sub.empty:
             continue
         crit = criteria_table(sub, z_features, z_graph, crit_cols, nan_worst)
-        level1[m] = choose(crit, sub, directions, tol_c, aggregator, order)
+        level1[m] = choose(crit, sub, directions, tol_c, aggregator, order, stab_tol)
     if not level1:
         return TwoLevel(winner=None, level1={}, level2=None)
     winners = [ch.winner for ch in level1.values()]
     sub = cands.loc[winners]
     crit = criteria_table(sub, z_features, z_graph, crit_cols, nan_worst)
-    level2 = choose(crit, sub, directions, tol_c, aggregator, order)
+    level2 = choose(crit, sub, directions, tol_c, aggregator, order, stab_tol)
     return TwoLevel(winner=level2.winner, level1=level1, level2=level2)
 
 
