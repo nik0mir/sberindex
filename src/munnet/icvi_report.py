@@ -36,6 +36,7 @@ _FIGURE = re.compile(r"<!--\s*figure:\s*(I\d{2})\s*-->")
 _NOTE = re.compile(r"[ \t]*<!--\s*note\s*:.*?-->[ \t]*\n?", re.S)
 LINT_ALLOW = [r"CC BY(?:-SA)? \d\.\d", r"\b\d{1,2}\.\d{2}\.\d{4}\b", r"\$\$.*?\$\$", r"\$[^$]+\$"]
 FEATURES = ("sw", "ch", "s_dbw")
+BETTER_SIGN: dict[str, int] = {m: 1 if b == "max" else -1 for m, b in icvi.BETTER.items()}
 GRAPH = ("avi", "avu", "mq")
 VALUE_KIND: dict[str, str] = {
     "sw": "num3",
@@ -70,6 +71,9 @@ def build_facts(out: Path, p: EvalParams, extra: Mapping) -> tuple[dict[str, Fac
     cands = pd.read_csv(out / "candidates.csv")
     tau_z = pd.read_csv(out / "agreement_z.csv").set_index("metric")
     tau_v = pd.read_csv(out / "agreement_value.csv").set_index("metric")
+    tau_k = pd.read_csv(out / "agreement_within_k.csv").set_index("metric")
+    tau_k_long = pd.read_csv(out / "agreement_within_k_long.csv")
+    kf = pd.read_csv(out / "k_fair.csv")
     kd = pd.read_csv(out / "k_dependence.csv").set_index("metric")
     q = pd.read_csv(out / "space_ranks.csv")
     fu = pd.read_csv(out / "final_unifiability.csv") if (out / "final_unifiability.csv").exists() else None
@@ -149,6 +153,50 @@ def build_facts(out: Path, p: EvalParams, extra: Mapping) -> tuple[dict[str, Fac
     else:
         _fact(facts, "tau_min_pair", "—", "str")
         _fact(facts, "tau_min", float("nan"), "num2")
+
+    # согласие внутри одного K: эффект K исключён
+    for i, a in enumerate(METRICS):
+        for b in METRICS[i + 1 :]:
+            _fact(facts, f"tauk_{a}_{b}", tau_k.loc[a, b], "num2")
+    _fact(facts, "tauk_n_strata", int(tau_k_long["k"].nunique()) if len(tau_k_long) else 0, "int")
+    _fact(facts, "tauk_n_min", int(tau_k_long["n"].min()) if len(tau_k_long) else 0, "int")
+    _fact(facts, "tauk_n_max", int(tau_k_long["n"].max()) if len(tau_k_long) else 0, "int")
+    _fact(facts, "flip_text", _flip_text(tau_v, tau_z, tau_k, kd), "str")
+    _fact(facts, "tauk_text", _tauk_text(tau_z, tau_k), "str")
+
+    # сравнение разных K без смещения
+    sel = kf.loc[kf["is_method_winner"].astype(bool) | kf["is_final"].astype(bool)]
+    sel = sel.loc[sel["family"].isin(["graph", "attributed"]) | sel["is_final"].astype(bool)]
+    for col, key in (("z_avi", "order_z_avi"), ("avi_adj", "order_avi_adj"), ("mq", "order_mq")):
+        _fact(facts, key, _order_text(sel, col), "str")
+    _fact(facts, "order_z_mq", _order_text(sel, "z_mq"), "str")
+    if has_final:
+        r = kf.loc[kf["is_final"].astype(bool)].iloc[0]
+        _fact(facts, "final_avi_adj", r["avi_adj"], "num3")
+        _fact(facts, "final_avi_base", r["avi_base"], "num3")
+        _fact(facts, "final_rank_in_k_avi", int(r["rank_in_k_avi"]), "int")
+        _fact(facts, "final_rank_in_k_mq", int(r["rank_in_k_mq"]), "int")
+        _fact(facts, "final_n_in_k", int(r["n_in_k"]), "int")
+    pf = kf.loc[kf["feasible"].astype(bool)]
+    _fact(facts, "pct_avi_top", int((pf["pct_avi"] >= 1).sum()), "int")
+    _fact(facts, "kfair_text", _kfair_text(sel), "str")
+    _fact(facts, "kfair_differs", int(_order_text(sel, "z_avi") != _order_text(sel, "avi_adj")), "int")
+    first = [
+        str(sel.sort_values(col, ascending=False)["candidate"].iloc[0])
+        for col in ("z_avi", "avi_adj", "mq", "z_mq")
+        if sel[col].notna().any()
+    ]
+    fin_c = kf.loc[kf["is_final"].astype(bool), "candidate"]
+    _fact(facts, "final_first_any", int(len(fin_c) == 1 and fin_c.iloc[0] in first), "int")
+    feas_k = kf.loc[kf["feasible"].astype(bool)].groupby("k_eff").size()
+    _fact(facts, "feas_in_k_min", int(feas_k.min()) if len(feas_k) else 0, "int")
+    _fact(facts, "feas_in_k_max", int(feas_k.max()) if len(feas_k) else 0, "int")
+    sd_avi = long.loc[long["metric"] == "avi"].merge(cands[["candidate", "k_eff"]], on="candidate")
+    rho_sd = (
+        sd_avi[["baseline_sd", "k_eff"]].corr(method="spearman").iloc[0, 1] if len(sd_avi) >= 3 else np.nan
+    )
+    _fact(facts, "rho_sd_k_avi", rho_sd, "num2")
+    _fact(facts, "flips_consistent", int(_flips_consistent(tau_v, tau_z, tau_k)), "int")
 
     # AVU: вырожденный базис и знак z
     k_small = feas.loc[feas["k_eff"] <= 3, "candidate"]
@@ -230,9 +278,9 @@ def build_facts(out: Path, p: EvalParams, extra: Mapping) -> tuple[dict[str, Fac
     titles = {
         "better": dict(icvi.BETTER),
         "title_curves": (
-            f"Сырые {_names(_weakened(facts))} заметно зависят от K: разные K сравниваются только через "
-            "случайный базис"
-            if _weakened(facts)
+            f"Сырые {_names(_k_dependent(facts))} заметно зависят от K (|ρ Спирмена| ≥ 0,5): разные K "
+            "по сырым значениям несравнимы"
+            if _k_dependent(facts)
             else "Индексы качества по числу типов K: значение, интервал и случайный базис"
         ),
         "title_z": (
@@ -260,6 +308,14 @@ def build_facts(out: Path, p: EvalParams, extra: Mapping) -> tuple[dict[str, Fac
     }
     _fact(facts, "agreement_text", _agreement_text(facts), "str")
     _fact(facts, "spaces_text", _spaces_text(facts, plays), "str")
+    _fact(facts, "families_text", _families_text(cands), "str")
+    neg, fin_n = int((zf < 0).sum()), len(zf)
+    _fact(
+        facts,
+        "avu_z_neg_text",
+        f"у всех {fin_n} допустимых кандидатов с определённой z" if neg == fin_n else f"у {neg} из {fin_n}",
+        "str",
+    )
     _fact(facts, "k_text", _k_text(facts), "str")
     _fact(facts, "sdbw_text", _sdbw_text(facts), "str")
     _fact(facts, "sdbw_short", _sdbw_short(facts), "str")
@@ -279,6 +335,91 @@ def _agreement_text(facts) -> str:
     if tx < min(tf, tg):
         return "метрики одного пространства согласуются между собой сильнее, чем метрики разных пространств"
     return "метрики разных пространств согласуются не слабее, чем метрики одного пространства"
+
+
+def _k_dependent(facts) -> list[str]:
+    """Индексы, сырые значения которых заметно связаны с K (|ρ Спирмена| ≥ 0,5), по убыванию |ρ|."""
+    ms = [m for m in METRICS if abs(_v(facts, f"rho_value_k_{m}")) >= 0.5]
+    return sorted(ms, key=lambda m: -abs(_v(facts, f"rho_value_k_{m}")))
+
+
+def _pair(a: str, b: str) -> str:
+    return f"{METRIC_LABELS[a].split(' ')[0]}–{METRIC_LABELS[b].split(' ')[0]}"
+
+
+def _flip_text(tau_v, tau_z, tau_k, kd) -> str:
+    """Пары, у которых τ по сырым значениям и по z разного знака, и почему: связь сырых значений с K."""
+    kd = kd.set_index("metric") if "metric" in kd.columns else kd
+    parts = []
+    for i, a in enumerate(METRICS):
+        for b in METRICS[i + 1 :]:
+            tv, tz, tk = tau_v.loc[a, b], tau_z.loc[a, b], tau_k.loc[a, b]
+            if not all(np.isfinite([tv, tz])) or np.sign(tv) == np.sign(tz) or min(abs(tv), abs(tz)) < 0.2:
+                continue
+            ra, rb = kd.loc[a, "rho_value_k"], kd.loc[b, "rho_value_k"]
+            za, zb = kd.loc[a, "rho_z_k"], kd.loc[b, "rho_z_k"]
+            parts.append(
+                f"{_pair(a, b)}: τ по сырым значениям {style.fmt_num(tv, 2)}, по z {style.fmt_num(tz, 2)}, "
+                f"внутри одного K {style.fmt_num(tk, 2)}; ρ с K у сырых значений (знак «больше — лучше») "
+                f"{style.fmt_num(ra, 2)} "
+                f"и {style.fmt_num(rb, 2)}, у z — {style.fmt_num(za, 2)} и {style.fmt_num(zb, 2)}"
+            )
+    return "; ".join(parts) if parts else "знак τ по сырым значениям и по z у всех пар одинаков"
+
+
+def _flips_consistent(tau_v, tau_z, tau_k) -> bool:
+    """У всех пар со сменой знака «сырые → z» знак τ внутри одного K совпадает со знаком по z."""
+    for i, a in enumerate(METRICS):
+        for b in METRICS[i + 1 :]:
+            tv, tz, tk = tau_v.loc[a, b], tau_z.loc[a, b], tau_k.loc[a, b]
+            if not all(np.isfinite([tv, tz])) or np.sign(tv) == np.sign(tz) or min(abs(tv), abs(tz)) < 0.2:
+                continue
+            if not np.isfinite(tk) or np.sign(tk) != np.sign(tz):
+                return False
+    return True
+
+
+def _tauk_text(tau_z, tau_k) -> str:
+    same = diff = 0
+    for i, a in enumerate(METRICS):
+        for b in METRICS[i + 1 :]:
+            tz, tk = tau_z.loc[a, b], tau_k.loc[a, b]
+            if np.isfinite(tz) and np.isfinite(tk) and max(abs(tz), abs(tk)) >= 0.2:
+                same += int(np.sign(tz) == np.sign(tk))
+                diff += int(np.sign(tz) != np.sign(tk))
+    return f"среди пар с |τ| ≥ 0,2 знак τ по z и τ внутри одного K совпадает у {same}, расходится у {diff}"
+
+
+def _order_text(sel: pd.DataFrame, col: str) -> str:
+    d = sel.dropna(subset=[col]).sort_values(col, ascending=False)
+    return " > ".join(cand_label(m, k) for m, k in zip(d["method"], d["k_eff"], strict=True))
+
+
+def _kfair_text(sel: pd.DataFrame) -> str:
+    """Меняет ли поправка на случайность порядок итога и победителей сетевых методов."""
+    if len(sel) < 2:
+        return "сравнивать не с кем"
+    by_z = list(sel.sort_values("z_avi", ascending=False)["candidate"])
+    by_adj = list(sel.sort_values("avi_adj", ascending=False)["candidate"])
+    if by_z == by_adj:
+        return "порядок по z AVI и по AVI с поправкой на случайность одинаков"
+    return (
+        "порядок по z AVI и по AVI с поправкой на случайность различается: z награждает большие K "
+        "(разброс случайного базиса сужается с ростом K), поправка на случайность — нет"
+    )
+
+
+def _families_text(cands: pd.DataFrame) -> str:
+    """Сколько допустимых кандидатов у каждого семейства и каких методов: семейства неравны."""
+    from munnet.icvi_figures import _method_style
+
+    labels, _, fam_labels = _method_style()
+    f = cands.loc[cands["feasible"].astype(bool)]
+    parts = []
+    for fam, g in f.groupby("family"):
+        methods = ", ".join(f"{labels.get(m, m)} — {n}" for m, n in g["method"].value_counts().items())
+        parts.append(f"{fam_labels.get(fam, fam)} — {len(g)} ({methods})")
+    return "; ".join(parts)
 
 
 def _spaces_text(facts, plays: bool) -> str:
@@ -393,6 +534,18 @@ def _sdbw_text(facts) -> str:
 # --- Проверяемые утверждения шаблона -------------------------------------------------------------
 
 CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
+    "внутри одного K AVI и MQ тоже согласуются (τ > 0,5)": lambda f: _v(f, "tauk_avi_mq") > 0.5,
+    "у пар со сменой знака «сырые → z» знак τ внутри одного K совпадает со знаком по z": lambda f: (
+        _v(f, "flips_consistent") == 1
+    ),
+    "разброс случайного базиса AVI сужается с ростом K": lambda f: _v(f, "rho_sd_k_avi") < 0,
+    "порядок по z AVI и по AVI с поправкой на случайность различается": lambda f: _v(f, "kfair_differs") == 1,
+    "итог не первый по сетевым индексам ни в одном из четырёх порядков": lambda f: (
+        _v(f, "final_first_any") == 0
+    ),
+    "процентиль AVI в базисе у большинства допустимых кандидатов максимален": lambda f: (
+        _v(f, "pct_avi_top") > 0.5 * _v(f, "n_feasible")
+    ),
     "при K = 3 AVU у всех кандидатов равна 2/3 (тождество)": lambda f: (
         _v(f, "n_k3") == 0 or _v(f, "avu_k3_maxdev") < 1e-9
     ),
@@ -487,7 +640,11 @@ def table_k(out: Path) -> str:
         [METRIC_LABELS[m], _fmt(kd.loc[m, "rho_value_k"], "num2"), _fmt(kd.loc[m, "rho_z_k"], "num2")]
         for m in METRICS
     ]
-    return _md(pd.DataFrame(rows, columns=["Индекс", "ρ Спирмена: значение и K", "ρ Спирмена: z и K"]))
+    return _md(
+        pd.DataFrame(
+            rows, columns=["Индекс", "ρ Спирмена: значение (знак «больше — лучше») и K", "ρ Спирмена: z и K"]
+        )
+    )
 
 
 def table_unif(out: Path) -> str:
@@ -509,7 +666,51 @@ def table_unif(out: Path) -> str:
     return _md(pd.DataFrame(rows, columns=["Тип", "МО", "Изолируемость", *[f"U с типом {t}" for t in types]]))
 
 
+def table_k_fair(out: Path) -> str:
+    kf = pd.read_csv(out / "k_fair.csv")
+    sel = kf.loc[kf["is_method_winner"].astype(bool) | kf["is_final"].astype(bool)]
+    sel = sel.sort_values("avi_adj", ascending=False)
+    rows = []
+    for _, r in sel.iterrows():
+        rows.append(
+            [
+                cand_label(r["method"], r["k_eff"]) + (" — итог" if r["is_final"] else ""),
+                _fmt(r["avi"], "num3"),
+                _fmt(r["avi_base"], "num3"),
+                _fmt(r["avi_adj"], "num3"),
+                _fmt(r["z_avi"], "num1"),
+                f"{int(r['rank_in_k_avi'])} из {int(r['n_in_k'])}",
+                _fmt(r["mq"], "num3"),
+                _fmt(r["z_mq"], "num1"),
+                f"{int(r['rank_in_k_mq'])} из {int(r['n_in_k'])}",
+                _fmt(r["pct_avi"], "pct"),
+            ]
+        )
+    cols = [
+        "Кандидат",
+        "AVI",
+        "Базис AVI (≈ 1/K)",
+        "AVI с поправкой",
+        "z AVI",
+        "Ранг AVI внутри K",
+        "MQ",
+        "z MQ",
+        "Ранг MQ внутри K",
+        "Процентиль AVI в базисе",
+    ]
+    return _md(pd.DataFrame(rows, columns=cols))
+
+
+def table_agreement_k(out: Path) -> str:
+    tau = pd.read_csv(out / "agreement_within_k.csv").set_index("metric")
+    rows = [[METRIC_LABELS[a], *[_fmt(tau.loc[a, b], "num2") for b in METRICS]] for a in METRICS]
+    header = ["τ внутри K", *[METRIC_LABELS[m].split(" ")[0] for m in METRICS]]
+    return _md(pd.DataFrame(rows, columns=header))
+
+
 TABLES: dict[str, Callable[[Path], str]] = {
+    "k_fair": table_k_fair,
+    "agreement_k": table_agreement_k,
     "winners_features": table_winners_features,
     "winners_graph": table_winners_graph,
     "agreement": table_agreement,

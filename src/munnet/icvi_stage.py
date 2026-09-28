@@ -83,6 +83,7 @@ ICVI_LONG = TableSchema(
         Col("baseline_sd", "float64", nullable=True),
         Col("z", "float64", nullable=True),
         Col("n_undefined", "int32", range=(0, 1e9)),
+        Col("percentile", "float64", nullable=True, range=(0.0, 1.0)),
     ),
     key=("candidate", "metric"),
 )
@@ -236,6 +237,17 @@ def candidate_task(task) -> dict[str, Any]:
     }
 
 
+def percentile_in_baseline(value: float, base: np.ndarray, better: str) -> float:
+    """Доля перестановок базиса, которые кандидат обходит в сторону «лучше» (ничьи — пополам); NaN, если
+    значение или все перестановки не определены. 1 — лучше всех случайных меток тех же размеров."""
+    b = np.asarray(base, dtype=np.float64)
+    b = b[np.isfinite(b)]
+    if not np.isfinite(value) or b.size == 0:
+        return float("nan")
+    worse = b < value if better == "max" else b > value
+    return float((worse.sum() + 0.5 * (b == value).sum()) / b.size)
+
+
 def _stats(v: np.ndarray) -> tuple[float, float, int]:
     fin = v[np.isfinite(v)]
     mean = float(fin.mean()) if fin.size else float("nan")
@@ -288,6 +300,7 @@ def evaluate_candidates(
                     "baseline_sd": sd,
                     "z": icvi.zscore(values[name], mean, sd, BETTER_OF[name]),
                     "n_undefined": undefined,
+                    "percentile": percentile_in_baseline(values[name], base[name], BETTER_OF[name]),
                 }
             )
         lab = labels[cand]
@@ -359,6 +372,65 @@ def agreement(
             t = kendalltau(both[a_], both[b_]).statistic if len(both) >= 3 else float("nan")
             tau.loc[a_, b_] = tau.loc[b_, a_] = t
     return tau
+
+
+def agreement_within_k(
+    long: pd.DataFrame, cands: pd.DataFrame, *, value: str = "value", min_n: int = 5
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """τ Кендалла внутри одного K (по всем кандидатам с этим K, «лучше — выше»): эффект K исключён.
+
+    Внутри K допустимых кандидатов мало (2–5), поэтому берутся все кандидаты этого K — допустимость касается
+    размеров типов, а не того, как метрики упорядочивают разбиения. Слой K участвует, если у пары метрик
+    в нём не меньше ``min_n`` кандидатов с конечными значениями. Итог — среднее τ по слоям, взвешенное числом
+    кандидатов (τ стратифицированный по K). Возвращает матрицу и длинную таблицу по слоям."""
+    w = _wide(long, cands, value, feasible_only=False).reindex(columns=list(METRICS))
+    k = cands.set_index("candidate")["k_eff"].reindex(w.index)
+    rows = []
+    for kk, idx in w.groupby(k).groups.items():
+        g = w.loc[idx]
+        for i, a_ in enumerate(METRICS):
+            for b_ in METRICS[i + 1 :]:
+                d = g[[a_, b_]].dropna()
+                if len(d) >= min_n and d[a_].nunique() > 1 and d[b_].nunique() > 1:
+                    t = kendalltau(d[a_], d[b_]).statistic
+                    rows.append({"k": int(kk), "a": a_, "b": b_, "tau": t, "n": len(d)})
+    by_k = pd.DataFrame(rows, columns=["k", "a", "b", "tau", "n"])
+    tau = pd.DataFrame(np.eye(len(METRICS)), index=list(METRICS), columns=list(METRICS))
+    for (a_, b_), g in by_k.groupby(["a", "b"]):
+        v = float(np.average(g["tau"], weights=g["n"])) if len(g) else float("nan")
+        tau.loc[a_, b_] = tau.loc[b_, a_] = v
+    for i, a_ in enumerate(METRICS):
+        for b_ in METRICS[i + 1 :]:
+            if by_k.loc[(by_k["a"] == a_) & (by_k["b"] == b_)].empty:
+                tau.loc[a_, b_] = tau.loc[b_, a_] = float("nan")
+    return tau, by_k
+
+
+def k_fair(long: pd.DataFrame, cands: pd.DataFrame) -> pd.DataFrame:
+    """Сравнение разных K без смещения, дополняющее z: AVI с поправкой на случайность
+    (AVI − E) / (1 − E), где E — среднее AVI случайного базиса (≈ 1/K), — по образцу поправки ARI
+    (Hubert, Arabie, 1985); MQ уже отсчитана от нулевой модели (среднее базиса ≈ 0); процентиль в базисе;
+    ранг кандидата среди всех кандидатов того же K (1 — лучший)."""
+    v = long.pivot(index="candidate", columns="metric", values="value")
+    base = long.pivot(index="candidate", columns="metric", values="baseline_mean")
+    z = long.pivot(index="candidate", columns="metric", values="z")
+    pct = long.pivot(index="candidate", columns="metric", values="percentile")
+    out = cands[["candidate", "method", "family", "k_eff", "feasible", "is_method_winner", "is_final"]].copy()
+    out = out.set_index("candidate")
+    out["avi"] = v["avi"]
+    out["avi_base"] = base["avi"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out["avi_adj"] = (v["avi"] - base["avi"]) / (1 - base["avi"])
+    out["mq"] = v["mq"]
+    out["mq_base"] = base["mq"]
+    out["z_avi"] = z["avi"]
+    out["z_mq"] = z["mq"]
+    out["pct_avi"] = pct["avi"]
+    out["pct_mq"] = pct["mq"]
+    out["n_in_k"] = out.groupby("k_eff")["avi"].transform("size")
+    for col in ("avi", "avi_adj", "mq"):
+        out[f"rank_in_k_{col}"] = out.groupby("k_eff")[col].rank(ascending=False, method="min")
+    return out.reset_index()
 
 
 def k_dependence(long: pd.DataFrame, cands: pd.DataFrame) -> pd.DataFrame:
@@ -464,6 +536,10 @@ def run(cfg: Config) -> None:
     write_csv(tau_z.rename_axis("metric").reset_index(), out / "agreement_z.csv")
     write_csv(tau_v.rename_axis("metric").reset_index(), out / "agreement_value.csv")
     write_csv(k_dependence(res.long, res.cands), out / "k_dependence.csv")
+    tau_k, tau_k_long = agreement_within_k(res.long, res.cands)
+    write_csv(tau_k.rename_axis("metric").reset_index(), out / "agreement_within_k.csv")
+    write_csv(tau_k_long, out / "agreement_within_k_long.csv")
+    write_csv(k_fair(res.long, res.cands), out / "k_fair.csv")
     write_csv(space_ranks(res.long, res.cands), out / "space_ranks.csv")
     if len(res.final_u):
         write_csv(res.final_u, out / "final_unifiability.csv")

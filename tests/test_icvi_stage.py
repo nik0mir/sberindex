@@ -116,6 +116,7 @@ def test_long_table_schema_and_values(result):
         "baseline_sd",
         "z",
         "n_undefined",
+        "percentile",
     ]
     assert set(long["metric"]) == {*METRICS, "anui"}
     assert len(long) == 6 * 7
@@ -276,7 +277,14 @@ def test_run_end_to_end(tmp_path, monkeypatch):
     long = pd.read_csv(out / "icvi_long.csv")
     assert len(long) == 42
     assert (out / "icvi_long.parquet").exists()
-    for name in ("candidates.csv", "agreement_z.csv", "agreement_value.csv", "k_dependence.csv"):
+    for name in (
+        "candidates.csv",
+        "agreement_z.csv",
+        "agreement_value.csv",
+        "agreement_within_k.csv",
+        "k_dependence.csv",
+        "k_fair.csv",
+    ):
         assert (out / name).exists(), name
     facts = json.loads((out / "report_facts.json").read_text(encoding="utf-8"))
     assert facts["icvi.n_candidates"]["value"] == 6
@@ -325,3 +333,42 @@ def test_z_match_cluster(result, tmp_path):
     cand.loc[0, "z_sw"] += 1.0
     cand.to_csv(path, index=False)
     assert icvi_stage.z_match_cluster(path, res.long)["rel"] > 0.01
+
+
+def test_percentile_in_baseline_direction_and_ties():
+    base = np.array([1.0, 2.0, 3.0, 4.0, np.nan])
+    assert icvi_stage.percentile_in_baseline(3.0, base, "max") == pytest.approx((2 + 0.5) / 4)
+    assert icvi_stage.percentile_in_baseline(3.0, base, "min") == pytest.approx((1 + 0.5) / 4)
+    assert icvi_stage.percentile_in_baseline(9.0, base, "max") == 1.0
+    assert math.isnan(icvi_stage.percentile_in_baseline(float("nan"), base, "max"))
+
+
+def test_agreement_within_k_removes_the_k_confound():
+    """Метрики A и B противоположно зависят от K, но внутри каждого K упорядочивают кандидатов одинаково:
+    τ по всем кандидатам отрицателен, τ внутри K равен 1."""
+    rows, cands = [], []
+    for k in (3, 6, 9):
+        for j in range(5):
+            cand = f"m{j}_k{k:02d}"
+            cands.append({"candidate": cand, "k_eff": k, "feasible": True})
+            rows.append({"candidate": cand, "metric": "sw", "value": -10 * k + j, "z": float(j)})
+            rows.append({"candidate": cand, "metric": "avi", "value": 10 * k + j, "z": float(j)})
+    long = pd.DataFrame(rows)
+    cands = pd.DataFrame(cands)
+    pooled = icvi_stage.agreement(long, cands, value="value", metrics=["sw", "avi"])
+    assert pooled.loc["sw", "avi"] < 0
+    within, by_k = icvi_stage.agreement_within_k(long, cands, value="value", min_n=5)
+    assert within.loc["sw", "avi"] == pytest.approx(1.0)
+    assert sorted(by_k.loc[(by_k["a"] == "sw") & (by_k["b"] == "avi"), "k"]) == [3, 6, 9]
+    assert math.isnan(within.loc["sw", "mq"])  # пары без данных — NaN, а не 0
+
+
+def test_k_fair_table(result):
+    _, _, _, _, res = result
+    kf = icvi_stage.k_fair(res.long, res.cands).set_index("candidate")
+    r = kf.loc["leiden_k04"]
+    assert r["avi_adj"] == pytest.approx((r["avi"] - r["avi_base"]) / (1 - r["avi_base"]))
+    assert r["avi_base"] == pytest.approx(0.25, abs=0.03)  # случайный базис AVI ≈ 1/K
+    assert kf.loc[kf["k_eff"] == 4, "rank_in_k_avi"].min() == 1
+    assert kf.loc["leiden_k04", "rank_in_k_avi"] == 1  # посаженное разбиение сети — лучшее при K = 4
+    assert kf["pct_avi"].between(0, 1).all()
