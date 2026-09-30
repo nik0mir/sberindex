@@ -9,6 +9,7 @@
   `outputs/eda/facts.json`; `feat.` — `outputs/features/report_facts.json`; `net.` —
   `outputs/network/report_facts.json`; `cl.` — `outputs/cluster/report_facts.json`; `icvi.` —
   `outputs/evaluate/report_facts.json`; `dyn.` — `outputs/dynamics/report_facts.json`;
+- `int.<ключ>` — значение ключа в `outputs/interpret/facts.json` (этап `interpret`). Числа §1 и §8 сверены 30.09.2026 по выходам полного перерасчёта этапа (завершён 30.09.2026 14:41, тот же код и конфиг): от утреннего прогона `facts.json` отличается только названиями типов после слепой проверки (`names_final`, `naming_test`), новым блоком пояснений `post_unsealing` и временем (`seconds`, `timing`); все остальные числа совпали побайтно. `csv:outputs/interpret/…` — CSV того же этапа;
 - `controls:<ключ>` — поле `actual` в `outputs/panel/controls.json`;
 - `yaml:<путь>` — значение в `configs/default.yaml`;
 - `csv:<файл> [строка; колонка]` — значение в CSV;
@@ -18,6 +19,22 @@
 Числа, которые повторяют уже внесённое (например, 1776 в разных разделах), внесены один раз — при первом
 появлении. Номера разделов, рисунков, таблиц и формул статей не вносятся; годы в ссылках на литературу —
 по приложению Б отчёта (проверены по DOI).
+
+## Раздел 1. Вопрос и главный вывод
+
+| Раздел | Число в тексте | Источник | Что это |
+|---|---|---|---|
+| 1 | ρ 0,55; 0,37 | `int.t1.per.retail.rho_a` (0,551), `int.t1.per.catering.rho_a` (0,374) | ρ Спирмена порядка типов с оборотом розницы и общепита на жителя относительно региона, без страт |
+| 1 | ε² 0,152 и 0,194; 0,002 | `cl.val_ip_per_1000_difference`, `cl.val_orgs_per_1000_difference`; `cl.val_ip_per_1000_difference_null`, `cl.val_orgs_per_1000_difference_null` (0,002) | внешняя проверка этапа 3 |
+| 1 | 0,35 и 0,28 против 0,24 и 0,17 | `int.t1.per.catering.best_rival_rho` (0,345), `int.t1.per.retail.best_rival_rho` (0,277), `int.t1.per.catering.rho_b` (0,237), `int.t1.per.retail.rho_b` (0,173) | ρ внутри страт размера и доли горожан: лучшее деление без типов и типы |
+| 1 | AMI 0,31; порог 0,30 | `int.t5.max_ami` (0,313, деление `sized:log_level_rel:+`); `yaml:interpret.tests.T5_trivial.ami_max` | T5 |
+| 1 | 181; 21; 47 | `int.t3.main.n_reliable`, `int.t3.main.median`, `int.t3.main.p95` (47,05) | надёжные переходы и плацебо, основной расчёт |
+| 1 | 8 из 9 | `csv:outputs/interpret/r1_runs.csv` [test = T3_reliable_placebo; runs кроме main — 9 строк, из них confirmed 8, not — variant:graph_basket_cos] | прогоны устойчивости R1 |
+| 1 | 148; 33; 0,82; 0,49 | `int.t2.main.n_up`, `int.t2.main.n_down`, `int.t2.main.share_up` (0,818), `int.t2.main.p0` (0,488) | направление переходов |
+| 1 | 0,036; 0,050; 0,045 | `int.t7.median_error.B` (0,0362), `int.t7.median_error.D` (0,0496), `int.t7.median_error.C` (0,0450) | медианная ошибка: соседи по региону, похожие по корзине без типа, случайные того же размера |
+| 1 | `90991e1`, 29.09.2026; `abc6107` | `git:90991e1` (2026-09-29 23:41 +0300), `git:abc6107` | предрегистрация этапа 5; код, написанный вслепую |
+
+Вставка в разделе 7 («Проверка этапа 5») повторяет числа раздела 1: 181, 21, 47, 8 из 9, 148, 33.
 
 ## Шапка и раздел 2. Данные
 
@@ -286,6 +303,37 @@
 | 7 | 0,99 (seed) | `dyn.seed_ari_min` | |
 | 7 | `events_jaccard: 0.5`, `bootstrap: 1000`, `window_months: 12`, `step_months: 1` | `yaml:dynamics` | параметры |
 
+## Раздел 8. Типы локальных экономик
+
+| Раздел | Число в тексте | Источник | Что это |
+|---|---|---|---|
+| 8 | 473, 806, 394, 103 | `csv:outputs/interpret/settlement_shares.csv` [n] (с узлами-городами; в `profile.csv` у типа 3 — 392 территориальных узла) | узлов в типе |
+| 8 | названия четырёх типов | `int.names.<тип>.name` | правило названий |
+| 8 | медианы CLR: общепит −0,43 / −0,03 / +0,41 / +0,78; продовольствие +0,16 / +0,03 / −0,15 / −0,38; маркетплейсы +0,16 / +0,03 / −0,15 / −0,37; транспорт +0,08 / −0,02 / −0,03 / +0,07; уровень трат −0,11 / −0,04 / +0,13 / +0,34 | `csv:outputs/interpret/profile.csv` [type; feature = clr_rel_cafe, clr_rel_food, clr_rel_marketplace, clr_rel_transport, log_level_rel; median] | профиль, порядок типов 2, 1, 3, 4 — `int.ladder.order` |
+| 8 | 1774 | `int.scope.n_territorial` | территориальные узлы профиля |
+| 8 | 23% / 52% / 75% / 74%; 0% / 3% / 14% / 60%; 77% | `csv:outputs/interpret/settlement_shares.csv` [cities; large_cities; rural у типа 2 = 0,768] | состав по типу поселения; условия — `yaml:interpret.naming.settlement_words` |
+| 8 | Большеберезниковский район, Верховский район, Любинский район, Ярославль | `csv:outputs/interpret/examples.csv` [kind = typical; rank = 1] | типичные МО |
+| 8 | e^0,41 ≈ 1,5; −0,43 → 1,5; +0,34 → 40% | exp(0,410) = 1,51; exp(0,431) = 1,54; exp(0,338) = 1,40 из `profile.csv` | чтение CLR и уровня трат |
+| 8 | не больше 0,03 | `profile.csv` [type = 1; clr_rel_*; median]: наибольший модуль 0,032 (clr_rel_food) | тип 1 близок к региону |
+| 8 | 4 из 4; порог 4 из 4 | `int.naming_test.correct` (4), `int.naming_test.state` (accepted), `int.naming_test.pass_min` (4); ответ проверяющего — `docs/interpretation_naming_test.json`; порог — `yaml:interpret.naming.test.pass_min` | слепая проверка названий |
+| 8 | 92,7%; 92,6%; 45,4% | `int.tree.accuracy`, `int.tree.balanced_accuracy`, `int.tree.baseline_majority_acc` | дерево «корзина → тип» |
+| 8 | −0,27; 0,21; −0,26; −0,34; 0,59; 96% / 97%, 96% / 94%, 92% / 80%, 92% / 92%; 11% | `csv:outputs/interpret/tree_rules.csv` [rule; precision; coverage] | правила отнесения |
+| 8 | 27 867 ₽; 11 692 ₽; 3 330 ₽; 1 278 ₽ | `data/processed/panel_long.parquet`, territory_id = 44, среднее `value` за 24 месяца по category = all, food, marketplace, cafe | пример МО, траты |
+| 8 | 43,3%; 9,4%; 4,6%; 31,4% | `data/processed/features_windows.parquet`, territory_id = 44, window = 2023: sh_food, sh_marketplace, sh_cafe, sh_other | пример МО, корзина |
+| 8 | +0,29 / +0,31; −0,06 / −0,07; +0,05 / +0,02; +0,19 / +0,27 | то же, window = 2023 и 2024: clr_rel_cafe, clr_rel_food, clr_rel_marketplace, log_level_rel | пример МО относительно региона |
+| 8 | тип 3 у territory_id 44 | `csv:outputs/interpret/types.csv` [territory_id = 44; type] | пример МО, тип |
+| 8 | 0,050; 0,058; 1542; 10 МО | `int.t7.example.error` (0,0496), `csv:outputs/interpret/t7_errors.csv` [territory_id = 44; err_B = 0,0583], `int.t7.n_common`, `yaml:interpret.tests.T7_utility.k` | пример МО, сверка |
+| 8 | T1: 0,52–0,59, 1705; 0,32–0,42, 1241; 0,17, 0,24; 0,28, 0,35; −0,10 (от −0,16 до −0,05); −0,11 (от −0,17 до −0,04) | `int.t1.per.retail.rho_a_ci`, `n_a`; `int.t1.per.catering.rho_a_ci`, `n_a`; `rho_b`; `best_rival_rho`; `int.t1.per.retail.diff_point`, `diff_ci`; `int.t1.per.catering.diff_point`, `diff_ci` | T1 |
+| 8 | T5: 0,28; 0,12; −0,003; не выше 0,10 | `int.t5.ami.sized:log_pop_rel:+` (0,283), `int.t5.ami.sized:log_wage_rel:+` (0,123), `int.t5.region_ami` (−0,0032); наибольший AMI делений `sized:emp_sh_*` — 0,0985 (`emp_sh_industry:+`) | T5 |
+| 8 | 0,024; 0,002–0,003; 0,006–0,026 | `cl.val_nights_pc_difference`; как в разделе 5 | внешняя проверка этапа 3 |
+| 8 | T3: 10,2%; 148; ≈ 34; от −103 до 143; 236; 11%; 8 из 9 | `int.texts.T3_main`; `int.texts.T3_reliable_placebo` (вариант `graph_basket_cos`, `int.r1.source_run.T3_reliable_placebo`); `int.post_unsealing.t3_runs` [run = variant:graph_basket_cos, scheme = main: p95 = 236,05, share_above = 0,11]; `csv:outputs/interpret/r1_runs.csv` (как в разделе 1) | T3 |
+| 8 | T2: 0,76–0,87; 40,9%; 19,1% | `int.t2.main.share_ci`, `int.t2_place.share_a` (0,409), `int.t2_place.share_null` (0,191) | T2 |
+| 8 | T6: 81; 586; −0,015; от −0,15 до 0,12; p = 0,60; ε² 0,082 | `int.t6.n_movers`, `int.t6.n_stayers`, `int.t6.delta`, `int.t6.ci`, `int.t6.p` (0,598), `int.t6.coverage_eps2` | T6; δ Клиффа — `src/munnet/interpret/external.py`, функция T6 |
+| 8 | T7: 0,045; 0,048; 0,050; −0,012 (от −0,015 до −0,009); −0,005 (от −0,008 до −0,003); +0,001 (от 0,000 до 0,003) | `int.t7.median_error.C`, `.A`, `.D`; `int.t7.diffs.B-A`, `int.t7.diffs.B-A_abs`, `int.t7.diffs.D-A` | T7 |
+| 8 | K = 4 | `cl.final_k` | число типов |
+
+Пояснение к T3 («тяжёлый хвост плацебо» на сети «косинус корзин») опирается только на числа `int.post_unsealing.t3_runs` (95-й перцентиль 236 против 47 в основном расчёте, доля псевдопар выше реальности 0,11). Объяснение причины хвоста («два почти равных решения с K = 4») из сообщения коммита `ea65acd` в текст не вошло: в журнале после вскрытия и в коде его нет, отдельного расчёта в репозитории тоже.
+
 ## Раздел 9. Ограничения
 
 Повторяют числа разделов 2–7, кроме:
@@ -297,6 +345,9 @@
 | 9 | 143 | `cl.hybrid_zavi_min` | наименьшая z AVI гибрида |
 | 9 | 4 из 5, 1; 3 из 5, 2 из 5 | `cl.sf_prereg_all`, `cl.sf_tolerance_all` | выбор среди всех семейств по seed |
 | 9 | 5 → 20; 29.09 | `yaml:clustering.synthetic.repeats` (комментарий «было 5»); `docs/clustering.md`, раздел 10 | синтетика не предрегистрирована |
+| 9 | AMI 0,31; не выше 0,10; ε² 0,082; ε² 0,024; 77%; 52% | как в разделе 8 | ограничения смысла типов |
+| 9 | 1705; 1241 из 1774 | `int.t1.per.retail.n_a`, `int.t1.per.catering.n_a`, `int.scope.n_territorial` | покрытие оборотов Росстата |
+| 9 | 1115; 1569 | `int.t6.n_nodes`, `int.t7.n_known` | оба года оборота общепита; оба года розницы |
 
 ## Раздел 10. Воспроизводимость
 
@@ -317,6 +368,7 @@
 | 10 | 14 файлов | `yaml:sources.bdmo.members` | число файлов БД ПМО |
 | 10 | 30.09.2026; seed 43 и 44; 1776 узлах; ARI 1,00 | сравнение `data/processed/cluster_final.parquet` с `cluster_final.parquet` прогонов с `seed: 43` и `seed: 44` во временных папках: `sklearn.metrics.adjusted_rand_score` = 1.0, доля совпавших меток 1.0 на 1776 общих узлах | проверено при подготовке отчёта 30.09 |
 | 10 | спектральная с K = 4 при seed 43 | `cl.all_winner` в `report_facts.json` прогона с `seed: 43` | |
+| 10 | 7241 с, около 2 ч; 6 процессов; 101 мин | `int.seconds` (7240,5), `int.workers` (6), `int.timing.robustness` (6057,8 с) | время этапа `interpret`, полный перерасчёт 30.09.2026 (утренний прогон — 7374 с) |
 
 ## Приложение А
 
