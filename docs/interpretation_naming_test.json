@@ -1,0 +1,13 @@
+{
+ "package_sha": "a266949796a0d1516d45c3c843008fc82d9687beebe12b9be039d555287180fd",
+ "who": "check-ux",
+ "answers": {
+  "Сельские, меньше общепита": "П2",
+  "Крупные города, меньше продуктов": "П1",
+  "Города, меньше транспорта": "П4",
+  "Города, меньше продуктов": "П3"
+ },
+ "correct": 4,
+ "total": 4,
+ "note": "Ответ check-ux дан вслепую по outputs/interpret/naming_test.json (30.09); correct посчитан основной сессией сравнением с ключом data/interim/interpret/naming_test_key.json."
+}

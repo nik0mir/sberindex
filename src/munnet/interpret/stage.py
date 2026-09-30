@@ -814,6 +814,9 @@ def _run(  # noqa: C901 — последовательность шагов пр
     # --- поузловые выгрузки для лендинга: описание, не проверка (в вердикты и главный вывод не входят) ---
     node_files = write_node_tables(out, data, cx, ev, runs, t1_main, t5_main, t7, margin, members, rob, seed)
     facts["node_tables"] = {"note": NT.NOTE, "files": node_files}
+    # пояснения после вскрытия (post_unsealing): описательные числа рядом с текстами исходов; вердикты,
+    # тексты и главный вывод уже собраны выше и здесь не трогаются (сверка — outcomes_sha256)
+    facts["post_unsealing"] = post_unsealing(out, data, cx, spec, seed, facts)
     facts["seconds"] = time.perf_counter() - t_start
 
     from munnet.interpret import report as R
@@ -1602,6 +1605,63 @@ def _posthoc(data: D.Data, cx: CX.Ctx, spec: Spec, types_t: np.ndarray) -> pd.Da
             }
         )
     return pd.DataFrame(rows)
+
+
+def post_unsealing(out: Path, data: D.Data, cx: CX.Ctx, spec: Spec, seed: int, facts: Mapping) -> dict:
+    """Числа пояснений после вскрытия (``post_unsealing``): T3 по прогонам R1, изменение доли общепита
+    относительно региона у оставшихся в нижнем типе, близость типов к делению по уровню трат, η² группы
+    региона для изменения розницы. Читает уже записанные выходы этапа; в вердикты и тексты не входит."""
+    from munnet.interpret import post_unsealing as PU
+
+    pu: dict[str, Any] = {"outcomes_sha256": PU.outcomes_sha256(facts)}
+    pu["t3_runs"] = PU.t3_runs(
+        pd.read_csv(out / "t3_placebo.csv"),
+        pd.read_csv(out / "r1_runs.csv"),
+        float(spec["tests"]["T3_reliable_placebo"]["percentile"]),
+    )
+    # T2: изменение CLR общепита относительно среднего группы региона, окно year_b минус окно year_a
+    months = data.ns.months
+
+    def win(key: str) -> np.ndarray:
+        a0, a1 = (str(x) for x in spec["windows"][key])
+        mm = months.loc[(months["date"] >= a0) & (months["date"] <= a1), "t"].to_numpy()
+        return CI.window_clr(data.ns, mm)
+
+    j = list(data.base.b_names).index("clr_rel_cafe")
+    d_cafe = win("year_b")[:, j] - win("year_a")[:, j]
+    nd = data.nodes_dyn
+    pu["t2_relative"] = PU.t2_relative(
+        d_cafe,
+        nd["half_type_2023"].to_numpy(dtype=np.int64),
+        nd["half_type_2024"].to_numpy(dtype=np.int64),
+        nd["reliable"].astype(bool).to_numpy(),
+        int(data.order[0]),
+        int(data.order[1]),
+    )
+    pu["t5_level"] = PU.t5_level(
+        pd.read_csv(out / "types.csv"),
+        pd.read_csv(out / "node_rival.csv"),
+        pd.read_csv(out / "node_r1.csv"),
+        int(spec["tests"]["T5_trivial"]["stratified"]["bootstrap"]),
+        0.95,
+        seed,
+    )
+    # T7 (разведка после вскрытия): η² группы региона для цели T7 и её варианта без относительности
+    t7 = spec["tests"]["T7_utility"]
+    ya, yb = (int(y) for y in spec["windows"]["change_years"])
+    groups = data.base.groups
+    region = {}
+    for key, tspec in (("retail_rel", t7["target"]), ("retail_abs", t7["target_abs"])):
+        va = CX.transform(
+            CX.context_values(data, str(tspec["source"]), ya, data.ids), str(tspec["transform"]), groups
+        )
+        vb = CX.transform(
+            CX.context_values(data, str(tspec["source"]), yb, data.ids), str(tspec["transform"]), groups
+        )
+        y = (vb - va)[cx.pos]
+        region[key] = PU.region_eta2(y, groups[cx.pos], data.final[cx.pos], 1000, seed)
+    pu["t7_region"] = region
+    return pu
 
 
 def check_variant_names(names: list[str], known: list[str]) -> None:

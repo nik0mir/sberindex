@@ -122,6 +122,13 @@ def test_stage_reads_every_key_and_writes_outputs(pipeline):
     assert th["question"] and len(th["point_1"]) == 2 and len(th["point_2"]) == 2 and th["caveat"]
     report = Path(cfg["interpret"]["report"]).read_text(encoding="utf-8")
     assert "СЛЕПОЙ ПРОГОН" not in report and "## 13. Уточнения реализации" in report
+    # пояснения после вскрытия: числа — в facts.json, хеш исходов — от тех же verdicts_final и thesis
+    from munnet.interpret import post_unsealing as PU
+
+    pu = facts["post_unsealing"]
+    assert pu["outcomes_sha256"] == PU.outcomes_sha256(facts)
+    assert {"t3_runs", "t2_relative", "t5_level", "t7_region"} <= set(pu)
+    assert "## 14. Журнал после вскрытия" in report and "Пояснение после вскрытия" in report
     for name in ("controls.csv", "t1_runs.csv", "r1_runs.csv", "profile.csv", "examples.csv", "types.csv"):
         assert (out / name).exists()
     # сверка «цепочка окон против прямого сопоставления» опубликована для основного прогона

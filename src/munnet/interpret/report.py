@@ -22,6 +22,7 @@ from munnet.contracts import QCError
 from munnet.eda import report as eda_report
 from munnet.eda.base import to_markdown
 from munnet.eda.s1_coverage import plural
+from munnet.interpret import post_unsealing as PU
 from munnet.interpret.amendments import lines as amendment_lines
 from munnet.interpret.clarifications import CLARIFICATIONS
 from munnet.interpret.labels import SCHEME_LABELS, SET_NAMES, TURNOVER_NOM, feature_label
@@ -239,6 +240,10 @@ def t_t6(out: Path, f: Mapping) -> str:
             "Медиана Δ: остались": [F3(x) for x in d["median_stayers"]],
         }
     )
+    # пояснение после вскрытия: интервал дельты Клиффа правила T6 — строкой «все потоки» (post_unsealing)
+    if "post_unsealing" in f:
+        df["95% интервал"] = style.NA_TEXT
+        df = pd.concat([df, pd.DataFrame([PU.t6_total_row(f)])], ignore_index=True).fillna(style.NA_TEXT)
     return _md(df)
 
 
@@ -387,6 +392,15 @@ def t_posthoc(out: Path, f: Mapping) -> str:
     )
 
 
+def t_posthoc_region(out: Path, f: Mapping) -> str:
+    """Разведка после вскрытия: η² группы региона для изменения розницы (цель T7) против перестановок."""
+    if "post_unsealing" not in f:
+        return ""
+    head = PU.POSTHOC_NOTE[0].upper() + PU.POSTHOC_NOTE[1:]
+    pu = f["post_unsealing"]
+    return f"*{head}.*\n\n" + _md(PU.region_table(pu)) + "\n\n" + PU.region_note(pu)
+
+
 def t_t2_pairs(out: Path, f: Mapping) -> str:
     rows = []
     for s_, r in f["t2"].items():
@@ -449,6 +463,7 @@ TABLES: dict[str, Callable[[Path, Mapping], str]] = {
     "fca": t_fca,
     "exceptions": t_exceptions,
     "posthoc": t_posthoc,
+    "posthoc_region": t_posthoc_region,
 }
 
 
@@ -667,6 +682,22 @@ def _chain_note(f: Mapping, blind: int | None = None) -> str:
     )
 
 
+def _post_unsealing_fields(pu: Mapping | None, f: Mapping) -> dict[str, str]:
+    """Пояснения после вскрытия — отдельные поля рядом с текстами исходов (сами тексты не меняются)."""
+    keys = ("point_2_note", "t2_note", "t5_note", "t6_note", "t7_note", "city_note")
+    if not pu:
+        return dict.fromkeys(keys, "") | {"journal": "- Записей нет."}
+    return {
+        "point_2_note": PU.point2_note(pu, f),
+        "t2_note": PU.t2_note(pu),
+        "t5_note": PU.t5_note(pu),
+        "t6_note": PU.t6_note(f),
+        "t7_note": PU.t7_note(f),
+        "city_note": PU.city_note(f),
+        "journal": "\n".join(PU.journal_lines(pu)),
+    }
+
+
 def fields(spec: Spec, f: Mapping, blind: int | None, out_dir: str = "outputs/interpret") -> dict[str, str]:
     tests = spec["tests"]
     th = f["thesis"]
@@ -707,6 +738,7 @@ def fields(spec: Spec, f: Mapping, blind: int | None, out_dir: str = "outputs/in
     higher = r1["main_higher"]
     exp = spec["controls"]["expected"].plain()
     return {
+        **_post_unsealing_fields(f.get("post_unsealing"), f),
         "banner": banner,
         "out_dir": out_dir,
         "t3_chain": _chain_note(f, blind),
@@ -830,6 +862,10 @@ def fields(spec: Spec, f: Mapping, blind: int | None, out_dir: str = "outputs/in
                 "- Поузловые выгрузки для лендинга — описание, не проверка (в вердикты и главный вывод "
                 "не входят): `node_comparable.csv` (наборы T7), `node_r1.csv` и `node_seed.csv` (тип узла "
                 "в прогонах R1), `node_margin.csv` (пограничность), `node_rival.csv` (деления-соперники).",
+                "- Пояснения после вскрытия и разведка после вскрытия: `facts.json` (`post_unsealing`: "
+                "`t3_runs` — из `t3_placebo.csv` и `r1_runs.csv`, `t2_relative`, `t5_level` — "
+                "из `types.csv`, `node_rival.csv`, `node_r1.csv`, `t7_region`, `outcomes_sha256`); код — "
+                "`src/munnet/interpret/post_unsealing.py`.",
                 f"- Источники данных: {style.SOURCE_SBER}; {style.SOURCE_ROSSTAT}; {style.SOURCE_FNS}.",
             ]
         ),
