@@ -165,8 +165,11 @@
 | 5 | фронт из трёх: Leiden K = 3, Louvain K = 6, гибрид | `cl.all_front`, `cl.all_front_n` | все семейства, seed 42 |
 | 5 | +1 | `cl.all_top_score`, `cl.all_tied` | очки Копленда |
 | 5 | 0,91 против 0,62 | `cl.final_stability`, `cl.leiden_stability` | равенство очков решает устойчивость |
+| 5 | Борда на фронте: 7 и 7 (Leiden K = 3, гибрид), 10 (Louvain K = 6); 0,909 против 0,615 | `cl.borda_front`, `cl.borda_leiden`, `cl.borda_hybrid`, `cl.borda_n_tied` = 2, `cl.borda_outcome`, `cl.borda_consistent` = 1 | ничья, решает устойчивость; сумма мест пересчитана вручную по `csv:outputs/cluster/selection_levels_all.csv [level = 2; on_front = True]` |
+| 5 | seed конфига 43 и 44: поровну у трёх (Leiden, спектральная, гибрид), выбран гибрид | `cl.borda_outcome` в `tests/fixtures/cluster_report_facts/seed43.json` (по 10; 0,912 / 0,902 / 0,628) и `seed44.json` (по 9; 0,910 / 0,897 / 0,623) | фикстуры — `report_facts.json` прогонов 43 и 44; сами прогоны вне репозитория |
 | 5 | 4 из 5; спектральная K = 4 — 1 | `cl.sf_prereg_all` | все семейства, seed 42–46, предрегистрация |
 | 5 | наименьший ARI 1,00 | `cl.sf_all_minari`, `cl.sf_all_minari_min` | разбиения победителей по seed |
+| 5 | спектральная не на фронте при seed 42: качество в X 0,50 против 0,25; на G 0,50 и 0,50; устойчивость 0,909 и 0,901; объяснимость 0,894 и 0,905; допуск 0,02 | `csv:outputs/cluster/selection_levels_all.csv [level = 2; cand = hybrid_k04, spectral_k04; crit_quality_features, crit_quality_graph, crit_stability, crit_interpretability]`; `cl.tie_stability`, `cl.tie_interpretability` | гибрид доминирует спектральную только по качеству в X |
 | 5 | 0,91 против 0,90 | `cl.final_stability`, `cl.spectral_stability` | |
 | 5 | 7 из 8 | `cl.all_n_same`, `cl.all_n_checks` | проверки чувствительности, все семейства |
 | 5 | один шаг — спектральная K = 4 | `cl.all_changed`, `cl.all_joint_winner`, `cl.all_joint_k` | |
@@ -175,6 +178,7 @@
 | 5 | 55%; спектральная K = 3; 0,008; 0,02; K = 4 / K = 3 | `cl.grid55_all_winner`, `cl.grid55_all_k`, `cl.hybrid_k3_k4_stab_diff`, `cl.tie_stability`, `cl.grid55_strict_hybrid_k`, `cl.grid55_tol_hybrid_k` | порог крупнейшего типа |
 | 5 | 1%–3% не меняет | `cl.grid_minshare_effect` = 0; `csv:outputs/cluster/threshold_grid.csv` | порог наименьшего типа |
 | 5 | K = 3 не участвовал во внешней проверке | `csv:outputs/cluster/validation.csv [cand: hybrid_k03 нет]` | |
+| 5 | iK-means: 16 по X, 20 по корзине ⊕ X; порог 2 узла; граница сетки 12 | `cl.ik_x`, `cl.ik_joint`; `yaml:clustering.impl.ik_means_min_size`; `yaml:clustering.n_clusters` | ориентир K, в выбор не входит |
 | 5 | 5 базисам; 0,03; 0,04 | `yaml:clustering.impl.seed_check`; `cl.tol_qf`, `cl.tol_qg` | допуск по шуму базиса |
 | 5 | таблица «правило × уровень» | `cl.final_label`, `cl.final_k`, `cl.all_winner`, `cl.tol_eligible_winner`, `cl.tol_all_winner`, `cl.sf_prereg_eligible`, `cl.sf_tolerance_eligible`, `cl.sf_prereg_all`, `cl.sf_tolerance_all` | |
 | 5 | 0,031–0,033; 0,030–0,039 | `cl.tol_jk_qf_min`, `cl.tol_jk_qf_max`, `cl.tol_jk_qg_min`, `cl.tol_jk_qg_max` | допуск без одного базиса |

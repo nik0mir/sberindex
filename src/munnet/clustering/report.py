@@ -372,6 +372,13 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
         "; ".join(f"{_cand_label(c, x)} — {int(v)}" for x, v in ranks.sort_values().items()),
         "str",
     )
+    b2_winner = b2["winner"].iloc[0]
+    outcome, n_tied, consistent = _borda_outcome(
+        ranks, c["stability"], b2_winner, lambda x: _cand_label(c, x)
+    )
+    _fact(f, "borda_outcome", outcome, "str")
+    _fact(f, "borda_n_tied", n_tied, "int")
+    _fact(f, "borda_consistent", consistent, "int")
     _fact(f, "all_tradeoff", _tradeoff(lw, fin, c, cp), "str")
     _fact(f, "borda_leiden", float(ranks.get(winners_of(o)["leiden"], np.nan)), "int")
     # устойчивость выбора к seed и допуск качества по шуму базиса
@@ -1015,6 +1022,9 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
     "методы по графу согласны с итогом, гауссова смесь — нет": lambda f: (
         _v(f, "ari_hybrid_leiden") > 0.5 and _v(f, "ari_hybrid_gmm") < 0.3
     ),
+    "Борда на фронте: победитель — среди лучших по сумме мест, ничью решает устойчивость": lambda f: (
+        _v(f, "borda_consistent") == 1
+    ),
     "гибрид устойчивее Leiden": lambda f: _v(f, "final_stability") > _v(f, "leiden_stability"),
     "гибрид устойчивее Leiden к удалению рёбер": lambda f: _v(f, "pert_hybrid") > _v(f, "pert_leiden"),
     # другие входы
@@ -1241,6 +1251,34 @@ def _tradeoff(lw: pd.DataFrame, fin: str, cands: pd.DataFrame, cp: ClusterParams
 
 def _cand_label(cands: pd.DataFrame, cand: str) -> str:
     return f"{FG.mlabel(cands.loc[cand, 'method'])}, K = {int(cands.loc[cand, 'k'])}"
+
+
+_COUNT_GEN = {2: "двух", 3: "трёх", 4: "четырёх", 5: "пяти"}
+
+
+def _borda_outcome(ranks: pd.Series, stability: pd.Series, winner, label) -> tuple[str, int, int]:
+    """Фраза об исходе Борда на фронте, число равных лучших и согласованность победителя с цепочкой равенств.
+
+    ``ranks`` — сумма мест кандидата (меньше — лучше), ``stability`` — устойчивость кандидатов (первое звено
+    цепочки ``selection.tie_break``), ``winner`` — победитель из ``decide``. Если суммы мест лучших равны,
+    фраза называет ничью и числа устойчивости; согласованность (1/0) — победитель среди лучших и, при ничьей,
+    не менее устойчив, чем остальные равные."""
+    top = ranks.min()
+    tied = [x for x in ranks.index if ranks[x] == top]
+    if len(tied) == 1:
+        return f"Её победитель — {label(winner)}", 1, int(winner == tied[0])
+    st = stability.reindex(tied).astype(float)
+    consistent = int(winner in tied and st[winner] >= st.max())
+    by_stab = consistent and all(st[winner] > st[x] for x in tied if x != winner)
+    head = (
+        f"Ничья: у {_COUNT_GEN.get(len(tied), str(len(tied)))} лучших поровну ({style.fmt_num(top)}), "
+        "победителя решает цепочка равенств"
+    )
+    if by_stab:
+        order = [winner, *sorted((x for x in tied if x != winner), key=lambda x: -st[x])]
+        vals = "; ".join(f"{label(x)} — {style.fmt_num(st[x], 3)}" for x in order)
+        return f"{head} — выше устойчивость ({vals}): {label(winner)}", len(tied), consistent
+    return f"{head} (устойчивость, затем простота и K): {label(winner)}", len(tied), consistent
 
 
 def _cand_quoted(cands: pd.DataFrame, cand: str) -> str:

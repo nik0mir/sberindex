@@ -14,6 +14,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from munnet.clustering import report as R
@@ -138,3 +139,43 @@ def test_noisy_graph_cells_counted_with_none(seed):
     md = render_text(facts).replace(" ", " ")
     assert "ячеек шумового графа с победителем" not in md
     assert f"в остальных {none} из {n} — «нет»" in md
+
+
+def test_borda_outcome_tie_decided_by_stability():
+    """Равные суммы мест лучших — «ничья», победителя называет цепочка равенств с числами устойчивости."""
+    ranks = pd.Series({"leiden": 7.0, "hybrid": 7.0, "louvain": 10.0})
+    stab = pd.Series({"leiden": 0.615, "hybrid": 0.909, "louvain": 0.5})
+    text, n_tied, ok = R._borda_outcome(ranks, stab, "hybrid", str.capitalize)
+    assert (n_tied, ok) == (2, 1)
+    assert text.startswith("Ничья: у двух лучших поровну (7)")
+    assert "победителя решает цепочка равенств — выше устойчивость (Hybrid — 0,909; Leiden — 0,615)" in text
+    assert text.endswith(": Hybrid")
+    # победитель не самый устойчивый среди равных — утверждение ломается
+    assert R._borda_outcome(ranks, stab, "leiden", str.capitalize)[2] == 0
+
+
+def test_borda_outcome_clear_winner():
+    ranks = pd.Series({"leiden": 8.0, "hybrid": 7.0, "louvain": 10.0})
+    stab = pd.Series({"leiden": 0.9, "hybrid": 0.6, "louvain": 0.5})
+    assert R._borda_outcome(ranks, stab, "hybrid", str.capitalize) == ("Её победитель — Hybrid", 1, 1)
+    assert R._borda_outcome(ranks, stab, "leiden", str.capitalize)[2] == 0
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_borda_sentence_names_tie(seed):
+    """При равенстве сумм мест текст не выдаёт победителя Борда за чистую победу."""
+    facts = load_facts(seed)
+    md = render_text(facts).replace("\u00a0", " ")
+    assert facts["cl.borda_consistent"].value == 1
+    if facts["cl.borda_n_tied"].value > 1:
+        assert "Ничья: у " in md and "победителя решает цепочка равенств" in md
+        assert "её победитель —" not in md
+    else:
+        assert f"Её победитель — {facts['cl.borda_l2_winner'].value}" in md
+
+
+def test_claims_catch_borda_winner_not_from_chain():
+    facts = load_facts(42)
+    facts["cl.borda_consistent"] = replace(facts["cl.borda_consistent"], value=0)
+    with pytest.raises(QCError, match="Борда"):
+        R.check_claims(facts)
