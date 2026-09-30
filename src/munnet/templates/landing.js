@@ -668,6 +668,84 @@ function renderExamples() {
   box.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) go(Number(b.dataset.go)); });
 }
 
+// --- главы 1, 3, 4, 5: SVG и тексты вписаны при сборке (site_chapters.py); здесь только поведение ------------------
+// ссылки на муниципалитеты в главах: go() запоминает, откуда открыли карточку (фокус вернётся туда)
+for (const sec of doc.querySelectorAll(".chapter")) {
+  sec.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-go]");
+    if (a) { e.preventDefault(); go(Number(a.dataset.go)); }
+  });
+}
+// глава 1: шаги переключают пример муниципалитета
+{
+  const fig = $("#basket-fig");
+  if (fig) fig.addEventListener("click", (e) => {
+    const b = e.target.closest("button.step");
+    if (!b) return;
+    for (const x of fig.querySelectorAll("button.step")) x.setAttribute("aria-pressed", String(x === b));
+    for (const p of fig.querySelectorAll(".step-pane")) p.hidden = p.dataset.step !== b.dataset.step;
+  });
+}
+// глава 5: поток или строка списка раскрывает муниципалитеты потока (тип окна 2023 -> тип окна 2024)
+function flowMembers(a, b) {
+  const out = [];
+  for (const r of MO.values()) {
+    if ((r.role === "territorial" || r.role === "city") && r.t23 === a && r.t24 === b) out.push(r);
+  }
+  return out.sort((x, y) => String(x.ns || x.n).localeCompare(String(y.ns || y.n), "ru"));
+}
+function showFlow(a, b) {
+  const box = $("#flow-mo");
+  if (!box) return;
+  const key = a + "-" + b;
+  const same = box.dataset.key === key && !box.hidden;
+  for (const x of doc.querySelectorAll(".flow-btn")) x.setAttribute("aria-expanded", String(!same && x.dataset.a == a && x.dataset.b == b));
+  for (const g of doc.querySelectorAll(".alluvial .chg")) g.classList.toggle("on", !same && g.dataset.a == a && g.dataset.b == b);
+  if (same) { box.hidden = true; box.dataset.key = ""; return; }
+  const rows = flowMembers(a, b);
+  box.dataset.key = key;
+  box.hidden = false;
+  const head = `${fig(a)}Тип ${a} → ${fig(b)}Тип ${b}: ${nf.format(rows.length)} ${plural(rows.length, "муниципалитет", "муниципалитета", "муниципалитетов")}`;
+  box.innerHTML = `<p><b>${head}</b></p><ul>${rows.map((r) =>
+    `<li><a href="#mo=${r.id}" data-go="${r.id}">${esc(r.ns || r.n)}</a> <small>${esc(r.r)}</small></li>`).join("")}</ul>`;
+}
+{
+  const dyn = $("#dynamics");
+  if (dyn) {
+    dyn.addEventListener("click", (e) => {
+      const t = e.target.closest(".flow-btn, .alluvial .chg");
+      if (t) showFlow(Number(t.dataset.a), Number(t.dataset.b));
+    });
+    dyn.addEventListener("keydown", (e) => {
+      const t = e.target.closest(".alluvial .chg");
+      if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showFlow(Number(t.dataset.a), Number(t.dataset.b)); }
+    });
+  }
+}
+
+// глава 9: сортировка таблиц «метод × индекс» по заголовку столбца (значения — в data-v ячеек)
+for (const table of doc.querySelectorAll("table.mtable")) {
+  table.addEventListener("click", (e) => {
+    const b = e.target.closest("button.sort");
+    if (!b) return;
+    const th = b.parentElement;
+    const col = Number(b.dataset.col);
+    const num = th.dataset.kind === "num";
+    const dir = th.getAttribute("aria-sort") === "descending" ? "ascending" : "descending";
+    for (const x of table.querySelectorAll("th")) x.removeAttribute("aria-sort");
+    th.setAttribute("aria-sort", dir);
+    const sign = dir === "ascending" ? 1 : -1;
+    const body = table.tBodies[0];
+    const key = (tr) => tr.cells[col].dataset.v ?? tr.cells[col].textContent.trim();
+    const rows = [...body.rows].sort((x, y) => {
+      const a = key(x), c = key(y);
+      if (a === "" || c === "") return (a === "") - (c === "");
+      return sign * (num ? Number(a) - Number(c) : a.localeCompare(c, "ru"));
+    });
+    body.append(...rows);
+  });
+}
+
 // --- загрузка ----------------------------------------------------------------------------------------------------
 (async () => {
   const [mo, types, hexgrid] = await Promise.all([loadData("mo"), loadData("types"), loadData("hexgrid")]);

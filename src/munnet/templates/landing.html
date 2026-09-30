@@ -13,7 +13,9 @@
   Шаблон лендинга munnet (string.Template, собирает src/munnet/landing.py).
   Подстановки: $$title $$lang $$css $$js $$story_json $$names_json $$first_screen_svg $$data_inline $$meta_json;
   тексты экрана 0 вписывает landing.py (screen0_html): $$banner_html $$answer_head $$answer_findings $$map_shift
-  $$map_key $$examples_html $$meta_line — страница читается без JS, JS только добавляет поведение.
+  $$map_key $$examples_html $$meta_line;
+  главы 1, 3, 4, 5, 6, 7, 9 — $$chapters_html (site_chapters.py и site_chapters_tail.py: HTML и статичные SVG) — страница
+  читается без JS, JS только добавляет поведение; источники и выгрузки в подвале — $$sources_html.
   Статичная SVG карты ячеек ($$first_screen_svg) ожидается с id="hexmap", классами .cells-t1…t4 и .cells-t0
   (без типа, штриховка), .regions, .labels, .callout и атрибутами решётки data-hex-size, data-hex-x0,
   data-hex-y0, data-hex-orient="pointy" (осевые координаты q, r из mo.json: hq, hr;
@@ -29,6 +31,10 @@ $banner_html
       <ul class="nav">
         <li><a href="#answer">Ответ</a></li>
         <li><a href="#find">Найти муниципалитет</a></li>
+        <li><a href="#types">Типы</a></li>
+        <li><a href="#dynamics">Динамика</a></li>
+        <li><a href="#limits">Ограничения</a></li>
+        <li><a href="#method">Как сделано</a></li>
         <li><a href="#sources">Источники</a></li>
       </ul>
     </nav>
@@ -77,6 +83,8 @@ $first_screen_svg
     </figure>
   </section>
 
+$chapters_html
+
   <aside class="card" id="card" role="region" aria-labelledby="card-title" hidden>
     <div class="card-grip" id="card-grip" aria-hidden="true"></div>
     <div class="card-head">
@@ -94,12 +102,7 @@ $first_screen_svg
 </main>
 
 <footer class="sources" id="sources" aria-labelledby="sources-title">
-  <h2 id="sources-title">Источники и лицензии</h2>
-  <ul id="sources-list">
-    <li>СберИндекс: безналичные потребительские расходы жителей муниципалитетов, справочник границ — CC BY-SA 4.0.</li>
-    <li>Росстат, база данных показателей муниципальных образований в обработке «Если быть точным» — CC BY 4.0.</li>
-    <li>ФНС, форма 5-НДФЛ в обработке «Если быть точным» — CC BY 4.0.</li>
-  </ul>
+$sources_html
   <p class="meta" id="meta-line">$meta_line</p>
 </footer>
 

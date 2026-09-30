@@ -41,7 +41,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from munnet import site_hexgrid, style
+from munnet import site_chapters, site_chapters_tail, site_hexgrid, style
 from munnet.config import Config
 from munnet.contracts import MissingInputError, QCError
 from munnet.site_headlines import SLOT, HeadlineChecker, check_headlines, freeze_hash, norm
@@ -248,13 +248,27 @@ def site_numbers(cfg: Config) -> dict[str, str]:
         if inc and absent.get("value")
         else {}
     )
-    return regions | {
-        "share_cross": style.fmt_pct(1 - float(main["same_region"].mean())),
-        "share_cross_random": style.fmt_pct(1 - float((n_r * (n_r - 1)).sum()) / (big_n * (big_n - 1))),
-        "n_rhythm": style.fmt_num(n_rhythm),
-        "share_rhythm": str(share["text"]),
-        "share_rhythm_null": str(ef["syn.null_reliable_share_nodes"]["text"]),
+    # глава 7 (site.build.texts.limits): рост трат (номинал) и НДФЛ по месту работы — тексты разведки как есть
+    eda_txt = {
+        k: str((ef.get(src) or {}).get("text") or "")
+        for k, src in (
+            ("growth_median", "e4.growth_median"),
+            ("growth_p10", "e4.growth_p10"),
+            ("growth_p90", "e4.growth_p90"),
+            ("n_recip_gt3", "e5.n_recip_gt3"),
+        )
     }
+    return (
+        regions
+        | eda_txt
+        | {
+            "share_cross": style.fmt_pct(1 - float(main["same_region"].mean())),
+            "share_cross_random": style.fmt_pct(1 - float((n_r * (n_r - 1)).sum()) / (big_n * (big_n - 1))),
+            "n_rhythm": style.fmt_num(n_rhythm),
+            "share_rhythm": str(share["text"]),
+            "share_rhythm_null": str(ef["syn.null_reliable_share_nodes"]["text"]),
+        }
+    )
 
 
 # --- вердикты и поля текстов этапа 5 ------------------------------------------------------------------------
@@ -520,9 +534,16 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "title": limits_title,
             "lead": [H["descriptive"]["coverage"]] + ([H["T6_caveat"]["caveat"]] if v["caveat"] else []),
             "text": texts["T6_bank_coverage"],
+            "items": limits_items(TX.get("limits") or {}, numbers, scope, screen0.get("regions_note")),
         },
         "explore": {"title": H["descriptive"]["explore"], "nodata": A["honesty"]["nodata"]},
-        "method": {"title": H["descriptive"]["method"]},
+        "method": {
+            "title": H["descriptive"]["method"],
+            "command": site["build"].get("command"),
+            "prereg": [dict(p) for p in site["build"].get("prereg") or []],
+            "links": {"repo": site["build"].get("repo_url")},
+            "numbers": {},  # заполняет run() из выгрузок (method_numbers)
+        },
         "sources": {"title": H["descriptive"]["sources"], "licenses": LICENSES},
     }
     an = R["analysts"]
@@ -571,6 +592,34 @@ def regions_note(tpl: str | None, numbers: Mapping[str, str]) -> str | None:
     if not tpl or not all(numbers.get(k) for k in keys):
         return None
     return fill(tpl, {k: numbers[k] for k in keys})
+
+
+def limits_items(
+    tpl: Mapping[str, str], numbers: Mapping[str, str], scope: Mapping, regions: str | None
+) -> dict[str, str]:
+    """Ограничения главы 7 (``site.build.texts.limits``) в порядке страницы; числа — из ``site_numbers``
+    и ``facts.scope`` этапа 5. Строка, у которой нет хотя бы одного числа, не показывается."""
+    num = lambda k: style.fmt_num(round(float(scope[k]))) if scope.get(k) is not None else ""  # noqa: E731
+    vals = dict(numbers) | {
+        "n_untyped": num("n_untyped"),
+        "pop_partial": num("pop_median_partial"),
+        "pop_full": num("pop_median_full"),
+    }
+    # «у 41 муниципалитета», «у 169 муниципалитетов» — родительный падеж после «у»
+    for k in ("n_untyped", "n_recip_gt3"):
+        n = int(re.sub(r"\D", "", str(vals.get(k) or "")) or -1)
+        vals[k + "_mo"] = (
+            f"{vals[k]} {plural_ru(n, 'муниципалитета', 'муниципалитетов', 'муниципалитетов')}"
+            if n >= 0
+            else ""
+        )
+    out: dict[str, str] = {}
+    for k in ("visitors", "regions", "untyped", "nominal", "workplace"):
+        t = regions if k == "regions" else tpl.get(k)
+        if not t or not all(vals.get(s) for s in _slots(t)):
+            continue
+        out[k] = fill(t, vals)
+    return out
 
 
 def _slots(s: str) -> list[str]:
@@ -783,7 +832,11 @@ def lint_templates(cfg: Config, story: Mapping, svg: str) -> list[str]:
     tdir = Path(__file__).parent / "templates"
     read = lambda n: (tdir / n).read_text(encoding="utf-8") if (tdir / n).exists() else ""  # noqa: E731
     hc = HeadlineChecker(cfg.data)
-    texts = template_strings(read("landing.html"), read("landing.js"), svg)
+    texts = (
+        template_strings(read("landing.html"), read("landing.js"), svg)
+        + site_chapters.ui_strings()
+        + site_chapters_tail.ui_strings()
+    )
     return [
         f"{kind}: «{w}» в «{t[:80]}»" for kind, w, t in hc.text_violations(texts, dict(story["verdicts"]))
     ]
@@ -1614,6 +1667,15 @@ def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFr
     return out
 
 
+def profile_reference(d: SiteData) -> dict[str, float]:
+    """Медианы признаков по всем узлам (``profile.csv``, строки ``type = 0``) — вертикаль главы 3."""
+    prof = d.opt("profile.csv")
+    if prof is None:
+        return {}
+    p = prof[prof["type"] == 0]
+    return {str(k): _num(v, 4) for k, v in zip(p["feature"], p["median"], strict=True) if pd.notna(v)}
+
+
 def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> dict:
     """Проверки для глав 4–7 (§5): T1, T3, T5, T7, R1, потоки 4 × 4, сеть, раскладка и карта ячеек.
     Всё — из выгрузок этапов; нет выгрузки — None."""
@@ -1653,6 +1715,7 @@ def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> 
             for r in ctr.to_dict("records")
         ]
     )
+    out["t1_order"] = [int(x) for x in (f.get("ladder") or {}).get("order") or []]  # порядок med_a в t1
     out["t3"] = t3_checks(d)
     ami = d.opt("t5_ami.csv")
     out["t5"] = (
@@ -1676,7 +1739,9 @@ def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> 
             "diffs": {
                 k: [_num(v[0], 4), [_num(x, 4) for x in v[1]]] for k, v in (t7.get("diffs") or {}).items()
             },
-            "example": t7.get("example"),
+            "example": t7_example(d, t7),
+            "k": int(d.cfg["interpret"]["tests"]["T7_utility"]["k"]),
+            **{k: t7.get(k) for k in ("n_common", "n_known", "n_dropped")},
         }
         if t7.get("median_error")
         else None
@@ -1686,11 +1751,65 @@ def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> 
         "runs": None if r1 is None else r1.to_dict("records"),
         "unstable_label": (f.get("r1") or {}).get("unstable_label"),
         "circularity": (f.get("r1") or {}).get("circularity"),
+        "variants": r1_variants(d),
     }
     out["flows"] = flows_matrix(d, mo)
     out["network"] = network_numbers(d)
     out["layout"] = dict(layout)
     out["hex"] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in hm.stats.items()}
+    return out
+
+
+def t7_example(d: SiteData, t7: Mapping) -> dict | None:
+    """Пример главы 6 (``facts.t7.example`` — МО с медианной ошибкой набора продукта): его ошибки по четырём
+    наборам (``t7_errors.csv``) и оба набора с км по прямой (``node_comparable.csv``: продукт и B)."""
+    ex = t7.get("example")
+    if not ex:
+        return None
+    tid = int(ex["territory_id"])
+    out: dict[str, Any] = {"territory_id": tid, "error": _num(ex.get("error"), 4)}
+    err = d.opt("t7_errors.csv")
+    if err is not None and (err["territory_id"] == tid).any():
+        row = err[err["territory_id"] == tid].iloc[0]
+        for kind, suf in (("errors", ""), ("errors_abs", "_abs")):
+            cols = {s: f"err{suf}_{s}" for s in "ABCD"}
+            out[kind] = {s: _num(row[c], 4) for s, c in cols.items() if c in row and pd.notna(row[c])}
+        prod = t7.get("product")
+        if prod and out["errors"].get(prod) is not None and ex.get("error") is not None:
+            if abs(float(row[f"err_{prod}"]) - float(ex["error"])) > 1e-9:  # тот же МО, та же ошибка
+                raise QCError(f"site: t7_errors.csv не сходится с facts.t7.example у {tid}")
+    nc = d.opt("node_comparable.csv")
+    if nc is not None:
+        me = nc[nc["territory_id"] == tid].sort_values("rank")
+        for kind, sel in (("members_p", me["product"].astype(bool)), ("members_b", me["set"] == "B")):
+            pairs = zip(me.loc[sel, "other_id"], me.loc[sel, "km"], strict=True)
+            out[kind] = [[int(o), _num(km, 0)] for o, km in pairs]
+        if ex.get("members") and [o for o, _ in out["members_p"]] != [int(x) for x in ex["members"]]:
+            raise QCError(f"site: node_comparable.csv не сходится с facts.t7.example.members у {tid}")
+    return out
+
+
+def r1_variants(d: SiteData) -> list[dict] | None:
+    """Карты главы 7: по варианту R1 — узлы, где тип другой (``node_r1.csv``, ``same`` — как у этапа 5),
+    число совпавших и ARI того же кандидата с основным расчётом (``outputs/cluster/variants.csv``)."""
+    nr = d.opt("node_r1.csv")
+    if nr is None:
+        return None
+    vp = d.outputs("cluster/variants.csv")
+    ari = pd.read_csv(vp).set_index("variant")["ari_same_candidate_vs_main"].to_dict() if vp.exists() else {}
+    out = []
+    for v, g in nr[nr["kind"] == "variant"].groupby("variant", sort=True):
+        same = g["same"].astype(bool)
+        a = ari.get(str(v).split(":", 1)[-1])
+        out.append(
+            {
+                "variant": str(v),
+                "n": int(len(g)),
+                "same": int(same.sum()),
+                "ari": _num(a, 4) if a is not None else None,
+                "diff_ids": sorted(int(x) for x in g.loc[~same, "territory_id"]),
+            }
+        )
     return out
 
 
@@ -1709,27 +1828,49 @@ def t3_checks(d: SiteData) -> dict | None:
     src = (r1.get("source_run") or {}).get(test, "main")
     v_final = (f.get("verdicts_final") or {}).get(test)
     v_main = (f.get("verdicts_main") or {}).get(test, f.get("t3_verdict"))
-    cloud = lambda run: [int(x) for x in pl[(pl["run"] == run) & (pl["scheme"] == "main")]["n_reliable"]]  # noqa: E731
     said = read_verdicts(d.cfg, f).by_test.get(test, {})
     unstable = v_main != v_final
+    pct = float(d.cfg["interpret"]["tests"][test].get("percentile", 95))
+    runs = {r: t3_run(pl, r, pct) for r in dict.fromkeys([src, "main"])}
+    m = runs["main"]
+    if m and main:  # сверка с facts.t3.main: та же формула, те же числа, иначе код 3
+        bad = [
+            k
+            for k, v in (
+                ("observed", main.get("n_reliable")),
+                ("p95", main.get("p95")),
+                ("median", main.get("median")),
+            )
+            if v is not None and (m[k] is None or abs(float(m[k]) - float(v)) > 1e-6)
+        ]
+        if bad:
+            raise QCError(f"site: t3_placebo.csv не сходится с facts.t3.main: {bad}")
+    fin = runs.get(src) or {}
     return {
         "verdict_final": v_final,
         "verdict_main": v_main,
         "unstable": unstable,
         "unstable_label": r1.get("unstable_label") if unstable else None,
-        "final": {
-            "run": src,
-            "placebo": cloud(src),
-            "text_fields": said,  # числа, которые этап 5 подставил в текст T3 (дословно)
-        },
-        "main": {
-            "run": "main",
-            "placebo": cloud("main"),
-            "p95": _num(main.get("p95"), 2),
-            "median": _num(main.get("median"), 2),
-            "observed": _num(main.get("n_reliable"), 0),
-            "passed": main.get("passed"),
-        },
+        "percentile": pct,
+        "final": {"run": src, **fin, "text_fields": said},  # text_fields — числа из текста T3 (дословно)
+        "main": {"run": "main", **(m or {}), "passed": main.get("passed")},
+    }
+
+
+def t3_run(pl: pd.DataFrame, run: str, pct: float) -> dict | None:
+    """Облако одного прогона (разбиение половин ``main``): ``pair = −1`` — наблюдение,
+    ``pair ≥ 0`` — псевдогоды.
+    Перцентиль и медиана — ``np.percentile`` и ``np.median``, как в ``interpret.placebo.t3_eval``."""
+    g = pl[(pl["run"] == run) & (pl["scheme"] == "main")]
+    if g.empty:
+        return None
+    cloud = g.loc[g["pair"] >= 0, "n_reliable"].to_numpy(dtype=np.float64)
+    obs = g.loc[g["pair"] == -1, "n_reliable"]
+    return {
+        "placebo": [int(x) for x in cloud],
+        "observed": int(obs.iloc[0]) if len(obs) else None,
+        "p95": _num(float(np.percentile(cloud, pct)), 2) if len(cloud) else None,
+        "median": _num(float(np.median(cloud)), 2) if len(cloud) else None,
     }
 
 
@@ -2076,6 +2217,8 @@ def render_html(
         "map_key",
         "examples_html",
         "meta_line",
+        "chapters_html",
+        "sources_html",
     ):
         parts.setdefault(k, "")
     page = Template(tpl).substitute(
@@ -2114,6 +2257,40 @@ def check_budget(payloads: Mapping[str, bytes], budget: Mapping[str, float], inl
     if page > float(budget["hard"]):
         return [f"страница {page:.2f} МБ больше budget_mb.hard {budget['hard']} МБ"]
     return []
+
+
+def cells_geo(hm: HexMap, mo: pd.DataFrame) -> dict:
+    """Центры ячеек карты экрана 0 (узлы и МО без типа) — для маленьких карт глав 6 и 7."""
+    c = mo[mo["role"].isin(["territorial", "city", "untyped"]) & mo["hq"].notna()]
+    x, y = hm.grid.center(c["hq"], c["hr"])
+    return {
+        "w": round(hm.grid.width, 1),
+        "h": round(hm.grid.height, 1),
+        "xy": {int(i): (float(a), float(b)) for i, a, b in zip(c["id"], x, y, strict=True)},
+    }
+
+
+def method_numbers(story: Mapping, mo: pd.DataFrame, checks: Mapping, methods: Mapping | None) -> dict:
+    """Числа пяти шагов главы 9 — из выгрузок страницы (ничего не пересчитывается)."""
+    final = next((r for r in (methods or {}).get("rows") or [] if r.get("final")), None)
+    n_types = len(story["view"].get("legend_order") or [])
+    nodes = mo["role"].isin(["territorial", "city"])
+    return {
+        "n_mo": style.fmt_num(int((mo["role"] != "city").sum())),  # строки узлов-городов — не МО
+        "n_nodes": style.fmt_num(int(nodes.sum())),
+        "n_edges": style.fmt_num((checks.get("network") or {}).get("n_edges") or 0),
+        "n_types": f"{n_types} {plural_ru(n_types, 'тип', 'типа', 'типов')}",
+        "method": site_chapters_tail.METHOD_WORDS.get(final["method"], final["method"]) if final else "",
+        "n_cand": style.fmt_num(len((methods or {}).get("rows") or [])),
+        "n_windows": style.fmt_num(N_WINDOWS),
+    }
+
+
+def rows_of(cols: Mapping[str, list]) -> list[dict]:
+    """Колонки ``mo.json`` -> записи (как ``rowsOf`` в landing.js)."""
+    keys = list(cols)
+    n = len(cols[keys[0]]) if keys else 0
+    return [{k: cols[k][i] for k in keys} for i in range(n)]
 
 
 def names_index(mo: pd.DataFrame) -> dict:
@@ -2181,18 +2358,32 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         "hexgrid": hexgrid,
     }
     story["screen0"]["examples"] = screen_examples(types, story)
+    data["types"]["reference"] = profile_reference(d)
     svg = first_screen_svg(d, hm, hexgrid, mo, story)
+    mo_rows = {int(r["id"]): r for r in rows_of(data["mo"])}
+    csvs = download_csvs(mo, types, checks, story)
+    story["chapters"]["method"]["numbers"] = method_numbers(story, mo, checks, methods)
+    geo = cells_geo(hm, mo)
+    chapters = "\n".join(
+        [
+            site_chapters.chapters_html(story, types, checks, mo_rows, data["types"]["reference"], _t),
+            site_chapters_tail.chapters_html(story, checks, mo_rows, geo, methods, meta, _t),
+        ]
+    )
+    sources = site_chapters_tail.sources_html(
+        story, {k.rsplit("/", 1)[-1]: len(b) for k, b in csvs.items()}, _t
+    )
     bad = lint_templates(cfg, story, svg)
     if bad:
         raise QCError("site: линт шаблона: " + "; ".join(bad[:10]))
     inline = bool(cfg["site"]["build"].get("inline_all", True))
-    parts = screen0_html(story, meta, hexgrid, mo)
+    parts = screen0_html(story, meta, hexgrid, mo) | {"chapters_html": chapters, "sources_html": sources}
     html, inline_bytes = render_html(story, names_index(mo), meta, svg, data, inline, parts)
     payloads: dict[str, bytes] = {"index.html": html, "data/story.json": dumps(story)}
     for k, v in data.items():
         if v is not None:
             payloads[f"data/{k}.json"] = dumps(v)
-    payloads.update(download_csvs(mo, types, checks, story))
+    payloads.update(csvs)
     over = check_budget(payloads, cfg["site"]["budget_mb"], inline_bytes)
     if over:
         raise QCError("site: бюджет: " + "; ".join(over))

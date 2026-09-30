@@ -685,3 +685,18 @@ def test_nbsp_display_only():
     nb = " "
     assert landing.nbsp("Траты в регионе и в МО — это а") == f"Траты в{nb}регионе и{nb}в{nb}МО{nb}— это а"
     assert landing.nbsp("Минск-а б") == "Минск-а б"
+
+
+def test_chapters_in_html_with_story_titles(tmp_path):
+    """Главы 1, 3, 4, 5 вписаны при сборке; h2 каждой — заголовок главы из story.json (§7), без JS."""
+    cfg, facts = _setup(tmp_path)
+    facts.pop("synthetic")
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    assert cli.main(["--config", str(_write_cfg(cfg)), "site"]) == 0
+    html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    story = json.loads((tmp_path / "site" / "data" / "story.json").read_text(encoding="utf-8"))
+    for cid, key in (("basket", "basket"), ("types", "types"), ("order", "order"), ("dynamics", "dynamics")):
+        m = re.search(rf'<h2 id="{cid}-title">(.*?)</h2>', html, re.S)
+        assert m, cid
+        assert _squash(_html_text(m[1])) == _squash(story["chapters"][key]["title"]), cid
+    assert '<a href="#types">' in html and '<a href="#dynamics">' in html
