@@ -1,5 +1,5 @@
 /* Лендинг «Корзина и регион» (пакет munnet): объёмная карта первого экрана, газетная колонка глав, один акцент.
-   Шрифты Golos Text (текст) и Unbounded (название, крупные числа) — Google Fonts, SIL OFL 1.1; запасной — системный стек. */
+   Шрифты Golos Text (текст) и Unbounded (название, крупные числа) — SIL OFL 1.1, файлы Fontsource из vendor/fonts (встроены этапом site); запасной — системный стек. */
 :root {
   --paper: #fcfbf8;
   --ink: #1d1d1d;
@@ -10,7 +10,6 @@
   --nodata: #e0e0e0;
   --hatch: #9e9e9e;
   --t1: #589ba6; --t2: #846d1e; --t3: #574194; --t4: #0f2e56; --t0: #e0e0e0;   /* style.TYPE_PALETTE_NOMINAL; JS ставит палитру из story.view */
-  --serif: "PT Serif", Georgia, "Times New Roman", serif;
   --sans: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, "PT Sans", "Helvetica Neue", Arial, sans-serif;
   --display: "Unbounded", "Golos Text", system-ui, sans-serif;
   --head-h: 48px;
@@ -75,10 +74,10 @@ button { font: inherit; color: inherit; }
 .gloss { margin: -6px 0 10px; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
 .how .gloss, .caveat .gloss { margin: 6px 0 0; font-size: 12.5px; }
 h1 {
-  margin: 0 0 6px; font: 700 clamp(26px, 2.2vw, 32px)/1.15 var(--serif); letter-spacing: -.005em;
+  margin: 0 0 6px; font: 700 clamp(26px, 2.2vw, 32px)/1.15 var(--sans); letter-spacing: -.005em;
   text-wrap: balance;
 }
-.lead { margin: 0 0 12px; font: 400 clamp(18px, 1.5vw, 20px)/1.3 var(--serif); color: var(--ink); }
+.lead { margin: 0 0 12px; font: 400 clamp(18px, 1.5vw, 20px)/1.3 var(--sans); color: var(--ink); }
 .points { list-style: none; margin: 0; padding: 0; counter-reset: pt; }
 .points > li {
   counter-increment: pt; position: relative; padding: 2px 0 6px 24px;
@@ -86,7 +85,7 @@ h1 {
 }
 .points > li::before {
   content: counter(pt); position: absolute; left: 0; top: 0;
-  font: 700 17px/1.2 var(--serif); color: var(--ink);
+  font: 700 17px/1.2 var(--sans); color: var(--ink);
 }
 .points details { margin-top: 2px; }
 .pt-head { margin: 0; font-weight: 600; }
@@ -117,7 +116,7 @@ h1 {
 
 /* поиск: ARIA combobox */
 .finder { margin: 10px 0 0; padding: 12px 14px 10px; background: #f3f1ec; border-left: 3px solid var(--ink); }
-.finder-label { display: block; font: 700 16px/1.3 var(--serif); margin-bottom: 6px; }
+.finder-label { display: block; font: 700 16px/1.3 var(--sans); margin-bottom: 6px; }
 .combo { position: relative; }
 .combo-input {
   width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid #767676; border-radius: 2px;
@@ -227,7 +226,7 @@ h1 {
   grid-column: 1 / -1; justify-self: start; border: 0; background: none; padding: 0; min-height: 32px;
   color: var(--ink-2); cursor: pointer; font-size: 14px; text-decoration: underline;
 }
-.card-head h2 { grid-column: 1; margin: 0; font: 700 22px/1.2 var(--serif); outline: none; }
+.card-head h2 { grid-column: 1; margin: 0; font: 700 22px/1.2 var(--sans); outline: none; }
 .card-sub { grid-column: 1; margin: 2px 0 0; font-size: 14px; color: var(--ink-2); }
 .card-actions { grid-column: 2; grid-row: 2 / span 2; display: flex; gap: 4px; align-self: start; }
 .card-head .back:not([hidden]) ~ .card-actions { grid-row: 2 / span 2; }
@@ -235,8 +234,8 @@ h1 {
 .card-body { padding: 4px 18px 28px; }
 .row { padding: 12px 0; border-bottom: 1px solid var(--rule); }
 .row:last-child { border-bottom: 0; }
-.row h3 { margin: 0 0 6px; font: 700 13px/1.3 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
-.type-line { display: flex; align-items: baseline; gap: 8px; font: 700 19px/1.25 var(--serif); }
+.row h3 { margin: 0 0 6px; font: 600 14px/1.3 var(--sans); color: var(--ink); }
+.type-line { display: flex; align-items: baseline; gap: 8px; font: 700 19px/1.25 var(--sans); }
 .type-line .fig { font-size: 20px; }
 .cap { font-size: 13px; color: var(--ink-2); margin: 2px 0 0; }
 .rule { margin: 6px 0 0; font-size: 14px; }
@@ -300,7 +299,7 @@ h1 {
 
 /* подвал */
 .sources { max-width: 1440px; margin: 28px auto 0; padding: 16px 24px 40px; border-top: 1px solid var(--rule); font-size: 14px; }
-.sources h2 { font: 700 18px/1.3 var(--serif); margin: 0 0 6px; }
+.sources h2 { font: 700 18px/1.3 var(--sans); margin: 0 0 6px; }
 .sources ul { margin: 0; padding-left: 18px; }
 .sources .meta { color: var(--ink-2); font-size: 12px; }
 
@@ -363,10 +362,10 @@ h1 {
 }
 .chapter.wide { grid-template-columns: minmax(0, 1fr); }
 .chapter.wide .ch-text { max-width: 46rem; }
-.chapter h2 { font: 700 26px/1.22 var(--serif); margin: 0 0 10px; }
+.chapter h2 { font: 700 26px/1.22 var(--sans); margin: 0 0 10px; }
 .ch-text p { margin: 0 0 10px; font-size: 16px; line-height: 1.5; }
 .ch-text .lead { font-size: 17px; }
-.ch-text .sub { font: 400 19px/1.35 var(--serif); color: var(--ink); }
+.ch-text .sub { font: 400 19px/1.35 var(--sans); color: var(--ink); }
 .ch-text .note, .ch-fig .note { font-size: 13px; color: var(--ink-2); line-height: 1.4; }
 .ch-fig { margin: 0; min-width: 0; }
 .ch-fig h3 { font: 700 15px/1.3 var(--sans); margin: 14px 0 4px; }
@@ -479,7 +478,7 @@ h1 {
 .ch-text .how summary::-webkit-details-marker, .alt summary::-webkit-details-marker { display: none; }
 
 /* главы 6, 7, 9 и подвал (site_chapters_tail.py) */
-.kicker { margin: 0 0 4px; font: 600 12px/1.3 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+.kicker { margin: 0 0 4px; font: 600 14px/1.3 var(--sans); color: var(--ink-2); }
 .roles-h { font: 700 15px/1.3 var(--sans); margin: 16px 0 6px; }
 .roles, .limits, .prereg { margin: 0 0 10px; padding: 0; list-style: none; font-size: 15px; line-height: 1.45; }
 .roles li, .limits li, .prereg li { padding: 7px 0; border-top: 1px solid var(--grid); }
@@ -498,7 +497,7 @@ h1 {
 .method-fig { max-width: 1100px; }
 .msteps { list-style: none; margin: 0 0 18px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0 18px; counter-reset: none; }
 .mstep { position: relative; padding: 10px 0 0; border-top: 2px solid var(--ink); }
-.mstep .mnum { position: absolute; top: 8px; right: 0; font: 700 22px/1 var(--serif); color: var(--ink-2); }
+.mstep .mnum { position: absolute; top: 8px; right: 0; font: 700 22px/1 var(--sans); color: var(--ink-2); }
 .mstep .glyph { display: block; margin: 0 0 6px; }
 .mstep h3 { margin: 0 0 4px; font: 700 15px/1.3 var(--sans); }
 .mstep p { margin: 0 0 6px; font-size: 14px; line-height: 1.45; }
@@ -513,7 +512,7 @@ h1 {
 .mtable td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--grid); vertical-align: top; }
 .mtable td small { display: block; color: var(--ink-2); font-size: 11px; }
 .mtable tr.is-final td { background: #f6ecee; }
-.mtable .final { color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.mtable .final { color: var(--accent); font-size: 12px; font-weight: 600; }
 .gloss-list { margin: 4px 0 0; padding-left: 18px; }
 .sources h3 { font: 700 15px/1.3 var(--sans); margin: 14px 0 4px; }
 .sources li { margin: 3px 0; }
@@ -676,4 +675,106 @@ html:not(.has-3d) .h0-hkey { display: none; }   /* у статичной кар�
 /* раздел «Что проверяли» — прежний экран 0 без карты: заголовок по T1, подзаголовок по T3, три пункта, оговорка */
 .checked { display: block; max-width: 1440px; border-top: 1px solid var(--rule); padding-top: 28px; }
 .checked .answer-head { max-width: 46rem; }
-.answer-h { margin: 0 0 6px; font: 700 clamp(24px, 2vw, 30px)/1.18 var(--serif); letter-spacing: -.005em; text-wrap: balance; }
+.answer-h { margin: 0 0 6px; font: 700 clamp(24px, 2vw, 30px)/1.18 var(--sans); letter-spacing: -.005em; text-wrap: balance; }
+
+/* === порция 5b: шрифты, блок «Что устояло», паспорта типов, карточка, телефон ===================================
+   Шрифты — Golos Text (текст и заголовки) и Unbounded (название, крупные числа), без засечек и без прописных
+   надзаголовков. */
+.chapter h2, .answer-h, .findings5 h2 { letter-spacing: -.015em; }
+.chapter h2 { font-size: 28px; line-height: 1.18; }
+.ch-text .sub { font-size: 18px; }
+.points > li::before, .mstep .mnum { font-family: var(--display); font-weight: 600; }
+.card-head h2 { font: 700 22px/1.2 var(--sans); letter-spacing: -.01em; }
+.type-line { font: 700 19px/1.25 var(--sans); }
+
+/* блок «Что устояло и чем полезно» — сразу под первым экраном */
+.findings5 { max-width: 1440px; margin: 0 auto; padding: 40px 24px 24px; }
+.findings5 h2 { margin: 0 0 8px; font: 700 clamp(26px, 2.4vw, 34px)/1.12 var(--sans); }
+.fd-intro { margin: 0 0 20px; max-width: 46rem; font-size: 16px; line-height: 1.5; color: var(--ink-2); }
+.fd-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 36px; }
+.fd { border-top: 3px solid var(--ink); padding-top: 12px; min-width: 0; }
+.fd-lab { margin: 0 0 4px; font: 600 14px/1.3 var(--sans); color: var(--ink-2); }
+.fd h3 { margin: 0 0 8px; font: 700 21px/1.22 var(--sans); letter-spacing: -.01em; text-wrap: balance; }
+.fd > p { margin: 0 0 12px; font-size: 15.5px; line-height: 1.5; }
+.fd figure { margin: 4px 0 0; }
+.fd-svg { display: block; width: 100%; height: auto; max-width: 440px; overflow: visible; font-family: var(--sans); }
+.fd-svg text { fill: var(--ink); font-size: 13px; }
+.fd-svg .axis { font-size: 11.5px; fill: var(--ink-2); }
+.fd-svg .val { font-size: 13px; font-weight: 600; }
+.fd-cap { margin: 6px 0 0; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.fd-note { margin: 8px 0 0; font-size: 13px; line-height: 1.4; color: var(--ink-2); border-left: 3px solid var(--rule); padding-left: 8px; }
+.findings5 > .source { margin-top: 14px; }
+.checked .kicker { font-size: 15px; }
+
+/* глава 3: паспорта типов */
+.pp-intro { margin: 0 0 14px; max-width: 46rem; font-size: 15.5px; line-height: 1.5; color: var(--ink-2); }
+.passports { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 0 0 20px; }
+.pp { background: #fff; border: 1px solid var(--rule); border-top: 4px solid var(--c); border-radius: 12px; padding: 14px 16px 12px; min-width: 0; }
+.pp-num { margin: 0; font: 600 40px/1 var(--display); color: var(--c); font-variant-numeric: tabular-nums; }
+.pp-size { margin: 4px 0 8px; font-size: 13px; color: var(--ink-2); }
+.pp h3 { margin: 0 0 6px; font: 700 17px/1.25 var(--sans); display: flex; gap: 6px; align-items: baseline; }
+.pp-who { margin: 0 0 10px; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
+.pp-rows { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.pp-rows li { display: grid; grid-template-columns: 8.6em minmax(40px, 1fr); grid-template-areas: "lab track" "lab val"; gap: 0 8px; align-items: center; font-size: 13.5px; }
+.pp-rows li.main { font-weight: 600; }
+.pp-lab { grid-area: lab; line-height: 1.2; }
+.pp-track { grid-area: track; position: relative; height: 10px; background: linear-gradient(var(--ink-2), var(--ink-2)) 50% 0 / 1px 100% no-repeat, #f1efea; }
+.pp-track i { position: absolute; top: 1px; bottom: 1px; }
+.pp-val { grid-area: val; font-size: 12.5px; color: var(--ink-2); font-weight: 400; }
+.pp-rows li.main .pp-val { color: var(--ink); font-weight: 600; }
+.pp-ex { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+.pp-ex button { font: inherit; color: var(--ink); background: none; border: 0; padding: 0; min-height: 44px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.types-full { margin: 4px 0 12px; }
+.types-full > summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; font-weight: 600; list-style: none; }
+.types-full > summary::-webkit-details-marker { display: none; }
+.types-full > summary::before { content: "+"; display: inline-block; width: 1.2em; font-weight: 700; }
+.types-full[open] > summary::before { content: "−"; }
+
+/* карточка: сверка с соседями по региону первой, устойчивость рядом с типом */
+.rob-line { margin: 6px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--ink); }
+.rob-line .label-note { margin: 0 0 0 4px; }
+.sim-note { margin: 6px 0 0; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.row.sim-p .sim .nm { font-weight: 400; }
+.row.sim-b { background: #f6f5f1; margin: 8px -18px 0; padding: 12px 18px; border-bottom: 0; }
+.sim.plain button { font-size: 14.5px; }
+
+/* шапка на телефоне: меню по кнопке (без JS — прокрутка ссылок) */
+.nav-toggle { display: none; }
+@media (max-width: 700px) {
+  .js .nav-toggle:not([hidden]) {
+    display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--rule);
+    border-radius: 999px; background: #fff; font-size: 14px; cursor: pointer;
+  }
+  .js .nav-toggle::after { content: "▾"; margin-left: 6px; font-size: 11px; }
+  .js .nav-toggle[aria-expanded="true"]::after { content: "▴"; }
+  .js .masthead-in nav { overflow: visible; }
+  .js .nav {
+    display: none; position: absolute; right: 12px; top: calc(100% + 4px); flex-direction: column; gap: 0;
+    background: #fff; border: 1px solid var(--rule); border-radius: 12px; box-shadow: 0 12px 28px rgba(22,32,43,.16);
+    padding: 6px 0; min-width: 220px; white-space: normal;
+  }
+  .js .nav.open { display: flex; }
+  .js .nav li, .js .nav li:first-child, .js .nav li:last-child { display: block; }
+  .js .nav a { display: flex; padding: 0 16px; font-size: 15px; color: var(--ink); }
+  .masthead-in { position: relative; }
+  /* без JS: ссылки прокручиваются, край затухает */
+  html:not(.js) .masthead-in nav { -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+}
+
+/* телефон: карта крупнее, подсказка жестами */
+@media (max-width: 700px) {
+  .has-3d .hero-stage { height: 60vh; height: 60svh; min-height: 360px; }
+  .h0-howto { font-size: 13px; color: var(--ink); background: rgba(255,255,255,.92); box-shadow: 0 2px 10px rgba(22,32,43,.12); }
+  .findings5 { padding: 28px 16px 16px; }
+  .fd-grid { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  .fd h3 { font-size: 20px; }
+  .passports { grid-template-columns: minmax(0, 1fr); }
+  .pp-num { font-size: 34px; }
+  .row.sim-b { margin: 8px -14px 0; padding: 12px 14px; }
+}
+@media (min-width: 701px) and (max-width: 1100px) {
+  .fd-grid { grid-template-columns: minmax(0, 1fr); gap: 26px; max-width: 760px; }
+  .passports { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.hexmap .ego line.far { stroke: #6f7680; stroke-width: 1.1px; stroke-dasharray: 4 3; }
+.hexmap .ego line.casing.thin { stroke-width: 3px; }

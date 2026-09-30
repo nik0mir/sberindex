@@ -758,6 +758,12 @@ def test_hero_screen0(tmp_path, monkeypatch):
         b = (site / "vendor" / name).read_bytes()
         assert hashlib.sha256(b).hexdigest() in readme, name
     assert 'id="data-scene"' in html and 'aria-label="Объёмная карта:' in html
+    # порция 5b: шрифты — из vendor/fonts (встроенный @font-face), внешних адресов нет
+    assert "fonts.googleapis" not in html and "fonts.gstatic" not in html
+    assert "url(vendor/fonts/golos-text-cyrillic-wght-normal.woff2)" in html
+    for f in (site / "vendor" / "fonts").iterdir():
+        assert hashlib.sha256(f.read_bytes()).hexdigest() in readme, f.name
+    assert not re.search(r'(?:src|href)="https?://(?!github\.com)', html.split("<footer")[0])
 
 
 def test_scene_heights_are_exp_clr_cafe(tmp_path, monkeypatch):
@@ -811,7 +817,11 @@ def test_scene_absent_without_values(tmp_path):
     bound_interpret(tmp_path, tmp_path / "outputs", facts)
     landing.run(cfg)
     site = tmp_path / "site"
-    assert not (site / "data" / "scene.json").exists() and not (site / "vendor").exists()
+    # three.js не копируется; шрифты (порция 5b) — всегда: страница без внешних запросов и без объёмной карты
+    assert (
+        not (site / "data" / "scene.json").exists() and not (site / "vendor" / "three.module.min.js").exists()
+    )
+    assert (site / "vendor" / "fonts" / "fonts.css").exists()
     assert '<svg id="hexmap"' in (site / "index.html").read_text(encoding="utf-8")
 
 
@@ -838,4 +848,5 @@ def test_code3_by_verdict_word_in_island_note(tmp_path):
     story["verdicts"]["T3_reliable_placebo"] = "not"
     assert landing.lint_texts(cfg, story, ["у медианы типа надёжно больше"])
     assert landing.lint_texts(cfg, story, ["доля {ratio}"])
-    assert landing.lint_texts(cfg, story, ["у медианы типа доля кафе на 3% меньше, чем в регионе"]) == []
+    ok_text = "у медианы типа доля кафе примерно на 3% меньше, чем в регионе"
+    assert landing.lint_texts(cfg, story, [ok_text]) == []

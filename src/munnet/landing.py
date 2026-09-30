@@ -41,7 +41,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from munnet import site_chapters, site_chapters_tail, site_hexgrid, site_scene, style
+from munnet import site_chapters, site_chapters_tail, site_findings, site_hexgrid, site_scene, style
 from munnet.config import Config
 from munnet.contracts import MissingInputError, QCError
 from munnet.site_headlines import SLOT, HeadlineChecker, check_headlines, freeze_hash, norm
@@ -1625,6 +1625,12 @@ def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFr
     prof = d.opt("profile.csv")
     rules = d.opt("tree_rules.csv")
     ex = d.opt("examples.csv")
+    ss = d.opt("settlement_shares.csv")  # «кто обычно» для паспортов главы 3 (порция 5b)
+    who_by = (
+        ss.set_index("type")
+        if ss is not None and {"type", "cities", "large_cities"} <= set(ss.columns)
+        else None
+    )
     jac = pd.read_parquet(
         Path(d.cfg["paths"]["processed"]) / "cluster_final.parquet", columns=["type", "type_jaccard"]
     ).drop_duplicates("type")
@@ -1658,7 +1664,11 @@ def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFr
             "basket": None,
             "why": None,
             "examples": {"typical": [], "borderline": [], "largest": []},
+            "who": None,
         }
+        if who_by is not None and t in who_by.index:
+            w = who_by.loc[t]
+            rec["who"] = {"cities": _num(w["cities"], 4), "large_cities": _num(w["large_cities"], 4)}
         if rules is not None:
             r = rules[(rules["type"] == t) & rules["journalist"].astype(bool)]
             rec["rule_text"] = str(r["rule"].iloc[0]) if len(r) else None
@@ -2278,6 +2288,7 @@ def render_html(
     data: Mapping[str, Any],
     inline: bool,
     parts: Mapping[str, str] | None = None,
+    fonts: str = "",
 ) -> tuple[bytes, int]:
     """``index.html`` из ``src/munnet/templates/landing.html`` (``string.Template``) со встроенными CSS и JS.
     Возвращает байты страницы и размер встроенных данных (для бюджета первого экрана)."""
@@ -2288,6 +2299,9 @@ def render_html(
     tpl = html_p.read_text(encoding="utf-8") if html_p.exists() else FALLBACK_TEMPLATE
     tpl = nbsp(tpl)  # ru-text и для статичного текста шаблона (подстановки $… и теги не затрагиваются)
     css = (tdir / "landing.css").read_text(encoding="utf-8") if (tdir / "landing.css").exists() else ""
+    css = (
+        (fonts + "\n" + css) if fonts else css
+    )  # @font-face из vendor/fonts (порция 5b), без внешних запросов
     js = (tdir / "landing.js").read_text(encoding="utf-8") if (tdir / "landing.js").exists() else ""
     js3d = (tdir / "landing3d.js").read_text(encoding="utf-8") if (tdir / "landing3d.js").exists() else ""
     blocks = (
@@ -2318,6 +2332,7 @@ def render_html(
         "meta_line",
         "chapters_html",
         "sources_html",
+        "findings_html",
         "hero_head",
         "hero_legend",
         "hero_note",
@@ -2348,7 +2363,11 @@ def check_budget(payloads: Mapping[str, bytes], budget: Mapping[str, float], inl
     html = len(payloads.get("index.html", b""))
     first = (html - inline_bytes) / mb
     # сторонние модули (vendor/*.js, порция 5a) грузит страница — они входят в её вес
-    vendor = sum(len(b) for n, b in payloads.items() if n.startswith("vendor/") and n.endswith(".js")) / mb
+    # и шрифты (порция 5b): считаются все подмножества woff2, хотя браузер грузит только нужные
+    vendor = (
+        sum(len(b) for n, b in payloads.items() if n.startswith("vendor/") and n.endswith((".js", ".woff2")))
+        / mb
+    )
     if inline_bytes:
         page = html / mb + vendor
     else:
@@ -2368,22 +2387,55 @@ def check_budget(payloads: Mapping[str, bytes], budget: Mapping[str, float], inl
 
 
 VENDOR = ("three.module.min.js", "OrbitControls.js", "three-LICENSE.txt", "README.md")
+# шрифты (порция 5b): Golos Text и Unbounded, SIL OFL 1.1, файлы Fontsource 5.3.0 — templates/vendor/fonts
+FONTS_DIR = "fonts"
+FONTS_CSS = "fonts/fonts.css"
+
+
+def _vendor_dir() -> Path:
+    return Path(__file__).parent / "templates" / "vendor"
+
+
+def _checked(name: str, readme: str) -> bytes:
+    """Байты файла ``templates/vendor/<name>`` со сверкой sha256 по ``templates/vendor/README.md`` (код 3)."""
+    b = (_vendor_dir() / name).read_bytes()
+    want = re.search(rf"`{re.escape(name)}`.*?`([0-9a-f]{{64}})`", readme)
+    if not want or hashlib.sha256(b).hexdigest() != want[1]:
+        raise QCError(f"site: vendor/{name}: sha256 не совпал с templates/vendor/README.md")
+    return b
+
+
+def font_files() -> dict[str, bytes]:
+    """Шрифты страницы (woff2, fonts.css, тексты OFL) — в ``vendor/fonts/`` рядом с ``index.html``; sha256
+    каждого файла сверяются с ``templates/vendor/README.md`` (расхождение — код 3). Внешних запросов нет."""
+    vdir = _vendor_dir()
+    readme = (vdir / "README.md").read_text(encoding="utf-8")
+    out = {}
+    for f in sorted((vdir / FONTS_DIR).iterdir()):
+        if f.is_file():
+            name = f"{FONTS_DIR}/{f.name}"
+            out[f"vendor/{name}"] = _checked(name, readme)
+    if f"vendor/{FONTS_CSS}" not in out:
+        raise QCError(f"site: нет templates/vendor/{FONTS_CSS}")
+    return out
+
+
+def fonts_css(files: Mapping[str, bytes]) -> str:
+    """``@font-face`` для встраивания в ``<style>`` страницы: пути ``url(fonts/…)`` из ``fonts.css`` (они
+    относительно самого файла) переписываются на ``vendor/fonts/…`` — относительно ``index.html``."""
+    css = files[f"vendor/{FONTS_CSS}"].decode("utf-8")
+    return re.sub(r"url\((['\"]?)fonts/", r"url(\g<1>vendor/fonts/", css)
 
 
 def vendor_files() -> dict[str, bytes]:
     """three.js 0.170.0 (MIT) из ``templates/vendor`` — в ``vendor/`` рядом с ``index.html`` (import map
-    страницы,
-    без CDN); sha256 сверяются с ``templates/vendor/README.md`` — расхождение (файл заменён) — код 3."""
-    vdir = Path(__file__).parent / "templates" / "vendor"
+    страницы, без CDN); sha256 сверяются с ``templates/vendor/README.md`` — расхождение (файл заменён) —
+    код 3."""
+    vdir = _vendor_dir()
     readme = (vdir / "README.md").read_text(encoding="utf-8")
     out = {}
     for name in VENDOR:
-        b = (vdir / name).read_bytes()
-        if name != "README.md":
-            want = re.search(rf"`{re.escape(name)}`.*?`([0-9a-f]{{64}})`", readme)
-            if not want or hashlib.sha256(b).hexdigest() != want[1]:
-                raise QCError(f"site: vendor/{name}: sha256 не совпал с templates/vendor/README.md")
-        out[f"vendor/{name}"] = b
+        out[f"vendor/{name}"] = (vdir / name).read_bytes() if name == "README.md" else _checked(name, readme)
     return out
 
 
@@ -2523,12 +2575,41 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     data["types"]["reference"] = profile_reference(d)
     svg = first_screen_svg(d, hm, hexgrid, mo, story)
     mo_rows = {int(r["id"]): r for r in rows_of(data["mo"])}
+    # порция 5b: блок «Что устояло», строки карточки о сверке, паспорта типов (тексты — site.build.texts)
+    tx = cfg["site"]["build"].get("texts") or {}
+    ft = site_findings.findings_texts(tx.get("findings") or {}, story, facts, checks)
+    if tx.get("findings") and ft is None:
+        log.warning(
+            "site: блок «Что устояло» не показан — вердикты или числовые условия не те, "
+            "под которые он написан"
+        )
+    story["card"].update(site_findings.card_texts(tx.get("card"), checks))
+    ptx = tx.get("passports")
+    bad = lint_texts(
+        cfg,
+        story,
+        site_findings.strings(ft)
+        + [str(v) for v in story["card"].values() if isinstance(v, str)]
+        + site_findings.passport_strings(types, ptx),
+    )
+    if bad:
+        raise QCError("site: линт текстов порции 5b: " + "; ".join(bad[:10]))
+    passports = site_findings.passports_html(types, story, mo_rows, ptx, _t)
     csvs = download_csvs(mo, types, checks, story)
     story["chapters"]["method"]["numbers"] = method_numbers(story, mo, checks, methods)
     geo = cells_geo(hm, mo)
     chapters = "\n".join(
         [
-            site_chapters.chapters_html(story, types, checks, mo_rows, data["types"]["reference"], _t),
+            site_chapters.chapters_html(
+                story,
+                types,
+                checks,
+                mo_rows,
+                data["types"]["reference"],
+                _t,
+                passports,
+                (ptx or {}).get("detail"),
+            ),
             site_chapters_tail.chapters_html(story, checks, mo_rows, geo, methods, meta, _t),
         ]
     )
@@ -2539,13 +2620,21 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     if bad:
         raise QCError("site: линт шаблона: " + "; ".join(bad[:10]))
     inline = bool(cfg["site"]["build"].get("inline_all", True))
-    parts = screen0_html(story, meta, hexgrid, mo) | {"chapters_html": chapters, "sources_html": sources}
-    html, inline_bytes = render_html(story, names_index(mo), meta, svg, data, inline, parts)
+    order = [int(x) for x in checks.get("t1_order") or facts["ladder"]["order"]]
+    findings = site_findings.findings_html(ft, story, order, _t, site_chapters.UI["src_rosstat"])
+    parts = screen0_html(story, meta, hexgrid, mo) | {
+        "chapters_html": chapters,
+        "sources_html": sources,
+        "findings_html": findings,
+    }
+    fonts = font_files()
+    html, inline_bytes = render_html(story, names_index(mo), meta, svg, data, inline, parts, fonts_css(fonts))
     payloads: dict[str, bytes] = {"index.html": html, "data/story.json": dumps(story)}
     for k, v in data.items():
         if v is not None:
             payloads[f"data/{k}.json"] = dumps(v)
     payloads.update(csvs)
+    payloads.update(fonts)
     if scene is not None:
         payloads.update(vendor_files())
     over = check_budget(payloads, cfg["site"]["budget_mb"], inline_bytes)

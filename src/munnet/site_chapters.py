@@ -602,6 +602,8 @@ def chapter_types(
     ref: Mapping[str, float],
     mo: Mapping[int, Mapping],
     esc: Esc,
+    passports: str = "",
+    detail: str | None = None,
 ) -> str:
     ch = story["chapters"]["types"]
     view = story["view"]
@@ -683,8 +685,15 @@ def chapter_types(
                     f"{_f(p['q25'], 2)}…{_f(p['q75'], 2)}" if p.get("q25") is not None else "—",
                 ]
             )
+    # порция 5b: паспорта типов сверху; малые множества всех признаков с интервалами — под «Подробнее»
+    # (открыто без JS не прячется: <details> раскрывается кликом, текст в HTML)
+    full_open = (
+        f'<details class="types-full"><summary>{esc(detail)}</summary>' if passports and detail else ""
+    )
     fig = (
         '<figure class="ch-fig types-fig">'
+        + passports
+        + full_open
         + (f'<p class="scale-note">{esc(UI["types_scale"])}</p>' if wide else "")
         + wide
         + f'<div class="sm-grid">{"".join(cards)}</div>'
@@ -693,6 +702,7 @@ def chapter_types(
             if any(ty.get("unstable_parts") for ty in types)
             else ""
         )
+        + ("</details>" if full_open else "")
         + f'<figcaption class="source">{esc(UI["src_rosstat"])}</figcaption>'
         + (_table(["", "", UI["col_med"], UI["col_ci"], UI["col_iqr"]], trows, esc) if trows else "")
         + ami_html
@@ -1190,12 +1200,15 @@ def chapters_html(
     mo: Mapping[int, Mapping],
     ref: Mapping[str, float],
     esc: Esc,
+    passports: str = "",
+    detail: str | None = None,
 ) -> str:
-    """Главы 1, 3, 4, 5 в порядке страницы (§2). ``esc`` — экранирование с типографикой ru-text."""
+    """Главы 1, 3, 4, 5 в порядке страницы (§2). ``esc`` — экранирование с типографикой ru-text;
+    ``passports`` — паспорта типов главы 3 (порция 5b, ``site_findings.passports_html``)."""
     return "\n".join(
         [
             chapter_basket(story, types, mo, esc),
-            chapter_types(story, types, checks, ref, mo, esc),
+            chapter_types(story, types, checks, ref, mo, esc, passports, detail),
             chapter_order(story, checks, esc),
             chapter_dynamics(story, checks, esc),
         ]

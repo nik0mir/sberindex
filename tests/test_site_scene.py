@@ -29,9 +29,9 @@ def test_spiral_unique_and_compact():
 
 def test_ratio_words():
     """Доля кафе словами: от |ln r| ≥ 0,4 — «в N раза», иначе проценты; 1 — «как в регионе»."""
-    assert sc.ratio_words(math.exp(0.784)) == f"в{NB}2,2 раза больше, чем в{NB}регионе"
-    assert sc.ratio_words(math.exp(-0.431)) == f"в{NB}1,5 раза меньше, чем в{NB}регионе"
-    assert sc.ratio_words(math.exp(-0.0318)) == f"на{NB}3% меньше, чем в{NB}регионе"
+    assert sc.ratio_words(math.exp(0.784)) == f"примерно в{NB}2,2 раза больше, чем в{NB}регионе"
+    assert sc.ratio_words(math.exp(-0.431)) == f"примерно в{NB}1,5 раза меньше, чем в{NB}регионе"
+    assert sc.ratio_words(math.exp(-0.0318)) == f"примерно на{NB}3% меньше, чем в{NB}регионе"
     assert sc.ratio_words(1.0) == f"как в{NB}регионе"
     assert sc.ratio_words(None) == "нет данных"
 
@@ -118,7 +118,7 @@ def test_build_scene_contract():
     assert [s["t"] for s in sc_["islands"]] == [2, 1, 0]
     b = sc_["islands"][0]
     assert b["n"] == 2 and b["h_med"] == pytest.approx(math.sqrt(8), abs=1e-3)  # медиана 2 и 4 — в логарифме
-    assert b["note"] == f"у медианы типа доля кафе в{NB}2,8 раза больше, чем в{NB}регионе"
+    assert b["note"] == f"у медианы типа доля кафе примерно в{NB}2,8 раза больше, чем в{NB}регионе"
     assert sc_["islands"][-1]["note"] == "ряд трат неполный"
     x, _ = grid.center(np.array([0, 1, 2, 3]), np.zeros(4))
     assert c["x"] == [round(float(v), 1) for v in x]

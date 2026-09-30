@@ -6,9 +6,6 @@
 <title>$title</title>
 <meta name="description" content="Типы муниципалитетов по корзине безналичных трат жителей относительно своего региона: карта, поиск и карточка муниципалитета. Данные СберИндекса (CC BY-SA 4.0), Росстата и ФНС в обработке «Если быть точным» (CC BY 4.0).">
 <meta name="color-scheme" content="light">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=Unbounded:wght@500;600;700&amp;display=swap">
 <script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
 <style>$css</style>
 </head>
@@ -20,7 +17,9 @@
   $$map_key $$examples_html $$meta_line; первый экран (порция 5a, hero_parts): $$hero_head $$hero_legend $$hero_note,
   подписи кнопок и название — $$brand $$brand_sub $$to_types $$to_map $$howto $$howto_touch $$more $$reset $$zoom_in
   $$zoom_out $$canvas_label $$checked_label; объёмная карта — $$js3d (templates/landing3d.js, three.js из vendor/ через
-  import map); без WebGL или без JS видна статичная SVG карты ($$first_screen_svg);
+  import map); без WebGL или без JS видна статичная SVG карты ($$first_screen_svg); шрифты — @font-face из
+  vendor/fonts/ встроены в $$css (порция 5b, без внешних запросов); блок «Что устояло» — $$findings_html
+  (site_findings.py);
   главы 1, 3, 4, 5, 6, 7, 9 — $$chapters_html (site_chapters.py и site_chapters_tail.py: HTML и статичные SVG) — страница
   читается без JS, JS только добавляет поведение; источники и выгрузки в подвале — $$sources_html.
   Статичная SVG карты ячеек ($$first_screen_svg) ожидается с id="hexmap", классами .cells-t1…t4 и .cells-t0
@@ -35,9 +34,11 @@ $banner_html
   <div class="masthead-in">
     <a class="brand" href="#answer">$brand<span class="brand-sub"> · $brand_sub</span></a>
     <nav aria-label="Разделы страницы">
-      <ul class="nav">
+      <button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-list" hidden>Меню</button>
+      <ul class="nav" id="nav-list">
         <li><a href="#answer">Карта</a></li>
         <li><a href="#find">Найти муниципалитет</a></li>
+        <li><a href="#findings">Что устояло</a></li>
         <li><a href="#types">Типы</a></li>
         <li><a href="#dynamics">Динамика</a></li>
         <li><a href="#limits">Ограничения</a></li>
@@ -108,6 +109,8 @@ $first_screen_svg
     <aside class="h0-legend" aria-label="Типы и высота столбиков">$hero_legend</aside>
     <p class="h0-note source">$hero_note Источник: СберИндекс (CC BY-SA 4.0), расчёт «Корзина и регион».</p>
   </section>
+
+$findings_html
 
   <section id="checked" class="answer checked" aria-labelledby="answer-title">
     <p class="kicker">$checked_label</p>

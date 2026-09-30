@@ -78,6 +78,19 @@ const typeHTML = (t) => `${fig(t)}<span>${esc(typeName(t))}</span>`;
   if (b && !b.hidden) doc.documentElement.style.setProperty("--banner-h", b.offsetHeight + "px");
 }
 
+// --- шапка на телефоне: разделы — по кнопке «Меню» (без JS ссылки прокручиваются) -----------------------------
+{
+  const btn = $("#nav-toggle"), list = $("#nav-list");
+  if (btn && list) {
+    btn.hidden = false;
+    const set = (on) => { list.classList.toggle("open", on); btn.setAttribute("aria-expanded", String(on)); };
+    btn.addEventListener("click", () => set(!list.classList.contains("open")));
+    list.addEventListener("click", (e) => { if (e.target.closest("a")) set(false); });
+    doc.addEventListener("click", (e) => { if (!e.target.closest(".masthead nav")) set(false); });
+    doc.addEventListener("keydown", (e) => { if (e.key === "Escape" && list.classList.contains("open")) { set(false); btn.focus(); } });
+  }
+}
+
 // --- экран 0: тексты вписаны при сборке (landing.screen0_html); на телефоне пункты 2–3 — по кнопке --------------
 {
   const ol = $("#answer-points");
@@ -225,8 +238,9 @@ window.addEventListener("hashchange", () => {
 const card = $("#card");
 const cardBody = $("#card-body");
 // объёмная карта первого экрана (landing3d.js) слушает выбор и сама открывает карточку через window.munnet.go
-// sim — сопоставимые территории карточки (mo.json, набор продукта T7): объёмная карта рисует к ним линии
-function announce(id, sim = []) { doc.dispatchEvent(new CustomEvent("munnet:select", { detail: { id, sim } })); }
+// simb — соседи по своему региону (набор B T7), sim — похожие по тратам в других регионах (набор продукта T7):
+// объёмная карта рисует к соседям главные дуги, к похожим — второстепенные (порция 5b)
+function announce(id, sim = [], simb = []) { doc.dispatchEvent(new CustomEvent("munnet:select", { detail: { id, sim, simb } })); }
 window.munnet = { go: (id) => go(id), ready: () => MO.size > 0 };
 function closeCard() {
   card.hidden = true;
@@ -271,7 +285,7 @@ function route() {
   $("#card-status").textContent = `Карточка: ${r.n}, ${r.r}`;
   drawEgo(r);
   const nd = nodeOf(r) || r; // район столицы — ячейка города
-  announce(nd.hq != null ? nd.id : null, (nd.sim || []).map((p) => p[0]));
+  announce(nd.hq != null ? nd.id : null, (nd.sim || []).map((p) => p[0]), (nd.simb || []).map((p) => p[0]));
 }
 
 // --- карточка ------------------------------------------------------------------------------------------------
@@ -282,11 +296,6 @@ function simList(pairs, numbered) {
     const o = MO.get(id) || { n: "№ " + id, r: "", t: null };
     return `<li><button type="button" data-go="${id}">${fig(o.t)}<span><span class="nm">${esc(cap1(o.ns || o.n))}</span><span class="rg">${esc(o.r)} — ${esc(typeName(o.t))}</span></span><span class="km">${nf.format(km)} км</span></button></li>`;
   }).join("") + "</ol>";
-}
-function squares(k, n) {
-  let s = '<span class="squares" aria-hidden="true">';
-  for (let i = 0; i < n; i++) s += `<i class="${i < k ? "on" : ""}"></i>`;
-  return s + "</span>";
 }
 // полоса «почему»: штрихи квантилей всех узлов, межквартильный размах и медиана типа, точка МО (акцент)
 function strip(w, v) {
@@ -359,15 +368,16 @@ function statusLine(r) {
   if (r.t != null && r.t !== r.t24) h += `<p class="status">Итоговый ${T(r.t)} посчитан по всем 24 месяцам сразу, поэтому может отличаться от типа отдельного года.</p>`;
   return h;
 }
-function stabilityRows(nd) {
+// устойчивость словами, одной строкой рядом с типом; варианты расчёта и повторы с другим seed — раздельно (§3.9)
+function stabilityLine(nd) {
   const rr = (s) => (s ? s.split("/").map(Number) : null);
   const a = rr(nd.rob_rule), b = rr(nd.rob_seed);
-  const vars = (CARD.variants || {})[a ? String(a[1]) : ""] || "";
-  let h = "";
-  if (a) h += `<p class="kv">${squares(a[0], a[1])}Тот же тип в ${a[0]} из ${a[1]} ${plural(a[1], "варианта", "вариантов", "вариантов")} расчёта${vars ? ` (${esc(vars)})` : ""}</p>`;
-  if (b) h += `<p class="kv">${squares(b[0], b[1])}Тот же тип в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим начальным числом (seed)</p>`;
   if (!a && !b) return "";
-  return h + `<span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span>`;
+  const vars = (CARD.variants || {})[a ? String(a[1]) : ""] || "";
+  const bits = [];
+  if (a) bits.push(`тот же тип в ${a[0]} из ${a[1]} ${plural(a[1], "варианта", "вариантов", "вариантов")} расчёта${vars ? ` (${esc(vars)})` : ""}`);
+  if (b) bits.push(`в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим начальным числом (seed)`);
+  return `<p class="rob-line"><b>${esc(CARD.stability || "Устойчивость типа")}:</b> ${bits.join("; ")}. <span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span></p>`;
 }
 
 function renderCard(r) {
@@ -378,7 +388,7 @@ function renderCard(r) {
   $("#card-sub").textContent = [r.r, r.n !== (r.ns || r.n) ? r.n : r.k].filter(Boolean).join(" · ");
   let h = "";
 
-  // 1. Тип
+  // 1. Тип и устойчивость — рядом (порция 5b)
   h += `<section class="row" aria-labelledby="c-type"><h3 id="c-type">Тип</h3>`;
   if (r.role === "inner") h += `<p class="kv">Район входит в узел-город ${esc(nd.n)}; тип — у города целиком.</p>`;
   if (nd.t == null) {
@@ -387,27 +397,27 @@ function renderCard(r) {
     h += `<div class="type-line">${fig(null)}<span>Нет типа</span></div><p class="cap">${esc(why)}.</p>`;
   } else {
     h += `<div class="type-line">${typeHTML(nd.t)}</div><p class="cap">${esc(names.caption || "Относительно своего региона")}</p>`;
+    h += stabilityLine(nd);
     if (r.role === "inner") h += `<p><button type="button" class="tool tool-text" data-go="${nd.id}">Карточка города</button></p>`;
   }
   h += `</section>`;
 
-  // 2. Сопоставимые территории (набор продукта T7) или объяснение, почему их нет
+  // 2. С кем сверять изменения: соседи по своему региону (набор B T7), затем похожие по тратам в других регионах
+  if (nd.simb && nd.simb.length) {
+    h += `<section class="row sim-b" aria-labelledby="c-simb"><h3 id="c-simb">${esc(CARD.simb_title || "Соседи по своему региону")}</h3>${simList(nd.simb, false)}`;
+    if (CARD.simb_note) h += `<p class="sim-note">${esc(CARD.simb_note)}.</p>`;
+    h += `</section>`;
+  }
   if (nd.t != null) {
-    h += `<section class="row" aria-labelledby="c-sim"><h3 id="c-sim">${esc(cap1(view.set_name || "сопоставимые территории"))}</h3>`;
+    h += `<section class="row sim-p" aria-labelledby="c-sim"><h3 id="c-sim">${esc(CARD.sim_title || cap1(view.set_name || "сопоставимые территории"))}</h3>`;
     if (nd.sim && nd.sim.length) {
       h += simList(nd.sim, true);
       const cc = (CH.comparable || {}).similar_caption;
-      h += `<p class="cap">${esc(CARD.lines || "Сходство трат, не поездки и не потоки")}. ${esc(CARD.shifted || "")}.${cc ? " " + esc(cc) + "." : ""}</p>`;
+      h += `<p class="cap">${CARD.sim_note ? esc(CARD.sim_note) + ". " : ""}${esc(CARD.lines || "Сходство трат, не поездки и не потоки")}. ${esc(CARD.shifted || "")}.${cc ? " " + esc(cc) + "." : ""}</p>`;
     } else if (CARD.no_comparable) {
       h += `<p class="kv">${esc(CARD.no_comparable)}.</p>`;
     }
     h += `</section>`;
-  }
-
-  // 3. Устойчивость типа — сразу, раздельно (§3.9)
-  if (nd.t != null) {
-    const st = stabilityRows(nd);
-    if (st) h += `<section class="row" aria-labelledby="c-rob"><h3 id="c-rob">Устойчивость типа</h3>${st}</section>`;
   }
 
   // Подробнее: 2023 → 2024, корзина, окна, «почему», соседи по региону, ритм, пометки
@@ -435,9 +445,6 @@ function renderCard(r) {
   }
   if (nd.t != null && nd.second != null) {
     h += `<p class="kv">Ближе к центру типа ${typeHTML(nd.second)}, чем к центру своего</p>`;
-  }
-  if (nd.simb && nd.simb.length) {
-    h += `<section class="row" aria-labelledby="c-simb"><h3 id="c-simb">Соседи по своему региону</h3>${simList(nd.simb, false)}<p class="cap">Ближайшие по расстоянию в своём регионе — для сравнения с набором выше.</p></section>`;
   }
   if (nd.t != null) {
     h += `<section class="row rhythm" aria-labelledby="c-rh"><h3 id="c-rh">Свой годовой ритм</h3>`;
@@ -622,8 +629,14 @@ function drawEgo(r) {
   const k = pxPerUnit() || 0.1;
   let s = "";
   const sim = (nd.sim || []).map(([id]) => MO.get(id)).filter((o) => o && o.hq != null);
+  const simb = (nd.simb || []).map(([id]) => MO.get(id)).filter((o) => o && o.hq != null);
+  // похожие по тратам в других регионах — тонкий пунктир; соседи по своему региону — сплошные (порция 5b);
   // белая подложка под линией: без неё тёмная линия теряется на тёмных ячейках
   for (const o of sim) {
+    const [x, y] = hexCenter(o.hq, o.hr);
+    s += `<line class="casing thin" x1="${sx}" y1="${sy}" x2="${x}" y2="${y}"/><line class="far" x1="${sx}" y1="${sy}" x2="${x}" y2="${y}"/>`;
+  }
+  for (const o of simb) {
     const [x, y] = hexCenter(o.hq, o.hr);
     s += `<line class="casing" x1="${sx}" y1="${sy}" x2="${x}" y2="${y}"/><line x1="${sx}" y1="${sy}" x2="${x}" y2="${y}"/>`;
   }
@@ -640,7 +653,7 @@ function drawEgo(r) {
   svg.classList.add("has-ego"); // выноски примеров прячутся, пока на карте эго-сеть
   const note = $("#ego-note");
   if (note && sim.length) {
-    note.innerHTML = nbsp(`<b>${esc(cap1(nd.ns || nd.n))}</b>, номера 1–${sim.length} — ${esc(view.set_name || "")}. Линии — ${esc((CARD.lines || "").replace(/^С/, "с"))}. ${esc(CARD.shifted || "")}.`);
+    note.innerHTML = nbsp(`<b>${esc(cap1(nd.ns || nd.n))}</b>: сплошные линии — соседи по своему региону, пунктир с номерами 1–${sim.length} — ${esc((CARD.sim_title || view.set_name || "").toLowerCase())}. Линии — ${esc((CARD.lines || "").replace(/^С/, "с"))}. ${esc(CARD.shifted || "")}.`);
     note.hidden = false;
   }
 }
@@ -679,8 +692,12 @@ function renderExamples() {
 // ссылки на муниципалитеты в главах: go() запоминает, откуда открыли карточку (фокус вернётся туда)
 for (const sec of doc.querySelectorAll(".chapter")) {
   sec.addEventListener("click", (e) => {
-    const a = e.target.closest("a[data-go]");
-    if (a) { e.preventDefault(); go(Number(a.dataset.go)); }
+    const a = e.target.closest("a[data-go], button[data-go]");
+    if (!a) return;
+    e.preventDefault();
+    go(Number(a.dataset.go));
+    // пример паспорта типа: карточка и карта (первый экран) — вместе
+    if (a.dataset.map) $("#map0").scrollIntoView({ block: "start", behavior: "auto" });
   });
 }
 // глава 1: шаги переключают пример муниципалитета

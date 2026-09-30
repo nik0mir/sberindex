@@ -24,8 +24,8 @@ const nf = new Intl.NumberFormat("ru-RU");
 
 // выбор, пришедший до готовности сцены (карточка открыта по адресу #mo=…), применяется после загрузки
 let pending = null;
-let onSelect = (id, sim) => { pending = [id, sim]; };
-doc.addEventListener("munnet:select", (e) => onSelect(e.detail ? e.detail.id : null, (e.detail && e.detail.sim) || []));
+let onSelect = (id, sim, simb) => { pending = [id, sim, simb]; };
+doc.addEventListener("munnet:select", (e) => onSelect(e.detail ? e.detail.id : null, (e.detail && e.detail.sim) || [], (e.detail && e.detail.simb) || []));
 
 async function loadScene() {
   const inl = readJSON("data-scene");
@@ -78,9 +78,9 @@ async function main() {
 
   function ratioText(r) {
     if (r == null) return `${HX.untyped || "Без типа"}: ${HX.untyped_note || ""}`;
-    if (Math.abs(Math.log(r)) >= 0.4) return `доля кафе в${NB}${fmt1(r > 1 ? r : 1 / r)} раза ${r > 1 ? "больше" : "меньше"}, чем в${NB}регионе`;
+    if (Math.abs(Math.log(r)) >= 0.4) return `доля кафе примерно в${NB}${fmt1(r > 1 ? r : 1 / r)} раза ${r > 1 ? "больше" : "меньше"}, чем в${NB}регионе`;
     const p = Math.round((r - 1) * 100);
-    return p === 0 ? `доля кафе как в${NB}регионе` : `доля кафе на${NB}${Math.abs(p)}% ${p > 0 ? "больше" : "меньше"}, чем в${NB}регионе`;
+    return p === 0 ? `доля кафе как в${NB}регионе` : `доля кафе примерно на${NB}${Math.abs(p)}% ${p > 0 ? "больше" : "меньше"}, чем в${NB}регионе`;
   }
 
   // ------------------------------------------------------------------ сцена
@@ -213,8 +213,11 @@ async function main() {
     // на узком экране карта в центре; расстояние — чтобы по ширине поместилась вся карта (половина ширины
     // карты с запасом — 560 единиц, ряд островов — 700) при горизонтальном угле обзора этой камеры
     const tanH = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
-    VIEWS.map.target.x = narrow ? 0 : -230;
-    VIEWS.map.dist = narrow ? Math.max(2300, 560 / tanH) : 2080;
+    const phone = w < 700;
+    VIEWS.map.target.x = phone ? -210 : narrow ? 0 : -230;
+    VIEWS.map.dir.set(0, phone ? 0.86 : 0.7, phone ? 0.51 : 0.71);  // на телефоне — круче сверху: карта выше в кадре
+    // телефон (порция 5b): камера ближе — по ширине кадра около половины карты, европейская часть в центре; остальное — жестом
+    VIEWS.map.dist = phone ? Math.max(1100, 290 / tanH) : narrow ? Math.max(2300, 560 / tanH) : 2080;
     VIEWS.islands.target.x = narrow ? 0 : -390;
     VIEWS.islands.dist = narrow ? Math.max(3600, 720 / tanH) : 2750;
     camera.updateProjectionMatrix();
@@ -329,8 +332,10 @@ async function main() {
     });
     mesh.instanceColor.needsUpdate = true;
   }
-  // линии к сопоставимым территориям карточки: дуги над картой (сходство трат, не поездки и не потоки)
+  // дуги над картой (сходство трат, не поездки и не потоки; порция 5b): к соседям по своему региону (набор B T7,
+  // с ними сверять изменения) — главные, тёмные; к похожим по тратам в других регионах — тонкие и бледные
   const egoMat = new THREE.MeshBasicMaterial({ color: 0x1d1d1d });
+  const farMat = new THREE.MeshBasicMaterial({ color: 0x8d96a1, transparent: true, opacity: 0.75 });
   const ego = new THREE.Group();
   scene.add(ego);
   let egoIdx = [];
@@ -339,20 +344,20 @@ async function main() {
     ego.clear();
     egoIdx = [];
   }
-  function drawEgo(i, simIdx) {
-    clearEgo();
-    egoIdx = simIdx;
-    const a = cells[i]; // положения на карте (выбор всегда возвращает карту из островов)
-    for (const j of simIdx) {
-      const b = cells[j];
-      const d = Math.hypot(b.x - a.x, b.z - a.z);
-      const p0 = new THREE.Vector3(a.x, a.h + 2, a.z), p2 = new THREE.Vector3(b.x, b.h + 2, b.z);
-      const p1 = new THREE.Vector3((a.x + b.x) / 2, Math.max(a.h, b.h) + 40 + d * 0.35, (a.z + b.z) / 2);
-      const curve = new THREE.QuadraticBezierCurve3(p0, p1, p2);
-      ego.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 1.1, 6, false), egoMat));
-    }
+  function arc(a, b, r, m) {
+    const d = Math.hypot(b.x - a.x, b.z - a.z);
+    const p0 = new THREE.Vector3(a.x, a.h + 2, a.z), p2 = new THREE.Vector3(b.x, b.h + 2, b.z);
+    const p1 = new THREE.Vector3((a.x + b.x) / 2, Math.max(a.h, b.h) + 24 + d * 0.35, (a.z + b.z) / 2);
+    ego.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(p0, p1, p2), 48, r, 6, false), m));
   }
-  function select(i, simIds = []) {
+  function drawEgo(i, simIdx, simbIdx = []) {
+    clearEgo();
+    egoIdx = [...simbIdx, ...simIdx];
+    const a = cells[i]; // положения на карте (выбор всегда возвращает карту из островов)
+    for (const j of simIdx) arc(a, cells[j], 0.6, farMat);
+    for (const j of simbIdx) arc(a, cells[j], 1.3, egoMat);
+  }
+  function select(i, simIds = [], simbIds = []) {
     if (mode === "islands") toMap(false, false);
     selected = i;
     hover = -1;
@@ -360,18 +365,21 @@ async function main() {
     ring.visible = true;
     doc.documentElement.classList.add("h0-picked"); // карточка открыта слева: текст экрана под ней прячется
     const simIdx = simIds.map((id) => byId.get(id)).filter((j) => j !== undefined);
+    const simbIdx = simbIds.map((id) => byId.get(id)).filter((j) => j !== undefined);
     spotlight(c.region, new Set(simIdx));
-    drawEgo(i, simIdx);
+    drawEgo(i, simIdx, simbIdx);
     // в кадре — выбранная ячейка и её сопоставимые территории (рамка по всем), и не под карточкой слева
-    const pts = [i, ...simIdx].map((j) => cells[j]);
+    // в кадре — выбранная ячейка и соседи по своему региону (с ними сверять); если соседей нет — похожие по тратам;
+    // дуги к похожим в других регионах уходят за край кадра — их список в карточке (порция 5b)
+    const pts = [i, ...(simbIdx.length ? simbIdx : simIdx)].map((j) => cells[j]);
     const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
     const z0 = Math.min(...pts.map((p) => p.z)), z1 = Math.max(...pts.map((p) => p.z));
     const card = doc.getElementById("card");
     const cardFrac = !narrow && card && !card.hidden ? Math.min(0.45, card.offsetWidth / Math.max(1, stage.clientWidth)) : 0;
     const tanV = Math.tan((camera.fov * Math.PI) / 360), tanH = tanV * camera.aspect;
     // запас на перспективу (ближний к камере край шире) и на высоту дуг
-    const halfW = (x1 - x0) / 2 + 90, halfD = (z1 - z0) / 2 + 90;
-    const dist = Math.min(3200, Math.max(narrow ? 1100 : 860, (halfW / (tanH * (1 - cardFrac))) * 1.7, (halfD / tanV) * 1.9));
+    const halfW = (x1 - x0) / 2 + 60, halfD = (z1 - z0) / 2 + 60;
+    const dist = Math.min(3200, Math.max(narrow ? 1100 : 880, (halfW / (tanH * (1 - cardFrac))) * 1.7, (halfD / tanV) * 1.9));
     const tgt = new THREE.Vector3((x0 + x1) / 2 - cardFrac * dist * tanH, 0, (z0 + z1) / 2);
     const off = new THREE.Vector3(0, 0.84, 0.54).normalize().multiplyScalar(dist);
     flyTo(tgt, tgt.clone().add(off), 1300);
@@ -384,9 +392,9 @@ async function main() {
     doc.documentElement.classList.remove("h0-picked");
     spotlight(null);
   }
-  onSelect = (id, sim = []) => {
+  onSelect = (id, sim = [], simb = []) => {
     const i = id == null ? undefined : byId.get(id);
-    if (i === undefined) clearSelection(); else select(i, sim);
+    if (i === undefined) clearSelection(); else select(i, sim, simb);
   };
 
   // ------------------------------------------------------------------ кадр

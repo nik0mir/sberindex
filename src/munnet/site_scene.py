@@ -51,11 +51,11 @@ def ratio_words(r: float | None, near: float = 0.4) -> str:
         return "нет данных"
     if abs(math.log(r)) >= near:
         k = r if r > 1 else 1 / r
-        return f"в{NB}{style.fmt_num(k, 1)} раза {'больше' if r > 1 else 'меньше'}, чем в{NB}регионе"
+        return f"примерно в{NB}{style.fmt_num(k, 1)} раза {'больше' if r > 1 else 'меньше'}, чем в{NB}регионе"
     p = round((r - 1) * 100)
     if p == 0:
         return f"как в{NB}регионе"
-    return f"на{NB}{abs(p)}% {'больше' if p > 0 else 'меньше'}, чем в{NB}регионе"
+    return f"примерно на{NB}{abs(p)}% {'больше' if p > 0 else 'меньше'}, чем в{NB}регионе"
 
 
 def spiral(n: int) -> list[tuple[int, int]]:

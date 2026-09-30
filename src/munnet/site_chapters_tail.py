@@ -225,9 +225,11 @@ SOURCES = [
 # программы и шрифты, которые загружает страница (порция 5a): название, для чего, лицензия, ссылка
 TOOLS = [
     ("three.js 0.170.0", "объёмная карта первого экрана (файлы в vendor/)", "MIT", "https://threejs.org"),
-    ("Golos Text", "шрифт текста (Google Fonts)", "SIL Open Font License 1.1", "https://fonts.google.com/specimen/Golos+Text"),
-    ("Unbounded", "шрифт названия и крупных чисел (Google Fonts)", "SIL Open Font License 1.1",
-     "https://fonts.google.com/specimen/Unbounded"),
+    ("Golos Text", "шрифт текста (файлы Fontsource в vendor/fonts/)", "SIL Open Font License 1.1",
+     "https://fontsource.org/fonts/golos-text"),
+    ("Unbounded", "шрифт названия и крупных чисел (файлы Fontsource в vendor/fonts/)",
+     "SIL Open Font License 1.1",
+     "https://fontsource.org/fonts/unbounded"),
 ]  # fmt: skip
 DOWNLOADS = [
     ("mo.csv", "все муниципалитеты: регион, тип, типы 2023 и 2024 годов, смена, причина, если типа нет"),
