@@ -68,6 +68,23 @@
         "outputs/site_preview"
       ],
       "port": 8769
+    },
+    {
+      "name": "site-proto",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--frozen",
+        "python",
+        "-m",
+        "http.server",
+        "8770",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "outputs/site_proto"
+      ],
+      "port": 8770
     }
   ]
 }
