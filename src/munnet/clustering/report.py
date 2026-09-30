@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -103,6 +104,16 @@ def _names(cands: list[str], table: pd.DataFrame) -> str:
     return ", ".join(f"{FG.mlabel(table.loc[c, 'method'])} (K = {int(table.loc[c, 'k'])})" for c in cands)
 
 
+def _changes_text(items: list[str], prefix: str, none_text: str) -> str:
+    """«<prefix>: а; б» или ``none_text``, если список пуст (без «меняют 0 из них: нет»)."""
+    return f"{prefix}: {'; '.join(items)}" if items else none_text
+
+
+def _verb(n: int) -> str:
+    """«меняет» при одном элементе, «меняют» — при нескольких."""
+    return "меняет" if n == 1 else "меняют"
+
+
 def _bucket(seconds: float) -> str:
     for limit, text in ((1, "< 1 с"), (10, "1–10 с"), (60, "10–60 с")):
         if seconds < limit:
@@ -146,6 +157,10 @@ class Out:
         self.grid = read("threshold_grid")
         self.reslim = read("resolution_limit")
         self.kef = read("kefrin_curve")
+        self.seed_freq = read("seed_frequency")
+        self.seed_runs = read("seed_runs")
+        self.tol_checks = read("sensitivity_tolerance")
+        self.qtol = read("quality_tolerance")
         self.rules = (out / "tree_rules.txt").read_text(encoding="utf-8")
 
     @property
@@ -158,6 +173,37 @@ def level1_table_all(o: Out) -> pd.DataFrame:
     t = o.levels_all.loc[o.levels_all["level"] == 2].copy()
     t = t.rename(columns={f"crit_{c}": c for c in CRITERIA})
     return t[["cand", "method", "k", *CRITERIA, "on_front", "score"]]
+
+
+TOL_GRID_SCALES: tuple[float, ...] = (0.0, 0.5, 1.0, 1.5, 2.0)
+
+
+def tolerance_sensitivity(o: Out, cp: ClusterParams) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Шум самого допуска качества (отступление от предрегистрации): победитель среди всех семейств при seed
+    прогона, если допуск оценить без одного из случайных базисов (``quality_tolerance.csv``), и на сетке
+    допусков от 0 до удвоенного по каждой оси. Правило то же, меняется только допуск."""
+    qt = o.qtol
+    cols = ["quality_features", "quality_graph"]
+
+    def winner(tol: Mapping[str, float]) -> str:
+        cpt = replace(cp, tie={**cp.tie, **{k: float(v) for k, v in tol.items()}})
+        return DE.run_rule(o.cands, cpt, methods=cp.methods).winner
+
+    jk = []
+    for s in sorted(qt["seed"].unique()):
+        tol = qt.loc[qt["seed"] != s].groupby("cand")[cols].std().median()
+        jk.append({"dropped_seed": int(s), **{k: float(tol[k]) for k in cols}, "winner": winner(tol)})
+    full = o.js["quality_tolerance"]
+    grid = [
+        {
+            "scale_features": a,
+            "scale_graph": b,
+            "winner": winner({cols[0]: a * full[cols[0]], cols[1]: b * full[cols[1]]}),
+        }
+        for a in TOL_GRID_SCALES
+        for b in TOL_GRID_SCALES
+    ]
+    return pd.DataFrame(jk), pd.DataFrame(grid)
 
 
 # --- Факты ---------------------------------------------------------------------------------------
@@ -241,6 +287,12 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
             if len(sm):
                 _fact(f, f"small_{m}_min", int(sm["size"].min()), "int")
                 _fact(f, f"small_{m}_max", int(sm["size"].max()), "int")
+        hk = set(small.loc[small["method"] == "hybrid", "k"].astype(int))
+        need = {k for k in cp.k_grid if k >= 5}
+        _fact(f, "hybrid_small_all_k5", int(need <= hk and not ({3, 4} & hk)), "int")
+        mk = small.loc[small["top_feature"] == "market_access_rel", "size"]
+        _fact(f, "small_market_size_min", int(mk.min()) if len(mk) else 0, "int")
+        _fact(f, "small_market_size_max", int(mk.max()) if len(mk) else 0, "int")
         top = small.loc[small["cand"] == "kmeans_joint_k04"]
         if len(top):
             _fact(f, "suburbs_size", int(top["size"].iloc[0]), "int")
@@ -277,7 +329,9 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
     main_l2 = o.levels.loc[o.levels["level"] == 2]
     _fact(f, "main_l2_n", len(main_l2), "int")
     ch = o.checks
-    el = ch.loc[(ch["scope"] == "eligible") & (ch["check"] != "main")]
+    # проверка all_eligible меняет множество кандидатов (все семейства), а не агрегатор: её победитель —
+    # факт all_winner, в счёт проверок уровня итога она не входит
+    el = ch.loc[(ch["scope"] == "eligible") & ~ch["check"].isin(["main", "all_eligible"])]
     _fact(f, "n_checks", len(el), "int")
     _fact(f, "n_checks_same", int(el["same_as_main"].astype(bool).sum()), "int")
     oe = o.orders.loc[o.orders["scope"] == "eligible"]
@@ -287,14 +341,17 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
     _fact(f, "all_n_checks", len(al), "int")
     _fact(f, "all_n_same", int(al["same_as_main"].astype(bool).sum()), "int")
     changed = al.loc[~al["same_as_main"].astype(bool)]
+    changed_items = [
+        f"{CHECK_LABELS[r['check']]} — {FG.mlabel(r['method'])}, K = {int(r['k'])}"
+        for _, r in changed.iterrows()
+    ]
+    _fact(f, "all_changed", "; ".join(changed_items) or "нет", "str")
     _fact(
         f,
-        "all_changed",
-        "; ".join(
-            f"{CHECK_LABELS[r['check']]} — {FG.mlabel(r['method'])}, K = {int(r['k'])}"
-            for _, r in changed.iterrows()
-        )
-        or "нет",
+        "all_changed_text",
+        _changes_text(
+            changed_items, f"победителя {_verb(len(changed_items))}", "победителя не меняет ни одна"
+        ),
         "str",
     )
     _fact(f, "all_joint_winner", FG.mlabel(al.set_index("check").loc["joint", "method"]), "str")
@@ -304,12 +361,84 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
         for m in ("hybrid", "leiden", "louvain", "spectral"):
             _fact(f, f"lex_{scope}_{m}", int((od["method"] == m).sum()), "int")
     b2 = ch.loc[(ch["scope"] == "all_level2") & (ch["check"] == "borda")]
-    _fact(f, "borda_l2_winner", FG.mlabel(b2["method"].iloc[0]), "str")
+    _fact(f, "borda_l2_winner", _cand_label(c, b2["winner"].iloc[0]), "str")
     lw = o.levels_all.loc[o.levels_all["level"] == 2].set_index("cand")
     front = lw.loc[lw["on_front"].astype(bool)]
     ranks = front[[f"crit_{c}" for c in CRITERIA]].rank(ascending=False, method="min").sum(axis=1)
     _fact(f, "borda_hybrid", float(ranks.get(fin, np.nan)), "int")
+    _fact(
+        f,
+        "borda_front",
+        "; ".join(f"{_cand_label(c, x)} — {int(v)}" for x, v in ranks.sort_values().items()),
+        "str",
+    )
+    _fact(f, "all_tradeoff", _tradeoff(lw, fin, c, cp), "str")
     _fact(f, "borda_leiden", float(ranks.get(winners_of(o)["leiden"], np.nan)), "int")
+    # устойчивость выбора к seed и допуск качества по шуму базиса
+    tolq = js["quality_tolerance"]
+    _fact(f, "tol_qf", float(tolq["quality_features"]), "num2")
+    _fact(f, "tol_qg", float(tolq["quality_graph"]), "num2")
+    sr = o.seed_runs
+    seeds = sorted(sr["seed"].unique())
+    _fact(f, "n_seeds", len(seeds), "int")
+    _fact(f, "seed", int(cp.seed), "int")
+    _fact(f, "seed_min", int(min(seeds)), "int")
+    _fact(f, "seed_max", int(max(seeds)), "int")
+    for rule in ("prereg", "tolerance"):
+        for scope in ("eligible", "all"):
+            sel = (sr["rule"] == rule) & (sr["scope"] == scope) & (sr["kind"] == "check")
+            m = sr.loc[sel & (sr["check"] == "main")]
+            _fact(f, f"sf_{rule}_{scope}", _freq_text(m["winner"], o.cands, len(seeds)), "str")
+            _fact(f, f"sf_{rule}_{scope}_final", int((m["winner"] == fin).sum()), "int")
+        od = sr.loc[(sr["rule"] == rule) & (sr["kind"] == "order") & (sr["scope"] == "all_level2")]
+        _fact(f, f"sf_{rule}_lex", _freq_text(od["winner"], o.cands, len(od)), "str")
+        m_all = sr.loc[(sr["rule"] == rule) & (sr["scope"] == "all") & (sr["kind"] == "check")]
+        n_win = int(m_all.loc[m_all["check"] == "main", "winner"].nunique())
+        _fact(f, f"sf_{rule}_all_n", n_win, "int")
+        _fact(
+            f,
+            f"sf_{rule}_all_verdict",
+            "победитель меняется от seed" if n_win > 1 else "победитель при этих seed один и тот же",
+            "str",
+        )
+    # разбиения победителей среди всех семейств при разных seed: наименьший ARI с разбиением seed прогона
+    sfq = o.seed_freq
+    sfm = sfq.loc[
+        (sfq["rule"] == "prereg")
+        & (sfq["scope"] == "all")
+        & (sfq["kind"] == "check")
+        & (sfq["check"] == "main")
+    ]
+    _fact(
+        f,
+        "sf_all_minari",
+        "; ".join(
+            f"{_cand_label(c, w)} — {_n(a)}"
+            for w, a in zip(sfm["winner"], sfm["min_ari_labels"], strict=True)
+        ),
+        "str",
+    )
+    _fact(f, "sf_all_minari_min", float(sfm["min_ari_labels"].min()), "num2")
+    _fact(f, "spectral_stability", float(c.loc[winners["spectral"], "stability"]), "num2")
+    # шум самого допуска: он оценён по n_seeds базисам; без одного базиса и при допуске от 0 до удвоенного
+    jk, grid = tolerance_sensitivity(o, cp)
+    for col, key in (("quality_features", "qf"), ("quality_graph", "qg")):
+        _fact(f, f"tol_jk_{key}_min", float(jk[col].min()), "num3")
+        _fact(f, f"tol_jk_{key}_max", float(jk[col].max()), "num3")
+    _fact(f, "tol_jk_n", len(jk), "int")
+    _fact(f, "tol_jk_winners", _freq_text(jk["winner"], c, len(jk)), "str")
+    _fact(f, "tol_grid_n", len(grid), "int")
+    _fact(f, "tol_grid_winners", _freq_text(grid["winner"], c, len(grid)), "str")
+    tc = o.tol_checks
+    for scope in ("eligible", "all"):
+        w = tc.loc[(tc["scope"] == scope) & (tc["check"] == "main"), "winner"].iloc[0]
+        _fact(f, f"tol_{scope}_winner", _cand_label(o.cands, w), "str")
+    all_main = ch.loc[(ch["scope"] == "all") & (ch["check"] == "main"), "winner"].iloc[0]
+    _fact(f, "all_winner", _cand_label(o.cands, all_main), "str")
+    _fact(f, "all_winner_method", FG.mlabel(o.cands.loc[all_main, "method"]), "str")
+    _fact(f, "all_winner_k", int(o.cands.loc[all_main, "k"]), "int")
+    od = o.orders.loc[o.orders["scope"] == "all_level2"]
+    _fact(f, "lex_l2_text", _freq_text(od["winner"], o.cands, len(od)), "str")
     # сетка порогов
     g = o.grid
     gs = g.loc[g["chain"] == "strict"]
@@ -325,6 +454,18 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
         f,
         "grid50_same_all_share",
         int((gs.loc[np.isclose(gs["max_share"], 0.5), "winner_all"] == fin).all()),
+        "int",
+    )
+    by_max = gs.groupby("max_share")[["winner_eligible", "winner_all"]].nunique()
+    _fact(f, "grid_minshare_effect", int((by_max > 1).any(axis=1).sum()), "int")
+    _fact(f, "grid_eligible_same", int((gs["winner_eligible"] == fin).all()), "int")
+    s55m = gs.loc[np.isclose(gs["max_share"], 0.55) & np.isclose(gs["min_share"], cp.min_cluster_share)]
+    _fact(f, "grid55_strict_hybrid_k", int(s55m["hybrid_k"].iloc[0]), "int")
+    _fact(f, "grid55_hybrid_feasible", str(s55m["hybrid_feasible_k"].iloc[0]).replace(",", ", "), "str")
+    _fact(
+        f,
+        "all_winner_is_final",
+        int(ch.loc[(ch["scope"] == "all") & (ch["check"] == "main"), "winner"].iloc[0] == fin),
         "int",
     )
     _fact(
@@ -366,6 +507,13 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
         "str",
     )
     _fact(f, "kef_ari_max", float(kf["ari_final"].max()), "num2")
+    _fact(f, "kef_z_feasible_min_xi", float(zf["xi_over_rho"].min()) if len(zf) else float("nan"), "num2")
+    _fact(
+        f,
+        "kef_z_feasible_graph_share_min",
+        float(zf["graph_share"].min()) if len(zf) else float("nan"),
+        "pct",
+    )
     _fact(f, "kef_z_feasible_ari_max", float(zf["ari_final"].max()) if len(zf) else float("nan"), "num2")
     raw = o.icvi.loc[o.icvi["check"].isin(DE.RAW_CHECKS)]
     r3 = raw.loc[raw["level"] == 3]
@@ -383,19 +531,86 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
         or "нет",
         "str",
     )
-    _fact(f, "raw_l3_winner_graph", FG.mlabel(r3.set_index("check").loc["raw_graph", "method"]), "str")
-    _fact(f, "raw_l3_winner_sw", FG.mlabel(r3.set_index("check").loc["raw_sw", "method"]), "str")
+    # метрики графа — (з), (и), (л); сырой SW (к) — отдельно: это качество в X, а не на G
+    r3g = r3c.loc[r3c["check"] != "raw_sw"]
+    _fact(
+        f,
+        "raw_l3_changes_graph",
+        _changes_text(
+            [
+                f"{ICVI_LABELS[r['check']]} — {FG.mlabel(r['method'])}, K = {int(r['k'])}"
+                for _, r in r3g.iterrows()
+            ],
+            "сменили победителя",
+            "победителя ни одна не меняет",
+        ),
+        "str",
+    )
+    r3i = r3.set_index("check")
+    _fact(f, "raw_l3_winner_graph", FG.mlabel(r3i.loc["raw_graph", "method"]), "str")
+    _fact(f, "raw_l3_winner_graph_k", int(r3i.loc["raw_graph", "k"]), "int")
+    _fact(f, "raw_l3_winner_sw", FG.mlabel(r3i.loc["raw_sw", "method"]), "str")
+    _fact(
+        f,
+        "raw_l3_sw_note",
+        "это смена победителя"
+        if bool(r3i.loc["raw_sw", "changed"])
+        else "победитель тот же, что по z-оценкам",
+        "str",
+    )
+    rg = r3.set_index("check").loc["raw_graph", "winner"]
+    zw = ch.loc[(ch["scope"] == "all") & (ch["check"] == "main"), "winner"].iloc[0]
+    _fact(
+        f,
+        "raw_graph_verdict",
+        f"победитель тот же, что по z-оценкам, — {_cand_quoted(c, zw)}"
+        if rg == zw
+        else f"побеждает {_cand_quoted(c, rg)}, а не победитель по z-оценкам — {_cand_quoted(c, zw)}: "
+        "z-оценки качества на G смещены по K (`docs/icvi.md`)",
+        "str",
+    )
     rc = DE.with_raw_columns(c)
     lw = winners_of(o)["leiden"]
     for key, cand in (("hybrid", fin), ("leiden", lw)):
         _fact(f, f"avi_adj_{key}", float(rc.loc[cand, "raw_avi_adj"]), "num3")
         _fact(f, f"mq_raw_{key}", float(rc.loc[cand, "raw_mq"]), "num3")
         _fact(f, f"sw_raw_{key}", float(rc.loc[cand, "raw_sw"]), "num3")
+    l2a = o.levels_all.loc[o.levels_all["level"] == 2].set_index("cand")
+    _fact(
+        f,
+        "l2_qg_hybrid_minus_leiden",
+        float(l2a.loc[fin, "crit_quality_graph"] - l2a.loc[lw, "crit_quality_graph"]),
+        "num2",
+    )
     ic = o.icvi.loc[~o.icvi["check"].isin(DE.RAW_CHECKS)]
     l2c = ic.loc[ic["level"] == 2]
     _fact(f, "icvi_n", l2c["check"].nunique(), "int")
     _fact(f, "icvi_l2_changed", int(l2c["changed"].astype(bool).sum()), "int")
     _fact(f, "icvi_l3_changed", int(ic.loc[ic["level"] == 3, "changed"].astype(bool).sum()), "int")
+    l3c = ic.loc[(ic["level"] == 3) & ic["changed"].astype(bool)]
+    _fact(
+        f,
+        "icvi_l3_text",
+        _changes_text(
+            [
+                f"{ICVI_LABELS[r['check']]} — {FG.mlabel(r['method'])}, K = {int(r['k'])}"
+                for _, r in l3c.iterrows()
+            ],
+            f"победителя {_verb(len(l3c))} {len(l3c)} из них",
+            "победителя не меняет ни одна из них",
+        ),
+        "str",
+    )
+    _fact(
+        f,
+        "icvi_l3_changes",
+        "; ".join(
+            f"{ICVI_LABELS[r['check']]} — {FG.mlabel(r['method'])}, K = {int(r['k'])}"
+            for _, r in l3c.iterrows()
+        )
+        or "нет",
+        "str",
+    )
     l1c = ic.loc[(ic["level"] == 1) & ic["changed"].astype(bool)]
     _fact(f, "icvi_l1_changed", len(l1c), "int")
     _fact(
@@ -407,6 +622,22 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
             for _, r2 in l1c.iterrows()
         )
         or "нет",
+        "str",
+    )
+    # у каких методов сменилось K и сколько K у них на фронте первого уровня (без двух источников)
+    l1all = o.levels_all.loc[o.levels_all["level"] == 1]
+    front_k = l1all.groupby("method")["on_front"].apply(lambda s: int(s.astype(bool).sum()))
+    moved = list(dict.fromkeys(l1c["method"]))
+    _fact(
+        f,
+        "icvi_l1_note",
+        (
+            "Число K на фронте основного правила у методов со сменой K: "
+            + "; ".join(f"{FG.mlabel(m)} — {int(front_k.get(m, 0))}" for m in moved)
+            + ". Лишняя или убранная метрика качества переставляет очки Копленда между K фронта."
+        )
+        if moved
+        else "Выбор K внутри методов от набора метрик не зависит.",
         "str",
     )
     ex = o.extra.set_index("check")
@@ -476,9 +707,98 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
     both = knn.loc[(knn["graph_signal"] > 0) & (knn["feature_signal"] > 0)]
     _fact(f, "syn_n_cells", len(knn), "int")
     _fact(f, "syn_both_cells", len(both), "int")
-    won_both = both["winner"].map(lambda m: fam.get(m) in ("attributed", "fusion"))
-    _fact(f, "syn_both_won", int(won_both.sum()), "int")
-    _fact(f, "syn_joint_won", int((both["winner"] == "kmeans_joint").sum()), "int")
+    best_both = both["best"].map(lambda m: fam.get(m) in ("attributed", "fusion"))
+    _fact(f, "syn_both_won", int(best_both.sum()), "int")
+    clear = both["winner"].map(lambda m: fam.get(m) in ("attributed", "fusion"))
+    _fact(f, "syn_both_clear", int(clear.sum()), "int")
+    _fact(f, "syn_both_tie", int((both["winner"] == "tie").sum()), "int")
+    _fact(f, "syn_joint_won", int((both["best"] == "kmeans_joint").sum()), "int")
+    _fact(f, "syn_joint_clear", int((both["winner"] == "kmeans_joint").sum()), "int")
+    _fact(f, "syn_none_cells", int((s["winner"] == "none").sum()), "int")
+    _fact(f, "syn_tie_cells", int((s["winner"] == "tie").sum()), "int")
+    _fact(f, "syn_all_cells", len(s), "int")
+    _fact(f, "syn_clear_cells", int((~s["winner"].isin(["tie", "none"])).sum()), "int")
+    _fact(f, "syn_both_hybrid_best", int((both["best"] == "hybrid").sum()), "int")
+    c0 = knn.loc[(knn["graph_signal"] == 0) & (knn["feature_signal"] == knn["feature_signal"].max())].iloc[0]
+    for m in ("kmeans", "hybrid", "shalileh_mirkin", "kmeans_joint"):
+        _fact(f, f"syn_g0_{m}", float(c0[m]), "num2")
+    _fact(f, "syn_fmax", float(c0["feature_signal"]), "num1")
+    _fact(f, "syn_min_ari", float(cp.synthetic.get("min_ari", 0.05)), "num2")
+    _fact(f, "syn_ci", f"{round(100 * float(cp.synthetic.get('ci_level', 0.95)))}%", "str")
+    g0 = knn.loc[(knn["graph_signal"] == 0) & (knn["winner"] != "none")]
+    g0_sets = g0["winner_set"].fillna("").astype(str).str.split(",")
+    _fact(f, "syn_g0_live", len(g0), "int")
+    f0 = knn.loc[(knn["feature_signal"] == 0) & (knn["graph_signal"] > 0)]
+    f0_sets = f0["winner_set"].fillna("").astype(str).str.split(",")
+    _fact(f, "syn_f0_n", len(f0), "int")
+    _fact(
+        f,
+        "syn_f0_both_tie",
+        int(f0_sets.map(lambda x: bool({"hybrid", "kmeans_joint"} & set(x))).sum()),
+        "int",
+    )
+    _fact(f, "syn_g0_kefrin_tie", int(g0_sets.map(lambda x: "shalileh_mirkin" in x).sum()), "int")
+    # шумовой граф (kNN без сигнала в графе и блочный граф с долей внешних рёбер от 0,7); в ячейках,
+    # где лучший средний ARI не ниже порога, — ничья по интервалам K-means, гауссовой смеси и KEFRiN
+    noisy_all = s.loc[
+        ((s["design"] == "knn") & (s["graph_signal"] == 0))
+        | ((s["design"] == "sbm") & (s["graph_signal"] >= 0.7))
+    ]
+    _fact(f, "syn_noisy_n", len(noisy_all), "int")
+    _fact(f, "syn_noisy_none", int((noisy_all["winner"] == "none").sum()), "int")
+    noisy = noisy_all.loc[noisy_all["winner"] != "none"]
+    noisy_sets = noisy["winner_set"].fillna("").astype(str).str.split(",")
+    _fact(f, "syn_noisy_live", len(noisy), "int")
+    _fact(
+        f,
+        "syn_noisy_x_tie",
+        int(
+            (
+                (noisy["winner"] == "tie")
+                & noisy_sets.map(lambda x: {"kmeans", "gmm", "shalileh_mirkin"} <= set(x))
+            ).sum()
+        ),
+        "int",
+    )
+    # сигнал только в графе (kNN): ничья четырёх методов, видящих граф, и у кого лучший средний ARI
+    four = {"leiden", "spectral", "hybrid", "kmeans_joint"}
+    _fact(
+        f,
+        "syn_f0_four_tie",
+        int(((f0["winner"] == "tie") & f0_sets.map(lambda x: four <= set(x))).sum()),
+        "int",
+    )
+    _fact(
+        f,
+        "syn_f0_best_text",
+        ", ".join(f"{FG.mlabel(m)} — {n}" for m, n in f0["best"].value_counts().items()),
+        "str",
+    )
+    # явные победы методов только по графу во всех ячейках обоих генераторов
+    gw = s.loc[s["winner"].isin(["leiden", "louvain", "spectral"])]
+    _fact(f, "syn_graph_only_clear_n", len(gw), "int")
+    _fact(
+        f,
+        "syn_graph_only_clear_text",
+        "; ".join(
+            (
+                f"табл. 1а, доля внешних рёбер {_n(r['graph_signal'], 1)}"
+                if r["design"] == "sbm"
+                else f"табл. 1, сигнал в G {_n(r['graph_signal'], 1)}"
+            )
+            + f", сигнал в X {_n(r['feature_signal'], 1)} — {FG.mlabel(r['winner'])}"
+            + f" (ARI {_n(r[r['winner']])})"
+            for _, r in gw.iterrows()
+        )
+        or "ни в одной ячейке",
+        "str",
+    )
+    # порог «победителя нет»: лучший средний ARI ячеек по обе стороны
+    best_ari = s.apply(lambda r: float(r[r["best"]]), axis=1)
+    none = s["winner"] == "none"
+    _fact(f, "syn_none_best_max", float(best_ari[none].max()) if none.any() else float("nan"), "num3")
+    _fact(f, "syn_live_best_min", float(best_ari[~none].min()), "num3")
+    _fact(f, "syn_counts", _syn_counts(s), "str")
     _fact(f, "syn_repeats", int(cp.synthetic["repeats"]), "int")
     _fact(f, "syn_n", int(cp.synthetic["n_nodes"]), "int")
     _fact(f, "syn_k", int(cp.synthetic["k_true"]), "int")
@@ -505,6 +825,26 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
             _fact(f, "sbm_mid_leiden", float(mid["leiden"].mean()), "num2")
             _fact(f, "sbm_mid_kefrin", float(mid["shalileh_mirkin"].mean()), "num2")
             _fact(f, "sbm_mid_kmeans", float(mid["kmeans"].mean()), "num2")
+            _fact(f, "sbm_mid_spectral", float(mid["spectral"].mean()), "num2")
+            _fact(f, "sbm_mid_n", len(mid), "int")
+            _fact(f, "sbm_mid_hybrid_best", int((mid["best"] == "hybrid").sum()), "int")
+            _fact(f, "sbm_mid_hybrid_clear", int((mid["winner"] == "hybrid").sum()), "int")
+            mid_sets = mid["winner_set"].fillna("").astype(str).str.split(",")
+            _fact(
+                f,
+                "sbm_mid_tie_spectral",
+                int(
+                    (
+                        (mid["winner"] == "tie") & mid_sets.map(lambda x: {"hybrid", "spectral"} <= set(x))
+                    ).sum()
+                ),
+                "int",
+            )
+        fmax = sbm["feature_signal"] == sbm["feature_signal"].max()
+        s7 = sbm.loc[np.isclose(sbm["graph_signal"], 0.7) & fmax]
+        if len(s7):
+            for m in ("kmeans", "hybrid", "shalileh_mirkin"):
+                _fact(f, f"sbm7_{m}", float(s7[m].iloc[0]), "num2")
         hi = sbm.loc[sbm["graph_signal"] >= 0.7]
         _fact(f, "sbm_high_graph_max", float(hi[["leiden", "spectral"]].max().max()), "num2")
         _fact(f, "sbm_degree", float(cp.synthetic["sbm_degree"]), "int")
@@ -512,8 +852,11 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
     gm = c.loc[c["method"].isin(["leiden", "louvain", "spectral"])]
     tau = kendalltau(gm["z_avi"], gm["z_mq"], nan_policy="omit")[0]
     _fact(f, "tau_avi_mq", float(tau), "num2")
-    taus = [kendalltau(d["k"], d["z_avi"])[0] for _, d in gm.groupby("method")]
-    _fact(f, "tau_k_avi_min", float(min(taus)), "num2")
+    _fact(f, "tau_avi_mq_n", int(gm[["z_avi", "z_mq"]].notna().all(axis=1).sum()), "int")
+    # рост с K — у обоих рядов: минимум τ(K, z) по трём графовым методам отдельно для z AVI и z MQ
+    for col in ("z_avi", "z_mq"):
+        taus = [kendalltau(d["k"], d[col], nan_policy="omit")[0] for _, d in gm.groupby("method")]
+        _fact(f, f"tau_k_{col[2:]}_min", float(min(taus)), "num2")
     lei = c.loc[c["method"] == "leiden"].set_index("k")["mq"]
     _fact(f, "leiden_mq_k9", float(lei.loc[lei.index >= 9].min()), "num3")
     _fact(f, "leiden_mq_k12", float(lei.loc[lei.index >= 9].max()), "num3")
@@ -590,7 +933,17 @@ def build_facts(o: Out, cp: ClusterParams) -> dict[str, Fact]:
 
 # --- Проверяемые утверждения ---------------------------------------------------------------------
 
+
+def _changes_with_aggregator(f: Mapping[str, Fact]) -> bool:
+    """Среди всех семейств при seed прогона победителя меняет хотя бы одна проверка или порядок критериев."""
+    return _v(f, "all_n_same") < _v(f, "all_n_checks") or ";" in str(_v(f, "lex_l2_text"))
+
+
 CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
+    # Утверждения текста, которые шаблон пишет словами. Всё, что меняется от seed методов и случайного базиса
+    # (победитель среди всех семейств, ничьи на фронте, лексикографические счёты), текст берёт из фактов
+    # и формулирует нейтрально; здесь — то, что верно при seed 42, 43 и 44 (ворота этапа 3).
+    # итог и допустимость
     "итог — гибрид с K = 4": lambda f: _v(f, "final_method") == "hybrid" and _v(f, "final_k") == 4,
     "у KEFRiN и базовой линии нет допустимых K; у гибрида — один": lambda f: (
         _v(f, "feas_shalileh_mirkin") == 0 and _v(f, "feas_kmeans_joint") == 0 and _v(f, "feas_hybrid") == 1
@@ -598,83 +951,138 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
     "мелкие недопустимые типы почти все задаёт доступность рынков": lambda f: (
         _v(f, "n_small_market") >= 0.9 * _v(f, "n_small")
     ),
-    "среди методов с двумя источниками все проверки дают тот же итог": lambda f: (
-        _v(f, "n_checks_same") == _v(f, "n_checks") and _v(f, "orders_same") == _v(f, "orders_total")
+    "у гибрида мелкий тип при каждом K ≥ 5 и ни при K = 3, 4": lambda f: _v(f, "hybrid_small_all_k5") == 1,
+    "у гибрида при K = 3 крупнейший тип больше половины": lambda f: _v(f, "hybrid_k3_max_share") > 0.5,
+    "порог 1% не добавляет допустимых кандидатов": lambda f: _v(f, "extra01_n") == _v(f, "n_feasible"),
+    # чувствительность и seed
+    "среди методов с двумя источниками замены агрегатора, критериев, допусков и шага дают тот же итог": (
+        lambda f: (
+            _v(f, "n_checks_same") == _v(f, "n_checks") and _v(f, "orders_same") == _v(f, "orders_total")
+        )
     ),
-    "среди всех семейств меняет победителя только один шаг — спектральная": lambda f: (
-        _v(f, "all_n_same") == _v(f, "all_n_checks") - 1
-        and _v(f, "all_joint_winner") == FG.mlabel("spectral")
+    "на уровне итога — гибрид K = 4 при всех seed и обоих правилах": lambda f: (
+        _v(f, "sf_prereg_eligible_final") == _v(f, "n_seeds")
+        and _v(f, "sf_tolerance_eligible_final") == _v(f, "n_seeds")
     ),
-    "лексикографически (только второй уровень) Leiden 12, гибрид 6, Louvain 6": lambda f: (
-        _v(f, "lex_all_level2_leiden") == 12
-        and _v(f, "lex_all_level2_hybrid") == 6
-        and _v(f, "lex_all_level2_louvain") == 6
+    "среди всех семейств победитель зависит от агрегатора и порогов": lambda f: (
+        _changes_with_aggregator(f) and _v(f, "grid_same_all") < _v(f, "grid_cells")
     ),
-    "Борда: ничья гибрида и Leiden": lambda f: _v(f, "borda_hybrid") == _v(f, "borda_leiden"),
-    "при 55% среди всех семейств побеждает спектральная с K = 3": lambda f: (
-        _v(f, "grid55_all_winner") == FG.mlabel("spectral") and _v(f, "grid55_all_k") == 3
+    "сетка порогов: итог тот же во всех ячейках, наименьший тип победителей не меняет": lambda f: (
+        _v(f, "grid_eligible_same") == 1 and _v(f, "grid_minshare_effect") == 0
     ),
-    "при 50% итог тот же при любом наименьшем типе": lambda f: _v(f, "grid50_same_all_share") == 1,
-    "гибрид K = 3 и K = 4 разводит разница устойчивости меньше допуска": lambda f: (
-        0 < _v(f, "hybrid_k3_k4_stab_diff") < _v(f, "tie_stability") and _v(f, "grid55_tol_hybrid_k") == 3
+    "гибрид K = 3 и K = 4 разводит разница устойчивости меньше допуска; при 55% итог хрупок": lambda f: (
+        0 < _v(f, "hybrid_k3_k4_stab_diff") < _v(f, "tie_stability")
+        and _v(f, "grid55_tol_hybrid_k") != _v(f, "grid55_strict_hybrid_k")
     ),
+    "победителей среди всех семейств по seed двое, их разбиения от seed не зависят": lambda f: (
+        _v(f, "sf_prereg_all_n") == 2 and _v(f, "sf_all_minari_min") >= 0.999
+    ),
+    "проверки по свойствам индексов итог не меняют": lambda f: _v(f, "icvi_l2_changed") == 0,
+    "шесть проверок по свойствам индексов": lambda f: _v(f, "icvi_n") == 6,
+    "z AVI и z MQ растут с K почти монотонно": lambda f: (
+        _v(f, "tau_k_avi_min") >= 0.8 and _v(f, "tau_k_mq_min") >= 0.8
+    ),
+    "сравнимые между K метрики итог не меняют": lambda f: _v(f, "raw_l2_changed") == 0,
+    "по сравнимым метрикам графа среди всех семейств — Leiden, а не победитель по z-оценкам; "
+    "по z-оценкам на G гибрид выше Leiden": lambda f: (
+        _v(f, "raw_l3_winner_graph") == FG.mlabel("leiden")
+        and _v(f, "all_winner") != f"{_v(f, 'raw_l3_winner_graph')}, K = {_v(f, 'raw_l3_winner_graph_k')}"
+        and _v(f, "avi_adj_leiden") > _v(f, "avi_adj_hybrid")
+        and _v(f, "l2_qg_hybrid_minus_leiden") > 0
+    ),
+    # предел разрешения и KEFRiN
     "ни одно сообщество Leiden и Louvain не упирается в предел разрешения": lambda f: (
         _v(f, "rl_n_below") == 0
     ),
     "все сообщества Leiden и Louvain связны": lambda f: _v(f, "rl_disconnected") == 0,
     "KEFRiN на общем X недопустим при любом весе сети": lambda f: _v(f, "kef_inputs_feasible") == 0,
     "KEFRiN по статье (z, ρ = ξ = 1) недопустим": lambda f: _v(f, "kef_z1_feasible") == 0,
-    "допустимые разбиения KEFRiN далеки от итога": lambda f: _v(f, "kef_z_feasible_ari_max") < 0.5,
-    "проверки по свойствам индексов итог не меняют": lambda f: (
-        _v(f, "icvi_l2_changed") == 0 and _v(f, "icvi_l3_changed") == 0
+    "KEFRiN допустим только при сети, перевешивающей признаки": lambda f: (
+        _v(f, "kef_z_feasible") == 0 or _v(f, "kef_z_feasible_graph_share_min") > 0.5
     ),
-    "при всех семействах на фронте ничья гибрида и Leiden, решает устойчивость": lambda f: (
-        _v(f, "all_tied_n") == 2 and "Leiden" in _v(f, "all_tied") and "Гибрид" in _v(f, "all_tied")
+    "разбиения KEFRiN далеки от итога (все и допустимые)": lambda f: (
+        _v(f, "kef_ari_max") < 0.5 and (_v(f, "kef_z_feasible") == 0 or _v(f, "kef_z_feasible_ari_max") < 0.5)
     ),
+    "у KEFRiN z AVI ниже, чем у гибрида при любом K": lambda f: (
+        _v(f, "kefrin_zavi_max") < _v(f, "hybrid_zavi_min")
+    ),
+    "сеть — меньшая часть разброса KEFRiN": lambda f: _v(f, "kefrin_graph_share") < 0.5,
+    # гибрид и граф
     "итог почти совпадает со спектральной по одному графу": lambda f: _v(f, "ari_hybrid_spectral") > 0.9,
-    "варианты: без уровня трат — тот же итог; косинус и районы — другой": lambda f: (
-        _v(f, "var_no_level_ari") > 0.95
-        and _v(f, "var_graph_basket_cos_ari") < 0.5
-        and _v(f, "var_nodes_separate_ari") < 0.5
+    "при α = 0,5 гибрид близок к спектральной и далёк от K-means по X": lambda f: (
+        _v(f, "alpha_ari_spectral") > 0.9 and _v(f, "alpha_ari_kmeans") < 0.5
     ),
-    "при усечённых хвостах побеждает KEFRiN и разбиение другое": lambda f: (
-        _v(f, "var_x_clipped_winner") == FG.mlabel("shalileh_mirkin") and _v(f, "var_x_clipped_ari") < 0.5
+    "методы по графу согласны с итогом, гауссова смесь — нет": lambda f: (
+        _v(f, "ari_hybrid_leiden") > 0.5 and _v(f, "ari_hybrid_gmm") < 0.3
     ),
+    "гибрид устойчивее Leiden": lambda f: _v(f, "final_stability") > _v(f, "leiden_stability"),
+    "гибрид устойчивее Leiden к удалению рёбер": lambda f: _v(f, "pert_hybrid") > _v(f, "pert_leiden"),
+    # другие входы
+    "без уровня трат — тот же итог; косинус корзин и районы — другое разбиение": lambda f: (
+        _v(f, "var_no_level_winner") == FG.mlabel("hybrid")
+        and _v(f, "var_no_level_ari") > 0.95
+        and _v(f, "var_no_level_ari_same") > 0.9
+        and max(_v(f, "var_graph_basket_cos_ari"), _v(f, "var_graph_basket_cos_ari_same")) < 0.5
+        and max(_v(f, "var_nodes_separate_ari"), _v(f, "var_nodes_separate_ari_same")) < 0.5
+    ),
+    "при усечённых хвостах разбиение гибрида почти то же, а победитель другой": lambda f: (
+        _v(f, "var_x_clipped_ari_same") > 0.9 and _v(f, "var_x_clipped_ari") < 0.5
+    ),
+    # типы и внешняя проверка
     "все типы итога устойчивы по Хеннигу": lambda f: _v(f, "final_jaccard_min") >= 0.75,
+    "у самой объединяемой пары типов больше половины внешних рёбер ведёт друг в друга": lambda f: (
+        _v(f, "avu_pair_value") > 0.5
+    ),
+    "типы не повторяют регионы (AMI < 0,1)": lambda f: _v(f, "ami_region") < 0.1,
     "внешняя проверка: все проверки итога значимы": lambda f: _v(f, "val_n_sig") == _v(f, "val_n_tests"),
     "показатели не связаны с зарплатой": lambda f: _v(f, "val_wage_rho_max") <= 0.5,
-    "в синтетике при сигнале в обоих источниках почти всегда выигрывает метод, видящий оба": lambda f: (
-        _v(f, "syn_both_won") >= 0.9 * _v(f, "syn_both_cells")
-    ),
-    "в синтетике базовая линия сильнее KEFRiN и гибрида при сильных сигналах": lambda f: (
-        _v(f, "syn_strong_kmeans_joint") > _v(f, "syn_strong_hybrid") > _v(f, "syn_strong_shalileh_mirkin")
-    ),
+    "все ожидаемые знаки подтвердились": lambda f: _v(f, "val_signs_ok") == _v(f, "val_signs_n"),
+    # индексы
     "HDBSCAN не дал ни одного K из сетки": lambda f: _v(f, "cands_hdbscan") == 0,
     "признаковые индексы тянут к меньшему K, чем графовые": lambda f: (
         _v(f, "kbest_features") < _v(f, "kbest_graph")
     ),
     "z AVU отрицательна почти у всех разбиений с K ≥ 4": lambda f: _v(f, "avu_neg_share") > 0.9,
-    "гибрид устойчивее Leiden к удалению рёбер": lambda f: _v(f, "pert_hybrid") > _v(f, "pert_leiden"),
-    "Leiden обходит гибрид по объяснимости сверх допуска": lambda f: (
-        _v(f, "interp_diff") > _v(f, "tie_interpretability")
-    ),
-    "гибрид устойчивее Leiden": lambda f: _v(f, "final_stability") > _v(f, "leiden_stability"),
-    "у гибрида при K = 3 крупнейший тип больше половины": lambda f: _v(f, "hybrid_k3_max_share") > 0.5,
     "AVU не определена у всех кандидатов с K = 3": lambda f: _v(f, "avu_undefined_k3") == _v(f, "n_k3"),
-    "все ожидаемые знаки подтвердились": lambda f: _v(f, "val_signs_ok") == _v(f, "val_signs_n"),
-    "порог 1% не добавляет допустимых кандидатов": lambda f: _v(f, "extra01_n") == _v(f, "n_feasible"),
-    "у KEFRiN z AVI ниже, чем у гибрида при любом K": lambda f: (
-        _v(f, "kefrin_zavi_max") < _v(f, "hybrid_zavi_min")
+    # синтетика
+    "в синтетике при сигнале в обоих источниках лучший средний ARI почти всегда у метода, видящего оба": (
+        lambda f: _v(f, "syn_both_won") >= 0.9 * _v(f, "syn_both_cells")
     ),
-    "типы не повторяют регионы (AMI < 0,1)": lambda f: _v(f, "ami_region") < 0.1,
-    "сеть — меньшая часть разброса KEFRiN": lambda f: _v(f, "kefrin_graph_share") < 0.5,
-    "шесть проверок по свойствам индексов": lambda f: _v(f, "icvi_n") == 6,
-    "сравнимые между K метрики графа среди всех семейств выбирают Leiden, итог не меняют": lambda f: (
-        _v(f, "raw_l2_changed") == 0
-        and _v(f, "raw_l3_winner_graph") == "Leiden"
-        and _v(f, "avi_adj_leiden") > _v(f, "avi_adj_hybrid")
+    "в синтетике при сигнале в обоих источниках чаще всего лучшая — базовая линия, а не гибрид": lambda f: (
+        _v(f, "syn_joint_won") > _v(f, "syn_both_hybrid_best")
+        and 2 * _v(f, "syn_joint_won") >= _v(f, "syn_both_won")
     ),
-    "сырой SW оставляет гибрид": lambda f: _v(f, "raw_l3_winner_sw") == FG.mlabel("hybrid"),
+    "в синтетике базовая линия сильнее гибрида, гибрид — KEFRiN при сильных сигналах": lambda f: (
+        _v(f, "syn_strong_kmeans_joint") > _v(f, "syn_strong_hybrid") > _v(f, "syn_strong_shalileh_mirkin")
+    ),
+    "гибрид при шумовом графе теряет сигнал признаков": lambda f: (
+        _v(f, "syn_g0_kmeans") > _v(f, "syn_g0_hybrid") + 0.2
+        and _v(f, "sbm7_shalileh_mirkin") > _v(f, "sbm7_hybrid") + 0.2
+    ),
+    "KEFRiN при шумовом графе сохраняет признаки, но не лучше методов по X (ничья по интервалам)": lambda f: (
+        _v(f, "syn_g0_shalileh_mirkin") > _v(f, "syn_g0_hybrid") + 0.2
+        and _v(f, "syn_g0_shalileh_mirkin") > _v(f, "syn_g0_kmeans_joint")
+        and _v(f, "syn_noisy_live") > 0
+        and _v(f, "syn_noisy_x_tie") == _v(f, "syn_noisy_live")
+    ),
+    "порог «победителя нет» лежит в разрыве лучших средних ARI": lambda f: (
+        _v(f, "syn_none_best_max") < _v(f, "syn_min_ari")
+        and _v(f, "syn_live_best_min") > 2 * _v(f, "syn_min_ari")
+    ),
+    "без сигнала в признаках методы по X бессильны": lambda f: _v(f, "syn_nofeat_feat_max") < 0.1,
+    "при сигнале только в графе методы на двух источниках в ничьей с лучшим": lambda f: (
+        _v(f, "syn_f0_both_tie") >= 1
+    ),
+    "блочный граф: Leiden почти точен при малой доле внешних рёбер, при 0,7 и выше граф шумовой": lambda f: (
+        _v(f, "sbm_low_leiden") > 0.9 and _v(f, "sbm_high_graph_max") < 0.05
+    ),
+    "блочный граф 0,5: у гибрида лучший средний ARI больше чем в половине ячеек": lambda f: (
+        2 * _v(f, "sbm_mid_hybrid_best") > _v(f, "sbm_mid_n")
+    ),
+    "блочный граф 0,5: гибрид по среднему выше Leiden, KEFRiN и K-means": lambda f: (
+        _v(f, "sbm_mid_hybrid")
+        > max(_v(f, "sbm_mid_leiden"), _v(f, "sbm_mid_kefrin"), _v(f, "sbm_mid_kmeans"))
+    ),
 }
 
 
@@ -799,6 +1207,100 @@ def table_level2_all(o: Out) -> str:
             ]
         )
     cols = ["Победитель метода", *[FG.CRITERION_LABELS[c] for c in CRITERIA], "На фронте", "Очки Копленда"]
+    return _md(pd.DataFrame(rows, columns=cols))
+
+
+CRIT_LABELS: dict[str, str] = {
+    "quality_features": "качеству в X",
+    "quality_graph": "качеству на G",
+    "stability": "устойчивости",
+    "interpretability": "объяснимости",
+}
+
+
+def _tradeoff(lw: pd.DataFrame, fin: str, cands: pd.DataFrame, cp: ClusterParams) -> str:
+    """Итог против каждого кандидата фронта (второй уровень среди всех семейств): по каким критериям лучше
+    и хуже сверх допуска ничьей."""
+    front = [x for x in lw.index if bool(lw.loc[x, "on_front"]) and x != fin]
+    head = "" if fin in lw.index and bool(lw.loc[fin, "on_front"]) else "гибрид не на фронте; "
+    parts = []
+    for x in front:
+        better, worse = [], []
+        for cr in CRITERIA:
+            d = float(lw.loc[fin, f"crit_{cr}"] - lw.loc[x, f"crit_{cr}"])
+            if d > cp.tie[cr]:
+                better.append(CRIT_LABELS[cr])
+            elif d < -cp.tie[cr]:
+                worse.append(CRIT_LABELS[cr])
+        parts.append(
+            f"против «{_cand_label(cands, x)}» гибрид лучше по {', '.join(better) or 'ни одному критерию'}, "
+            f"хуже — по {', '.join(worse) or 'ни одному'}"
+        )
+    return head + ("; ".join(parts) or "других кандидатов на фронте нет")
+
+
+def _cand_label(cands: pd.DataFrame, cand: str) -> str:
+    return f"{FG.mlabel(cands.loc[cand, 'method'])}, K = {int(cands.loc[cand, 'k'])}"
+
+
+def _cand_quoted(cands: pd.DataFrame, cand: str) -> str:
+    """«Leiden» с K = 3 — название метода в кавычках, K отдельно (как в соседних фразах отчёта)."""
+    return f"«{FG.mlabel(cands.loc[cand, 'method'])}» с K = {int(cands.loc[cand, 'k'])}"
+
+
+def _freq_text(winners: pd.Series, cands: pd.DataFrame, total: int) -> str:
+    """«Гибрид, K = 4 — 3 из 5; Спектральная, K = 4 — 2 из 5» по убыванию частоты."""
+    cnt = winners.value_counts()
+    return "; ".join(f"{_cand_label(cands, w)} — {n} из {total}" for w, n in cnt.items())
+
+
+def _syn_counts(s: pd.DataFrame) -> str:
+    """Все ячейки синтетики одинаково: у каждого метода — сколько раз лучший средний ARI, сколько раз явный
+    победитель, сколько раз в наборе ничьей; «нет» — отдельно."""
+    methods = [m for m in FG.METHOD_LABELS if m in s.columns and m not in ("tie", "none")]
+    sets = s["winner_set"].fillna("").astype(str).str.split(",")
+    live = s["winner"] != "none"
+    parts = []
+    for m in methods:
+        best = int(((s["best"] == m) & live).sum())
+        clear = int((s["winner"] == m).sum())
+        tie = int(((s["winner"] == "tie") & sets.map(lambda x, m=m: m in x)).sum())
+        if best or clear or tie:
+            parts.append((best, clear, tie, m))
+    parts.sort(key=lambda p: (-p[0], -p[1], -p[2]))
+    return "; ".join(f"{FG.mlabel(m)} — {b}, {c} и {t}" for b, c, t, m in parts)
+
+
+def table_seed(o: Out) -> str:
+    """Частота победителей по seed: проверка × уровень × правило (основное и с допуском качества)."""
+    sr = o.seed_runs
+    n = sr["seed"].nunique()
+    rows = []
+    for check in [c for c in CHECK_LABELS if c != "all_eligible"]:
+        cells = [CHECK_LABELS[check]]
+        for rule in ("prereg", "tolerance"):
+            for scope in ("eligible", "all"):
+                sel = (sr["rule"] == rule) & (sr["scope"] == scope) & (sr["kind"] == "check")
+                m = sr.loc[sel & (sr["check"] == check)]
+                cells.append(_freq_text(m["winner"], o.cands, n) if len(m) else style.NA_TEXT)
+        rows.append(cells)
+    for scope, lab in (
+        ("all", "24 порядка на обоих уровнях"),
+        ("all_level2", "24 порядка только при выборе метода"),
+    ):
+        cells = [lab]
+        for rule in ("prereg", "tolerance"):
+            el = sr.loc[(sr["rule"] == rule) & (sr["kind"] == "order") & (sr["scope"] == "eligible")]
+            od = sr.loc[(sr["rule"] == rule) & (sr["kind"] == "order") & (sr["scope"] == scope)]
+            cells += [_freq_text(el["winner"], o.cands, len(el)), _freq_text(od["winner"], o.cands, len(od))]
+        rows.append(cells)
+    cols = [
+        "Проверка",
+        "Предрегистрация: итог",
+        "Предрегистрация: все семейства",
+        "С допуском качества: итог",
+        "С допуском качества: все семейства",
+    ]
     return _md(pd.DataFrame(rows, columns=cols))
 
 
@@ -1087,21 +1589,47 @@ def table_validation_methods(o: Out, cp: ClusterParams) -> str:
     return _md(pd.DataFrame(rows, columns=cols))
 
 
-def table_synthetic_sbm(o: Out) -> str:
-    s = o.syn.loc[o.syn["design"] == "sbm"]
+def _syn_verdict(r: pd.Series) -> str:
+    """Итог ячейки синтетики: метод; «ничья: …» — все, чей интервал перекрывает интервал лучшего; «нет»."""
+    if r["winner"] == "none":
+        return "нет"
+    if r["winner"] == "tie":
+        return "ничья: " + ", ".join(FG.mlabel(m) for m in str(r["winner_set"]).split(","))
+    return FG.mlabel(r["winner"])
+
+
+def _syn_table(s: pd.DataFrame, first: str) -> str:
+    """Все ячейки одного генератора одинаково: средний ARI каждого метода, лучший с 95% интервалом, итог."""
     meths = [m for m in FG.METHOD_LABELS if m in s.columns and s[m].notna().any()]
     rows = []
     for _, r in s.iterrows():
+        b = r["best"]
+        best = f"{FG.mlabel(b)} {_n(r[b])} [{_n(r[b + '_lo'])}; {_n(r[b + '_hi'])}]"
         rows.append(
             [
                 _n(r["graph_signal"], 1),
                 _n(r["feature_signal"], 1),
                 *[_n(r[m]) for m in meths],
-                FG.mlabel(r["winner"]),
+                best,
+                _syn_verdict(r),
             ]
         )
-    cols = ["Доля рёбер между группами", "Сигнал в X", *[FG.mlabel(m) for m in meths], "Победитель"]
+    cols = [
+        first,
+        "Сигнал в X",
+        *[FG.mlabel(m) for m in meths],
+        "Лучший средний ARI [95% интервал]",
+        "Итог ячейки",
+    ]
     return _md(pd.DataFrame(rows, columns=cols), right=0)
+
+
+def table_synthetic_sbm(o: Out) -> str:
+    return _syn_table(o.syn.loc[o.syn["design"] == "sbm"], "Доля рёбер между группами")
+
+
+def table_synthetic_knn(o: Out) -> str:
+    return _syn_table(o.syn.loc[o.syn["design"] == "knn"], "Сигнал в G")
 
 
 def table_methods_final(o: Out, cp: ClusterParams, f: Mapping[str, Fact]) -> str:
@@ -1151,9 +1679,8 @@ def table_methods_final(o: Out, cp: ClusterParams, f: Mapping[str, Fact]) -> str
             f"устойчив и на недопустимых K (медианный ARI бутстрапа {t('stab_median_kmeans')}, "
             f"`candidates.csv`)",
             f"хвост доступности рынков даёт {small}: все K недопустимы",
-            f"сигнал только в признаках, хвосты усечены (синтетика: при сигнале в графе 0 лучший метод по X "
-            f"— "
-            f"ARI {t('syn_nograph_best_feat')}, рис. 1)",
+            f"сигнал только в признаках, хвосты усечены (синтетика: при сигнале в графе 0 лучший метод "
+            f"по X — ARI {t('syn_nograph_best_feat')}, рис. 1, табл. 1)",
         ),
         "ward": (
             "детерминирован, одно дерево на все K",
@@ -1174,10 +1701,11 @@ def table_methods_final(o: Out, cp: ClusterParams, f: Mapping[str, Fact]) -> str
         ),
         "leiden": (
             f"все сообщества связны на G ({t('rl_disconnected')} несвязных у {t('rl_n_cands')} разбиений, "
-            f"раздел 5); "
-            "допустим при всех K (табл. 2)",
+            f"раздел 5); допустимых K — {t('feas_leiden')} из {t('cands_leiden')} (табл. 2)",
             f"устойчивость к удалению рёбер {t('pert_leiden')} против {t('pert_hybrid')} у гибрида (табл. 2)",
-            "сигнал только в графе (синтетика SBM: ARI " + t("sbm_low_leiden") + ", табл. 1)",
+            f"сигнал только в графе; явная победа метода только по графу в синтетике — "
+            f"{t('syn_graph_only_clear_text')}; на kNN-графе без сигнала в X — ничья с гибридом и базовой "
+            f"линией ({t('syn_f0_four_tie')} из {t('syn_f0_n')} ячеек, табл. 1)",
         ),
         "louvain": (
             "быстрый",
@@ -1187,27 +1715,44 @@ def table_methods_final(o: Out, cp: ClusterParams, f: Mapping[str, Fact]) -> str
         "spectral": (
             f"устойчив к бутстрапу и рёбрам ({t('pert_spectral')}; табл. 2)",
             "видит только граф: признаки места не участвуют",
-            "граф связен, сигнал в графе сильнее, чем в признаках",
+            f"граф связен и информативен; в синтетике — в ничьей с гибридом (блочный граф с долей внешних "
+            f"рёбер 0,5: {t('sbm_mid_tie_spectral')} из {t('sbm_mid_n')} ячеек, табл. 1а; kNN-граф без "
+            f"сигнала в X: {t('syn_f0_four_tie')} из {t('syn_f0_n')}, табл. 1)",
         ),
         "shalileh_mirkin": (
             "одна целевая функция по X и G; признаки и связи восстанавливаются центрами (раздел 2)",
             f"на X с хвостами все K недопустимы (мелкий тип {t('small_shalileh_mirkin_min')}–"
-            f"{t('small_shalileh_mirkin_max')} узлов, табл. 3); в синтетике слабее гибрида "
-            f"({t('syn_strong_shalileh_mirkin')} против {t('syn_strong_hybrid')}, рис. 1)",
-            "хвосты X усечены: тогда побеждает (раздел 6, «Другие входы»), либо граф без координат (SBM, "
-            "табл. 1)",
+            f"{t('small_shalileh_mirkin_max')} узлов, табл. 3), в варианте статьи тоже (табл. 7а); при "
+            f"сильных сигналах в синтетике слабее гибрида ({t('syn_strong_shalileh_mirkin')} против "
+            f"{t('syn_strong_hybrid')}, табл. 1)",
+            f"граф шумовой, признаки информативны, а нужен метод на двух источниках: сигнал признаков "
+            f"сохраняет (граф без сигнала — ARI {t('syn_g0_shalileh_mirkin')} против {t('syn_g0_hybrid')} "
+            f"у гибрида и {t('syn_g0_kmeans')} у K-means, табл. 1; SBM с долей внешних рёбер 0,7 — "
+            f"{t('sbm7_shalileh_mirkin')} против {t('sbm7_hybrid')} и {t('sbm7_kmeans')}, табл. 1а); "
+            f"но методы по X (K-means, гауссова смесь) не хуже: ничья по интервалам в "
+            f"{t('syn_noisy_x_tie')} из {t('syn_noisy_live')} ячеек шумового графа, где лучший средний "
+            f"ARI не ниже {t('syn_min_ari')}; в остальных {t('syn_noisy_none')} из {t('syn_noisy_n')} "
+            f"победителя нет",
         ),
         "hybrid": (
             f"устойчив ({t('final_stability')}), все типы устойчивы по Хеннигу (табл. 9)",
             f"при α = {t('alpha')} почти совпадает со спектральной (ARI {t('ari_hybrid_spectral')}, рис. 4); "
-            f"зависит от правила рёбер (ARI {t('var_graph_basket_cos_ari_same')} с сетью косинуса, табл. 8)",
-            f"граф без исходных координат (SBM: ARI {t('sbm_mid_hybrid')} при доле внешних рёбер 0,5, табл. "
-            f"1)",
+            f"при шумовом графе теряет сигнал признаков: ARI {t('syn_g0_hybrid')} против "
+            f"{t('syn_g0_kmeans')} у K-means (табл. 1) и {t('sbm7_hybrid')} против {t('sbm7_kmeans')} "
+            f"(SBM 0,7, табл. 1а); "
+            f"при координатах графа уступает базовой линии ({t('syn_strong_hybrid')} против "
+            f"{t('syn_strong_kmeans_joint')}, табл. 1); зависит от правила рёбер (ARI "
+            f"{t('var_graph_basket_cos_ari_same')} с сетью косинуса) и состава узлов "
+            f"({t('var_nodes_separate_ari_same')} с районами Москвы и Петербурга, табл. 8)",
+            f"граф информативен и дан без координат (SBM с долей внешних рёбер 0,5: средний ARI "
+            f"{t('sbm_mid_hybrid')} против {t('sbm_mid_spectral')} у спектральной и {t('sbm_mid_leiden')} "
+            f"у Leiden; лучший по среднему в {t('sbm_mid_hybrid_best')} из {t('sbm_mid_n')} ячеек, явно — в "
+            f"{t('sbm_mid_hybrid_clear')}, табл. 1а)",
         ),
         "kmeans_joint": (
-            f"лучший в синтетике, где граф построен из координат ({t('syn_joint_won')} из "
-            f"{t('syn_both_cells')} "
-            "ячеек, рис. 1)",
+            f"лучший средний ARI в синтетике, где граф построен из координат ({t('syn_joint_won')} из "
+            f"{t('syn_both_cells')} ячеек с сигналом в обоих источниках, явно — {t('syn_joint_clear')}; "
+            f"табл. 1)",
             f"на данных все K недопустимы (тип пригородов из {t('suburbs_size')} узлов, табл. 3)",
             "координаты, из которых строится граф, доступны, хвосты X усечены",
         ),
@@ -1291,9 +1836,11 @@ TABLES: dict[str, Callable] = {
     "validation": lambda o, cp, f: table_validation(o),
     "validation_methods": lambda o, cp, f: table_validation_methods(o, cp),
     "synthetic_sbm": lambda o, cp, f: table_synthetic_sbm(o),
+    "synthetic_knn": lambda o, cp, f: table_synthetic_knn(o),
     "methods_final": table_methods_final,
     "small": lambda o, cp, f: table_small(o),
     "grid": lambda o, cp, f: table_grid(o),
+    "seed": lambda o, cp, f: table_seed(o),
     "resolution": lambda o, cp, f: table_resolution(o),
     "kefrin": lambda o, cp, f: table_kefrin(o),
 }
@@ -1306,7 +1853,9 @@ def make_figures(cfg: Config, cp: ClusterParams, o: Out) -> list[FG.FigureInfo]:
     fam = {m: cp.family_of(m) for m in cp.methods}
     metrics = list(cp.icvi_metrics)
     figs = [
-        FG.fig_synthetic(o.dir, o.syn, fam, int(cp.synthetic["repeats"])),
+        FG.fig_synthetic(
+            o.dir, o.syn, fam, int(cp.synthetic["repeats"]), float(cp.synthetic.get("min_ari", 0.05))
+        ),
         FG.fig_methods(o.dir, level1_table_all(o), o.final["method"]),
         FG.fig_by_k(o.dir, o.cands, metrics),
         FG.fig_alpha(o.dir, o.alpha, metrics),

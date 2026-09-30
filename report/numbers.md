@@ -15,9 +15,9 @@
 - `git:<коммит>` — `git show <коммит>`;
 - `замер` — измерение 28.09.2026 при подготовке отчёта (команда — в разделе 10 отчёта).
 
-Результаты сравнения среди всех семейств (фронт, Копленд, Борда, порядки критериев, пороги 55–60%) из отчёта
-убраны до правок этапа cluster и в реестр не входят. Числа, которые повторяют уже внесённое (например, 1776 в разных разделах), внесены один раз — при первом
-появлении. Номера разделов, рисунков, таблиц и формул статей не вносятся.
+Числа, которые повторяют уже внесённое (например, 1776 в разных разделах), внесены один раз — при первом
+появлении. Номера разделов, рисунков, таблиц и формул статей не вносятся; годы в ссылках на литературу —
+по приложению Б отчёта (проверены по DOI).
 
 ## Шапка и раздел 2. Данные
 
@@ -117,82 +117,97 @@
 
 ## Раздел 5. Методы кластеризации
 
+Выходы этапа `cluster` — прогон 30.09.2026 с `seed: 42` (`outputs/cluster/report_facts.json`, `docs/clustering.md`).
+
 | Раздел | Число в тексте | Источник | Что это |
 |---|---|---|---|
 | 5 | K = 3, …, 12 | `cl.k_min`, `cl.k_max` | сетка K |
 | 5 | `2ee1363`, 28.09.2026 | `git:2ee1363` | коммит предрегистрации |
-| 5 | 12 418 | `cl.n_edges` | рёбер G |
+| 5 | 12 418 | `cl.n_edges` | рёбер G |
 | 5 | 0,11 | `cl.weight_min` | наименьший вес ребра |
 | 5 | одна компонента | `cl.n_components` | 1 |
 | 5 | 11 атрибутов | `cl.n_x` | признаков X |
+| 5 | 17 разбиений; 360; от 152 до 334 | `cl.rl_n_cands`, `cl.rl_min_inner`, `cl.rl_threshold`, `cl.rl_threshold_max` | предел разрешения модульности |
 | 5 | ρ = ξ = 1 | `yaml:clustering.impl.shalileh_mirkin.rho`, `…xi` | веса KEFRiN |
 | 5 | α = 0,5 | `cl.alpha`; `yaml:clustering.protocol.hybrid_alpha` | вес графа в гибриде |
-| 5 | 2% | `cl.min_share` | наименьший тип |
-| 5 | 36 | `cl.min_share_nodes` | узлов в 2% |
-| 5 | 50% | `cl.max_share` | крупнейший тип |
-| 5 | 10% | `cl.max_noise` | шум HDBSCAN |
+| 5 | 2%; 36; 50%; 10% | `cl.min_share`, `cl.min_share_nodes`, `cl.max_share`, `cl.max_noise` | пороги допустимости |
 | 5 | 200 разметок | `cl.icvi_perms` | случайный базис |
-| 5 | 100 подвыборок | `cl.bootstrap` | бутстрап устойчивости |
-| 5 | 80% | `cl.subsample` | доля узлов в подвыборке |
-| 5 | глубина 3 | `cl.tree_depth` | дерево объяснимости |
-| 5 | 17 признаков | `cl.n_tree` | входы дерева |
-| 5 | 5-кратная | `cl.cv_folds` | перекрёстная проверка |
+| 5 | 100 подвыборок; 80% | `cl.bootstrap`, `cl.subsample` | бутстрап устойчивости |
+| 5 | глубина 3; 17 признаков; 5-кратная | `cl.tree_depth`, `cl.n_tree`, `cl.cv_folds` | дерево объяснимости |
 | 5 | 0,02; 0 | `cl.tie_stability`, `cl.tie_interpretability`; `yaml:clustering.selection.tie` | допуски ничьей |
-| 5 | 20 наборов вместо 5 | `yaml:clustering.synthetic.repeats` | изменено этапом cluster после выходов 28.09 (незакоммиченная правка): числа синтетики ниже — из прогона с 5 наборами и будут пересчитаны |
-| 5 | 600 узлов | `cl.syn_n` | синтетика |
-| 5 | 4 группы | `cl.syn_k` | синтетика |
-| 5 | шести координатам | `yaml:clustering.synthetic.n_basket` | 6 |
-| 5 | 16 ячеек | `cl.syn_both_won`, `cl.syn_both_cells` | 16 из 16 |
-| 5 | 0,91 | `cl.syn_strong_kmeans_joint` | базовая линия, сильные сигналы |
-| 5 | 0,84 | `cl.syn_strong_hybrid` | гибрид |
-| 5 | 0,42 (KEFRiN, синтетика) | `cl.syn_strong_shalileh_mirkin` | KEFRiN |
-| 5 | половина рёбер между группами | `yaml:clustering.synthetic.sbm_mixing` | доля 0,5 |
-| 5 | 0,42 (гибрид, блочный граф) | `cl.sbm_mid_hybrid` | |
-| 5 | 0,14 | `cl.sbm_mid_leiden` | |
-| 5 | 0,19 | `cl.sbm_mid_kefrin` | |
-| 5 | 0,3 | `cl.sbm_mix_min` | доля внешних рёбер |
-| 5 | 0,98 | `cl.sbm_low_leiden` | Leiden при доле 0,3 |
-| 5 | 0,00; 0,55; 0,59; сигнал в признаках 2, в графе 0 | `csv:outputs/cluster/synthetic_summary.csv [design = knn; graph_signal = 0; feature_signal = 2; hybrid, shalileh_mirkin, kmeans]` | пометка «ждёт правок этапа cluster» и строка «Гибрид» в таблице методов |
-| 5 | 87 | `cl.n_candidates` | кандидатов |
-| 5 | 29 | `cl.n_feasible` | допустимых |
+| 5 | 600 узлов; 4 группы; шести координатам | `cl.syn_n`, `cl.syn_k`, `yaml:clustering.synthetic.n_basket` | синтетика |
+| 5 | от 0,3 до 0,9 | `cl.sbm_mix_min`, `cl.sbm_mix_max` | доля рёбер между группами в блочном графе |
+| 5 | 45 ячеек; 20 наборов | `cl.syn_all_cells`, `cl.syn_repeats`; `yaml:clustering.synthetic.repeats` | |
+| 5 | 95%; 0,05 | `cl.syn_ci`, `cl.syn_min_ari`; `yaml:clustering.synthetic.ci_level`, `…min_ari` | правило ячейки |
+| 5 | 9; 30; 6 | `cl.syn_clear_cells`, `cl.syn_tie_cells`, `cl.syn_none_cells` | явный победитель, ничья, «нет» |
+| 5 | 16 из 16; явно — 6 | `cl.syn_both_won`, `cl.syn_both_cells`, `cl.syn_both_clear` | сигнал в обоих источниках |
+| 5 | во всех 16 — базовая линия | `docs/clustering.md`, раздел 4, второй пункт («16 из 16»); `cl.syn_both_hybrid_best` = 0 | |
+| 5 | 0,91; 0,83; 0,44 | `cl.syn_strong_kmeans_joint`, `cl.syn_strong_hybrid`, `cl.syn_strong_shalileh_mirkin` | сильные сигналы |
+| 5 | во всех 4 ячейках | `cl.syn_f0_four_tie`, `cl.syn_f0_n` | ничья на kNN без сигнала в X |
+| 5 | одна ячейка; 0,3; 0,98 | `cl.syn_graph_only_clear_n`, `cl.syn_graph_only_clear_text`, `cl.sbm_low_leiden` | явная победа метода только по графу |
+| 5 | 5 из 5; 0,43; 0,34; 0,17; в 1; в 3 | `cl.sbm_mid_hybrid_best`, `cl.sbm_mid_n`, `cl.sbm_mid_hybrid`, `cl.sbm_mid_spectral`, `cl.sbm_mid_leiden`, `cl.sbm_mid_hybrid_clear`, `cl.sbm_mid_tie_spectral` | блочный граф, доля 0,5 |
+| 5 | 2,0; 0,03; 0,46; 0,39 | `cl.syn_fmax`, `cl.syn_g0_hybrid`, `cl.syn_g0_kmeans`, `cl.syn_g0_shalileh_mirkin` | шумовой граф kNN |
+| 5 | 0,7; 0,04; 0,43; 0,40 | `cl.sbm7_hybrid`, `cl.sbm7_kmeans`, `cl.sbm7_shalileh_mirkin` | блочный граф, доля 0,7, сигнал в X 2,0 |
+| 5 | во всех 9 ячейках; 9 из 9; 0,05 | `cl.syn_noisy_x_tie`, `cl.syn_noisy_live`, `cl.syn_min_ari` | шумовой граф (kNN без сигнала в графе и блочный граф с долей от 0,7), ячейки не «нет»: ничья K-means, гауссовой смеси и KEFRiN; то же — табл. 13 |
+| 5 | 28.09; `512cc67` | `git log --format='%h %ad' --date=short -S sbm_mixing -- configs/default.yaml` → `512cc67 2026-09-28`; предрегистрация `2ee1363` синтетику прямо исключает (комментарий блока `clustering` в `git show 2ee1363 -- configs/default.yaml`) | синтетика целиком не предрегистрирована; то же — `docs/clustering.md`, раздел 10 |
+| 5 | 29.09; было 5 наборов | `docs/clustering.md`, раздел 10, пункт «Синтетика изменена 29 сентября» | |
+| 5 | 0,040; 0,149 | `cl.syn_none_best_max`, `cl.syn_live_best_min` | разрыв у порога 0,05 |
+| 5 | 87; 29 | `cl.n_candidates`, `cl.n_feasible` | кандидатов, допустимых |
 | 5 | 10 значений K | `cl.cands_shalileh_mirkin`, `cl.cands_kmeans_joint`; допустимых — `cl.feas_shalileh_mirkin` = 0, `cl.feas_kmeans_joint` = 0 | |
-| 5 | 105 из 108 | `cl.n_small_market`, `cl.n_small` | мелких типов, выделенных по доступности рынков |
-| 5 | 16 районов (мелкий тип гибрида) | `cl.suburbs_size` | |
-| 5 | 26 MAD | `cl.suburbs_scaled` | |
-| 5 | K = 4 | `cl.final_k` | итог |
+| 5 | 105 из 108 | `cl.n_small_market`, `cl.n_small` | мелкие типы по доступности рынков |
+| 5 | 16 районов; 26 MAD | `cl.suburbs_size`, `cl.suburbs_scaled` | мелкий тип гибрида |
+| 5 | 1,2%; ξ/ρ от 16 | `cl.kef_z1_minshare_k4`, `cl.kef_z_feasible_min_xi` | KEFRiN в варианте статьи |
 | 5 | 51,5% | `cl.hybrid_k3_max_share` | крупнейший тип гибрида при K = 3 |
-| 5 | 806, 473, 394, 103 | `cl.type1_size` … `cl.type4_size` | размеры типов |
-| 5 | 0,91 | `cl.final_stability` | устойчивость итога |
-| 5 | 0,90 | `cl.final_jaccard_min` | худший Жаккар типа |
-| 5 | 0,75 | `cl.jaccard_stable` | порог Хеннига |
-| 5 | 10 разных seed; ARI 1,00 | `cl.seeds`, `cl.final_seed_ari` | совпадение разбиений гибрида K = 4 по seed |
+| 5 | K = 4; 806, 473, 394, 103 | `cl.final_k`, `cl.type1_size` … `cl.type4_size` | итог |
+| 5 | 0,91; 0,90; 0,75 | `cl.final_stability`, `cl.final_jaccard_min`, `cl.jaccard_stable` | устойчивость итога |
+| 5 | 10 seed; ARI 1,00 | `cl.seeds`, `cl.final_seed_ari` | разбиения гибрида K = 4 по seed метода |
+| 5 | seed 42–46; 5 из 5 (оба правила) | `cl.seed_min`, `cl.seed_max`, `cl.n_seeds`, `cl.sf_prereg_eligible`, `cl.sf_tolerance_eligible` | итог по seed |
+| 5 | фронт из трёх: Leiden K = 3, Louvain K = 6, гибрид | `cl.all_front`, `cl.all_front_n` | все семейства, seed 42 |
+| 5 | +1 | `cl.all_top_score`, `cl.all_tied` | очки Копленда |
+| 5 | 0,91 против 0,62 | `cl.final_stability`, `cl.leiden_stability` | равенство очков решает устойчивость |
+| 5 | 4 из 5; спектральная K = 4 — 1 | `cl.sf_prereg_all` | все семейства, seed 42–46, предрегистрация |
+| 5 | наименьший ARI 1,00 | `cl.sf_all_minari`, `cl.sf_all_minari_min` | разбиения победителей по seed |
+| 5 | 0,91 против 0,90 | `cl.final_stability`, `cl.spectral_stability` | |
+| 5 | 7 из 8 | `cl.all_n_same`, `cl.all_n_checks` | проверки чувствительности, все семейства |
+| 5 | один шаг — спектральная K = 4 | `cl.all_changed`, `cl.all_joint_winner`, `cl.all_joint_k` | |
+| 5 | 24 порядка; 12; 6; 6 | `cl.orders_total`, `cl.lex_l2_text` | порядки при выборе метода |
+| 5 | Leiden K = 3; 0,927; 0,884; 0,606; 0,590 | `cl.raw_l3_winner_graph`, `cl.raw_l3_winner_graph_k`, `cl.avi_adj_leiden`, `cl.avi_adj_hybrid`, `cl.mq_raw_leiden`, `cl.mq_raw_hybrid` | метрики графа, сравнимые между K |
+| 5 | 55%; спектральная K = 3; 0,008; 0,02; K = 4 / K = 3 | `cl.grid55_all_winner`, `cl.grid55_all_k`, `cl.hybrid_k3_k4_stab_diff`, `cl.tie_stability`, `cl.grid55_strict_hybrid_k`, `cl.grid55_tol_hybrid_k` | порог крупнейшего типа |
+| 5 | 1%–3% не меняет | `cl.grid_minshare_effect` = 0; `csv:outputs/cluster/threshold_grid.csv` | порог наименьшего типа |
+| 5 | K = 3 не участвовал во внешней проверке | `csv:outputs/cluster/validation.csv [cand: hybrid_k03 нет]` | |
+| 5 | 5 базисам; 0,03; 0,04 | `yaml:clustering.impl.seed_check`; `cl.tol_qf`, `cl.tol_qg` | допуск по шуму базиса |
+| 5 | таблица «правило × уровень» | `cl.final_label`, `cl.final_k`, `cl.all_winner`, `cl.tol_eligible_winner`, `cl.tol_all_winner`, `cl.sf_prereg_eligible`, `cl.sf_tolerance_eligible`, `cl.sf_prereg_all`, `cl.sf_tolerance_all` | |
+| 5 | 0,031–0,033; 0,030–0,039 | `cl.tol_jk_qf_min`, `cl.tol_jk_qf_max`, `cl.tol_jk_qg_min`, `cl.tol_jk_qg_max` | допуск без одного базиса |
+| 5 | 5 из 5 | `cl.tol_jk_winners`, `cl.tol_jk_n` | |
+| 5 | 25 сочетаний; 25 из 25 | `cl.tol_grid_n`, `cl.tol_grid_winners` | сетка допусков |
+| 5 | 0,032, 0,031 и 0,035; 0,043, 0,042 и 0,037 | поле `value` ключей `cl.tol_qf`, `cl.tol_qg` в `report_facts.json` трёх прогонов 30.09: seed 42 — репозиторий (0,03194; 0,04256), seed 43 и 44 — временные папки (0,03150; 0,04188 и 0,03529; 0,03694) | наблюдение по трём прогонам, одной командой не воспроизводится; те же числа — в `docs/clustering.md`, раздел 10 (опечатка 0,032 для seed 43 исправлена 30.09 в шаблоне `src/munnet/clustering/templates/clustering.md`) |
+| 5 | seed 44 с допуском: спектральная в прогонах 42 и 43, гибрид в 44 | `csv:outputs/cluster/seed_runs.csv [check = main; scope = all; rule = tolerance; seed = 44] = spectral_k04`; то же в `seed_runs.csv` прогона 43; в прогоне 44 — `hybrid_k04` | прогоны 43 и 44 — вне репозитория |
+| 5 | 23 из 276 (seed 44–46); 28 из 368 (seed 44–47); 0 из 368; 0 из 368, 276 и 368 | сравнение `seed_runs.csv` трёх прогонов 30.09 по ключу (`check`, `scope`, `rule`, `seed`, `kind`), число строк с разным `winner`: `rule = tolerance` — пары прогонов 42–44, 43–44, 42–43; `rule = prereg` — 42–43, 42–44, 43–44. Все расхождения — на уровне всех семейств (`scope` = `all`, `all_level2` и проверка `all_eligible`) | наблюдение по трём прогонам, одной командой не воспроизводится; прогоны 43 и 44 — вне репозитория |
+| 5 | гибрид с K = 4 при seed 42 | `cl.all_winner`, `cl.seed` | победитель по z-оценкам среди всех семейств |
 | 5 | 0,94 | `cl.ari_hybrid_spectral` | ARI гибрида и спектральной |
-| 5 | 0,22 | `cl.var_graph_basket_cos_ari_same` | сеть косинуса |
-| 5 | 0,32 | `cl.var_nodes_separate_ari_same` | районы отдельными узлами |
+| 5 | 0,22; 0,28; K = 3 | `cl.var_graph_basket_cos_ari_same`, `cl.var_graph_basket_cos_ari`, `cl.var_graph_basket_cos_k` | сеть косинуса |
+| 5 | 0,32; 0,40; K = 4 | `cl.var_nodes_separate_ari_same`, `cl.var_nodes_separate_ari`, `cl.var_nodes_separate_k` | районы отдельными узлами |
 | 5 | 1,00 | `cl.var_no_level_ari_same` | без уровня трат |
-| 5 | KEFRiN, K = 4 | `cl.var_x_clipped_winner`, `cl.var_x_clipped_k` | усечённые хвосты |
-| 5 | 0,15 | `cl.var_x_clipped_ari` | |
-| 5 | 0,97 | `cl.var_x_clipped_ari_same` | |
+| 5 | KEFRiN, K = 4; 0,15; 0,97 | `cl.var_x_clipped_winner`, `cl.var_x_clipped_k`, `cl.var_x_clipped_ari`, `cl.var_x_clipped_ari_same` | усечённые хвосты |
 | 5 | 1000 перестановок | `cl.val_perms` | внешняя проверка |
 | 5 | 10 проверок | `cl.val_n_sig`, `cl.val_n_tests` | значимы все |
 | 5 | 0,152; 0,194; 0,024 | `cl.val_ip_per_1000_difference`, `cl.val_orgs_per_1000_difference`, `cl.val_nights_pc_difference` | ε² |
 | 5 | 0,002–0,003 | `cl.val_ip_per_1000_difference_null` (0,002), `cl.val_orgs_per_1000_difference_null` (0,002), `cl.val_nights_pc_difference_null` (0,003) | ε² на перестановках |
 | 5 | 4 из 4 | `cl.val_signs_ok`, `cl.val_signs_n` | знаки |
 | 5 | от 0,006 до 0,026 | `cl.val_ip_per_1000_beyond_attributes` (0,006), `cl.val_orgs_per_1000_beyond_attributes` (0,026), `cl.val_nights_pc_beyond_attributes` (0,010) | прирост R² |
-| 5 | 2–34 | `cl.small_kmeans_min`, `cl.small_kmeans_max` | мелкий тип K-means |
-| 5 | 0,53 | `cl.stab_median_ward` | медианная устойчивость Уорда |
-| 5 | K = 3 (гауссова смесь) | `cl.win_gmm_k` | |
-| 5 | 0,09 | `cl.ari_hybrid_gmm` | |
-| 5 | от 5 до 400; 2 кластера | `cl.hdbscan_mcs_min`, `cl.hdbscan_mcs_max`, `cl.hdbscan_kmax` | HDBSCAN |
-| 5 | 10 K (Leiden) | `cl.feas_leiden` | допустим при всех K |
-| 5 | 10% рёбер | `yaml:clustering.impl.edge_perturbation.drop` | 0.1 |
-| 5 | 0,63 | `cl.pert_leiden` | |
-| 5 | 7 из 10 | `cl.louvain_n_reached` | |
-| 5 | 0,90 (спектральная) | `csv:outputs/cluster/candidates.csv [spectral_k04; stability = 0,901]` | |
-| 5 | 0,97 (спектральная) | `cl.pert_spectral` | |
-| 5 | 1–32 | `cl.small_shalileh_mirkin_min`, `cl.small_shalileh_mirkin_max` | мелкий тип KEFRiN |
-| 5 | 2–33 | `cl.small_kmeans_joint_min`, `cl.small_kmeans_joint_max` | мелкий тип базовой линии |
-| 5 | `seeds: 10`, `hybrid_alpha: 0.5`, `n_clusters: [3, 12]` | `yaml:clustering.protocol`, `yaml:clustering.n_clusters` | параметры |
+| 5, табл. | 0,85 | `cl.stab_median_kmeans` | медианная устойчивость K-means |
+| 5, табл. | 2–34 | `cl.small_kmeans_min`, `cl.small_kmeans_max` | мелкий тип K-means |
+| 5, табл. | 0,48 | `cl.syn_nograph_best_feat` | лучший метод по X без сигнала в графе |
+| 5, табл. | 0,53 | `cl.stab_median_ward` | медианная устойчивость Уорда |
+| 5, табл. | K = 3; 0,09 | `cl.win_gmm_k`, `cl.ari_hybrid_gmm` | гауссова смесь |
+| 5, табл. | от 5 до 400; 2 кластера | `cl.hdbscan_mcs_min`, `cl.hdbscan_mcs_max`, `cl.hdbscan_kmax` | HDBSCAN |
+| 5, табл. | 10 разбиений Leiden без несвязных | `cl.feas_leiden`, `cl.rl_disconnected`; `csv:outputs/cluster/resolution_limit.csv` | |
+| 5, табл. | 10% рёбер; 0,63; 0,98 | `yaml:clustering.impl.edge_perturbation.drop`, `cl.pert_leiden`, `cl.pert_hybrid` | удаление рёбер |
+| 5, табл. | 7 из 10 | `cl.louvain_n_reached`, `cl.n_grid` | |
+| 5, табл. | 0,90; 0,97 | `cl.spectral_stability`, `cl.pert_spectral` | спектральная |
+| 5, табл. | 1–32 | `cl.small_shalileh_mirkin_min`, `cl.small_shalileh_mirkin_max` | мелкий тип KEFRiN |
+| 5, табл. | 16 узлов (K = 4) | `csv:outputs/cluster/small_clusters.csv [cand = kmeans_joint_k04; size = 16]` | мелкий тип базовой линии |
+| 5 | `seeds: 10`, `hybrid_alpha: 0.5`, `n_clusters: [3, 12]`, `repeats: 20`, `ci_level: 0.95`, `min_ari: 0.05`, `seed_check: 5`, `tie_chain_tolerance: 0`, `quality_tolerance: baseline_sd` | `yaml:clustering.protocol`, `yaml:clustering.n_clusters`, `yaml:clustering.synthetic`, `yaml:clustering.impl` | параметры |
 
 ## Раздел 6. ICVI
 
@@ -221,6 +236,7 @@
 | 6 | 0,884 | `icvi.final_avi_adj` | итог |
 | 6 | 0,249 | `icvi.final_avi_base` | E |
 | 6 | Louvain, K = 6 первым по z AVI | `icvi.order_z_avi` | |
+| 6 | Leiden с K = 3 при метриках с поправкой (выбор) | `cl.raw_l3_winner_graph`, `cl.raw_l3_winner_graph_k`; итог не меняется — `cl.raw_l2_changed` = 0 | фраза о пересчёте выбора |
 | 6 | −0,26 | `icvi.tau_cross` | τ между пространствами |
 | 6 | −0,81 | `icvi.tau_min` (пара `icvi.tau_min_pair`) | CH и MQ |
 | 6 | `baseline_permutations: 200`, `s_dbw_density: pair`, `bootstrap: 100`, `ci_level: 0.95` | `yaml:icvi` | параметры |
@@ -274,6 +290,9 @@
 |---|---|---|---|
 | 9 | 5 регионах | `e1.n_gap_regions_2024` | нет зарплаты за 2024 год |
 | 9 | 0,007 | `icvi.final_sw` | силуэт итога |
+| 9 | 143 | `cl.hybrid_zavi_min` | наименьшая z AVI гибрида |
+| 9 | 4 из 5, 1; 3 из 5, 2 из 5 | `cl.sf_prereg_all`, `cl.sf_tolerance_all` | выбор среди всех семейств по seed |
+| 9 | 5 → 20; 29.09 | `yaml:clustering.synthetic.repeats` (комментарий «было 5»); `docs/clustering.md`, раздел 10 | синтетика не предрегистрирована |
 
 ## Раздел 10. Воспроизводимость
 
@@ -286,12 +305,14 @@
 | 10 | 42 с | README, раздел «Этап 1» | замер 26.09 |
 | 10 | 16 с | замер: `features` во временной папке | |
 | 10 | 431 с (около 7 мин) | замер: `network` во временной папке | |
-| 10 | 17 мин; 3 мин; 8 мин; 6 процессов | `cl.time_total_min`, `cl.time_bootstrap_min`, `cl.time_variants_min`, `cl.workers` | |
+| 10 | 69 мин; 4 мин; 13 мин; 6 процессов | `cl.time_total_min`, `cl.time_bootstrap_min`, `cl.time_variants_min`, `cl.workers` | прогон 30.09 с seed 42 |
 | 10 | 104 с | замер: `evaluate` во временной папке | |
 | 10 | не больше 1 мин | `dyn.minutes` | |
 | 10 | 16 ГБ | `yaml:clustering.impl.workers` (комментарий) | |
 | 10 | sha256 трёх файлов | `yaml:sources.hackathon.sha256`, `yaml:sources.borders.sha256`, `yaml:sources.ndfl.sha256` | |
 | 10 | 14 файлов | `yaml:sources.bdmo.members` | число файлов БД ПМО |
+| 10 | 30.09.2026; seed 43 и 44; 1776 узлах; ARI 1,00 | сравнение `data/processed/cluster_final.parquet` с `cluster_final.parquet` прогонов с `seed: 43` и `seed: 44` во временных папках: `sklearn.metrics.adjusted_rand_score` = 1.0, доля совпавших меток 1.0 на 1776 общих узлах | проверено при подготовке отчёта 30.09 |
+| 10 | спектральная с K = 4 при seed 43 | `cl.all_winner` в `report_facts.json` прогона с `seed: 43` | |
 
 ## Приложение А
 
@@ -300,3 +321,10 @@
 | А | n = 1776 | `feat.n_nodes` | |
 | А | 11 признаков | `cl.n_x` | |
 | А | k = 10 | `yaml:network.sparsify.k` | |
+
+## Приложение Б
+
+| Раздел | Число в тексте | Источник | Что это |
+|---|---|---|---|
+| Б | 25.09.2026 | `ls -l --time-style=full-iso data/raw/*/`: `hackathonlicence.zip` — 2026-09-25 23:46 +0300, `t_dict_municipal.rar` — 23:46, файлы `bdmo/` и `ndfl/` — 23:47 | дата скачивания; манифеста загрузки нет, загрузчик пишет файл через `.part` и переименовывает (`src/munnet/data.py:66`) |
+| Б | тома, номера, страницы, DOI | проверка библиографии по Crossref и страницам издателей 28.09.2026 (заметка участника `literature-verified`) | библиография |

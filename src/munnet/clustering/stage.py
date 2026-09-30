@@ -445,6 +445,14 @@ def run(cfg: Config) -> None:
                 shares[(f, x)] for f, x in zip(kef["features"], kef["xi_over_rho"], strict=True)
             ]
         timing["kefrin_curve"] = time.perf_counter() - t
+        t = time.perf_counter()
+        qtol, qtol_tab = AN.quality_tolerance(pool, res, cp)
+        timing["quality_tolerance"] = time.perf_counter() - t
+    cp_tol = AN.with_tolerance(cp, qtol)
+    dec_tol = DE.decide(cands, cp_tol)
+    t = time.perf_counter()
+    seed_runs, seed_freq = AN.seed_frequency(res, cp, cp_tol)
+    timing["seed_check"] = time.perf_counter() - t
     fm, fk = str(cands.loc[final, "method"]), int(cands.loc[final, "k"])
     log.info("cluster: итог — %s; проверки: %s", final, dec.checks[["check", "winner"]].values.tolist())
     levels = DE.level_table(dec.main, cands)
@@ -479,7 +487,9 @@ def run(cfg: Config) -> None:
     fam = {m: cp.family_of(m) for m in cp.methods}
     syn_state = {"synthetic": sy, "impl": cp.impl, "alpha": cp.hybrid_alpha, "seed": cp.seed}
     syn_raw = pd.DataFrame(parallel.run(SY.cell_task, SY.tasks(sy), syn_state, cp.workers))
-    syn_sum = SY.summarize(syn_raw, list(sy["methods"]), fam)
+    syn_sum = SY.summarize(
+        syn_raw, list(sy["methods"]), fam, float(sy.get("min_ari", 0.05)), float(sy.get("ci_level", 0.95))
+    )
     timing["synthetic"] = time.perf_counter() - t
 
     # 8. Ориентир K (iK-means) и профили итога
@@ -532,6 +542,11 @@ def run(cfg: Config) -> None:
     write_csv(dec.checks, out / "sensitivity.csv")
     write_csv(dec.orders, out / "sensitivity_orders.csv")
     write_csv(extra, out / "extra_checks.csv")
+    write_csv(dec_tol.checks, out / "sensitivity_tolerance.csv")
+    write_csv(dec_tol.orders, out / "sensitivity_tolerance_orders.csv")
+    write_csv(qtol_tab, out / "quality_tolerance.csv")
+    write_csv(seed_runs, out / "seed_runs.csv")
+    write_csv(seed_freq, out / "seed_frequency.csv")
     write_csv(grid, out / "threshold_grid.csv")
     write_csv(reslim, out / "resolution_limit.csv")
     write_csv(kef, out / "kefrin_curve.csv")
@@ -607,6 +622,9 @@ def run(cfg: Config) -> None:
         "all_eligible_front": dec.all_methods.level2.front,
         "checks": dec.checks.to_dict(orient="records"),
         "extra_checks": extra.to_dict(orient="records"),
+        "quality_tolerance": qtol,
+        "tolerance_winner": dec_tol.main.winner,
+        "tolerance_all_winner": dec_tol.all_methods.winner,
         "icvi_checks_changed": sorted(
             set(dec.icvi.loc[dec.icvi["changed"].astype(bool) & (dec.icvi["level"] == 2), "check"])
         )

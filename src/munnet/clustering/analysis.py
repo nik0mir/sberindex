@@ -139,3 +139,104 @@ def kefrin_graph_share(inp, xi: float, features: str) -> float:
     Y = inp.X if features == "inputs" else (inp.X - inp.X.mean(axis=0)) / inp.X.std(axis=0)
     sp_feat = float(((Y - Y.mean(axis=0)) ** 2).sum())
     return xi * sp_graph / (xi * sp_graph + sp_feat)
+
+
+# --- Шум случайного базиса и seed (ворота этапа 3; добавлено после предрегистрации) -------------------
+
+
+def icvi_seed_task(task) -> dict:
+    """ICVI кандидата с случайным базисом другого seed (разбиение то же)."""
+    cand, labels, seed = task
+    st = parallel.STATE
+    cp = st["params"]
+    old = parallel.STATE["params"]
+    parallel.STATE["params"] = replace(cp, seed=int(seed))
+    try:
+        row = CO.icvi_task((cand, labels))
+    finally:
+        parallel.STATE["params"] = old
+    row["seed"] = int(seed)
+    return row
+
+
+def seed_list(cp: ClusterParams) -> list[int]:
+    return [cp.seed + i for i in range(int(cp.impl.get("seed_check", 5)))]
+
+
+def quality_tolerance(pool, res, cp: ClusterParams) -> tuple[dict[str, float], pd.DataFrame]:
+    """Допуск ничьей критериев качества по шуму случайного базиса: для каждого seed базиса — критерии качества
+    на множестве всех допустимых кандидатов (ранги z-оценок, как в правиле), SD по seed у каждого кандидата,
+    медиана по кандидатам. Отступление от предрегистрации (там допуск 0)."""
+    from munnet.clustering import selection as S
+
+    feas = [c for c in res.cands.index if bool(res.cands.loc[c, "feasible"])]
+    zf, zg = DE.z_cols(cp, "features"), DE.z_cols(cp, "graph")
+    tasks = [(c, res.labels[c], s) for s in seed_list(cp)[1:] for c in feas]
+    rows = pool.map(icvi_seed_task, tasks)
+    z = [res.cands.loc[feas, zf + zg].assign(seed=cp.seed)]
+    extra = pd.DataFrame(rows).set_index("cand")
+    for s, d in extra.groupby("seed"):
+        z.append(d.loc[feas, zf + zg].assign(seed=s))
+    crit = []
+    for d in z:
+        t = S.criteria_table(d, zf, zg, ["quality_features", "quality_graph"])
+        crit.append(t.assign(seed=int(d["seed"].iloc[0])))
+    crit = pd.concat(crit).rename_axis("cand").reset_index()
+    sd = crit.groupby("cand")[["quality_features", "quality_graph"]].std()
+    tol = {c: float(sd[c].median()) for c in sd.columns}
+    zz = pd.concat(z).rename_axis("cand").reset_index()
+    return tol, crit.merge(zz, on=["cand", "seed"])
+
+
+def with_tolerance(cp: ClusterParams, tol: dict[str, float]) -> ClusterParams:
+    return replace(cp, tie={**cp.tie, **tol})
+
+
+def decide_rows(cands, cp: ClusterParams, cp_tol: ClusterParams, seed: int) -> pd.DataFrame:
+    """Победители всех проверок на обоих уровнях по предрегистрированному правилу и с допуском качества."""
+    out = []
+    for rule, c in (("prereg", cp), ("tolerance", cp_tol)):
+        d = DE.decide(cands, c)
+        ch = d.checks.assign(rule=rule, seed=seed, kind="check")
+        orders = d.orders.rename(columns={"order": "check"}).assign(rule=rule, seed=seed, kind="order")
+        out += [ch, orders]
+    return pd.concat(out, ignore_index=True)
+
+
+def seed_frequency(res, cp: ClusterParams, cp_tol: ClusterParams) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Уровни выбора при seed, seed + 1, …: методы, случайный базис и бутстрап — от нового seed, входы те же.
+    Ответ: победители по seed и частота «проверка × победитель»; ARI итогового кандидата с основным
+    разбиением."""
+    from sklearn.metrics import adjusted_rand_score
+
+    parts = [decide_rows(res.cands, cp, cp_tol, cp.seed)]
+    ari = []
+    for s in seed_list(cp)[1:]:
+        cp_s = replace(cp, seed=s, seeds=tuple(s + i for i in range(len(cp.seeds))))
+        res_s = CO.evaluate_set(res.inputs, cp_s, cp.bootstrap, f"seed{s}")
+        parts.append(
+            decide_rows(
+                res_s.cands,
+                cp_s,
+                with_tolerance(cp_s, {k: cp_tol.tie[k] for k in ("quality_features", "quality_graph")}),
+                s,
+            )
+        )
+        for c in res.labels:
+            if c in res_s.labels:
+                ari.append(
+                    {"seed": s, "cand": c, "ari": float(adjusted_rand_score(res.labels[c], res_s.labels[c]))}
+                )
+    runs = pd.concat(parts, ignore_index=True)
+    freq = (
+        runs.groupby(["rule", "scope", "kind", "check", "winner"], dropna=False)
+        .size()
+        .rename("n_seeds")
+        .reset_index()
+    )
+    return runs, freq.merge(
+        pd.DataFrame(ari).groupby("cand")["ari"].min().rename("min_ari_labels").reset_index(),
+        left_on="winner",
+        right_on="cand",
+        how="left",
+    ).drop(columns="cand")

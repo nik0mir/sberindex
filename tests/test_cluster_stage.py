@@ -35,6 +35,7 @@ def light_cluster(cfg: Config) -> Config:
             "leiden_grid": {"gamma_min": 0.05, "gamma_max": 5.0, "points": 10, "refine": 4},
             "hdbscan_grid": {"min_size": 3, "max_size": 20, "points": 6},
             "edge_perturbation": {"drop": 0.1, "repeats": 2},
+            "seed_check": 2,
         }
     )
     c["synthetic"].update(
@@ -132,6 +133,13 @@ def test_selection_intermediate_and_sensitivity(run_cluster):
     assert len(grid) == 2 * 5 * 3 and set(grid["chain"]) == {"strict", "tolerance"}
     rl = pd.read_csv(out / "resolution_limit.csv")
     assert (rl["threshold"] > 0).all() and set(rl["method"]) <= {"leiden", "louvain"}
+    freq = pd.read_csv(out / "seed_frequency.csv")
+    assert set(freq["rule"]) == {"prereg", "tolerance"} and freq["n_seeds"].between(1, 2).all()
+    main = freq.loc[(freq["kind"] == "check") & (freq["check"] == "main")]
+    assert main.groupby(["rule", "scope"])["n_seeds"].sum().eq(2).all()  # у каждого seed один победитель
+    tol = json.loads((out / "facts.json").read_text(encoding="utf-8"))["quality_tolerance"]
+    assert set(tol) == {"quality_features", "quality_graph"} and all(v >= 0 for v in tol.values())
+    assert len(pd.read_csv(out / "sensitivity_tolerance.csv")) > 0
     kef = pd.read_csv(out / "kefrin_curve.csv")
     assert set(kef["features"]) == {"inputs", "zscore"} and kef["graph_share"].between(0, 1).all()
     icvi = pd.read_csv(out / "sensitivity_icvi.csv")

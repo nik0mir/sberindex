@@ -1,0 +1,1738 @@
+{
+ "cl.all_changed": {
+  "text": "один шаг по всем парам «метод, K» — Спектральная, K = 4",
+  "value": "один шаг по всем парам «метод, K» — Спектральная, K = 4"
+ },
+ "cl.all_changed_text": {
+  "text": "победителя меняет: один шаг по всем парам «метод, K» — Спектральная, K = 4",
+  "value": "победителя меняет: один шаг по всем парам «метод, K» — Спектральная, K = 4"
+ },
+ "cl.all_front": {
+  "text": "Leiden (K = 3), Louvain (K = 6), Гибрид (K = 4)",
+  "value": "Leiden (K = 3), Louvain (K = 6), Гибрид (K = 4)"
+ },
+ "cl.all_front_n": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.all_joint_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.all_joint_winner": {
+  "text": "Спектральная",
+  "value": "Спектральная"
+ },
+ "cl.all_n_checks": {
+  "text": "8",
+  "value": 8
+ },
+ "cl.all_n_same": {
+  "text": "7",
+  "value": 7
+ },
+ "cl.all_tied": {
+  "text": "Leiden (K = 3), Гибрид (K = 4)",
+  "value": "Leiden (K = 3), Гибрид (K = 4)"
+ },
+ "cl.all_tied_n": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.all_top_score": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.all_tradeoff": {
+  "text": "против «Leiden, K = 3» гибрид лучше по качеству на G, устойчивости, хуже — по качеству в X, объяснимости; против «Louvain, K = 6» гибрид лучше по качеству в X, устойчивости, объяснимости, хуже — по качеству на G",
+  "value": "против «Leiden, K = 3» гибрид лучше по качеству на G, устойчивости, хуже — по качеству в X, объяснимости; против «Louvain, K = 6» гибрид лучше по качеству в X, устойчивости, объяснимости, хуже — по качеству на G"
+ },
+ "cl.all_winner": {
+  "text": "Гибрид, K = 4",
+  "value": "Гибрид, K = 4"
+ },
+ "cl.all_winner_is_final": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.all_winner_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.all_winner_method": {
+  "text": "Гибрид",
+  "value": "Гибрид"
+ },
+ "cl.alpha": {
+  "text": "0,50",
+  "value": 0.5
+ },
+ "cl.alpha0_z_avi": {
+  "text": "40",
+  "value": 40.0582
+ },
+ "cl.alpha0_z_sw": {
+  "text": "8,2",
+  "value": 8.20972
+ },
+ "cl.alpha1_z_avi": {
+  "text": "172",
+  "value": 171.863
+ },
+ "cl.alpha1_z_sw": {
+  "text": "1,6",
+  "value": 1.61819
+ },
+ "cl.alpha_ari_final": {
+  "text": "1,00",
+  "value": 1.0
+ },
+ "cl.alpha_ari_kmeans": {
+  "text": "0,16",
+  "value": 0.163023
+ },
+ "cl.alpha_ari_spectral": {
+  "text": "0,94",
+  "value": 0.936646
+ },
+ "cl.alpha_half_z_avi": {
+  "text": "165",
+  "value": 165.363
+ },
+ "cl.alpha_half_z_sw": {
+  "text": "2,1",
+  "value": 2.13209
+ },
+ "cl.ami_region": {
+  "text": "−0,003",
+  "value": -0.003240415446778452
+ },
+ "cl.ari_hybrid_gmm": {
+  "text": "0,09",
+  "value": 0.0878876
+ },
+ "cl.ari_hybrid_leiden": {
+  "text": "0,74",
+  "value": 0.736529
+ },
+ "cl.ari_hybrid_spectral": {
+  "text": "0,94",
+  "value": 0.936646
+ },
+ "cl.ari_spectral_leiden": {
+  "text": "0,73",
+  "value": 0.730894
+ },
+ "cl.avi_adj_hybrid": {
+  "text": "0,884",
+  "value": 0.8844025524283111
+ },
+ "cl.avi_adj_leiden": {
+  "text": "0,927",
+  "value": 0.9274788495600438
+ },
+ "cl.avu_neg_share": {
+  "text": "98,7%",
+  "value": 0.9871794871794872
+ },
+ "cl.avu_pair": {
+  "text": "1 и 2",
+  "value": "1 и 2"
+ },
+ "cl.avu_pair_value": {
+  "text": "0,60",
+  "value": 0.603829
+ },
+ "cl.avu_undefined_k3": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.avu_z_min": {
+  "text": "−156",
+  "value": -156.335
+ },
+ "cl.bootstrap": {
+  "text": "100",
+  "value": 100
+ },
+ "cl.bootstrap_variants": {
+  "text": "20",
+  "value": 20
+ },
+ "cl.borda_front": {
+  "text": "Leiden, K = 3 — 7; Гибрид, K = 4 — 7; Louvain, K = 6 — 10",
+  "value": "Leiden, K = 3 — 7; Гибрид, K = 4 — 7; Louvain, K = 6 — 10"
+ },
+ "cl.borda_hybrid": {
+  "text": "7",
+  "value": 7.0
+ },
+ "cl.borda_l2_winner": {
+  "text": "Гибрид, K = 4",
+  "value": "Гибрид, K = 4"
+ },
+ "cl.borda_leiden": {
+  "text": "7",
+  "value": 7.0
+ },
+ "cl.cands_gmm": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.cands_hdbscan": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.cands_hybrid": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.cands_kmeans": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.cands_kmeans_joint": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.cands_leiden": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.cands_louvain": {
+  "text": "7",
+  "value": 7
+ },
+ "cl.cands_shalileh_mirkin": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.cands_spectral": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.cands_ward": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.clip_feas_hybrid": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.clip_feas_kmeans_joint": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.clip_feas_shalileh_mirkin": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.cv_folds": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.edge_methods": {
+  "text": "Гауссова смесь, Leiden",
+  "value": "Гауссова смесь, Leiden"
+ },
+ "cl.edge_n": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.extra01_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.extra01_n": {
+  "text": "29",
+  "value": 29
+ },
+ "cl.extra01_winner": {
+  "text": "Гибрид",
+  "value": "Гибрид"
+ },
+ "cl.feas_gmm": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.feas_hdbscan": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.feas_hybrid": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.feas_kmeans": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.feas_kmeans_joint": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.feas_leiden": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.feas_louvain": {
+  "text": "7",
+  "value": 7
+ },
+ "cl.feas_shalileh_mirkin": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.feas_spectral": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.feas_ward": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.final_interpretability": {
+  "text": "0,89",
+  "value": 0.893879
+ },
+ "cl.final_jaccard_min": {
+  "text": "0,90",
+  "value": 0.895929
+ },
+ "cl.final_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.final_label": {
+  "text": "Гибрид",
+  "value": "Гибрид"
+ },
+ "cl.final_method": {
+  "text": "hybrid",
+  "value": "hybrid"
+ },
+ "cl.final_seed_ari": {
+  "text": "1,00",
+  "value": 1.0
+ },
+ "cl.final_stability": {
+  "text": "0,91",
+  "value": 0.909315
+ },
+ "cl.final_z_avi": {
+  "text": "178",
+  "value": 178.013
+ },
+ "cl.final_z_avu": {
+  "text": "−86",
+  "value": -85.5709
+ },
+ "cl.final_z_ch": {
+  "text": "315",
+  "value": 315.467
+ },
+ "cl.final_z_mq": {
+  "text": "162",
+  "value": 161.908
+ },
+ "cl.final_z_s_dbw": {
+  "text": "−6,5",
+  "value": -6.49558
+ },
+ "cl.final_z_sw": {
+  "text": "2,2",
+  "value": 2.20324
+ },
+ "cl.grid50_same_all_share": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.grid55_all_k": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.grid55_all_winner": {
+  "text": "Спектральная",
+  "value": "Спектральная"
+ },
+ "cl.grid55_hybrid_feasible": {
+  "text": "3, 4",
+  "value": "3, 4"
+ },
+ "cl.grid55_strict_hybrid_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.grid55_tol_hybrid_k": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.grid_cells": {
+  "text": "15",
+  "value": 15
+ },
+ "cl.grid_eligible_same": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.grid_minshare_effect": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.grid_same_all": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.grid_same_eligible": {
+  "text": "15",
+  "value": 15
+ },
+ "cl.hdbscan_kmax": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.hdbscan_mcs_max": {
+  "text": "400",
+  "value": 400
+ },
+ "cl.hdbscan_mcs_min": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.hdbscan_zero_from": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.hybrid_k3_k4_stab_diff": {
+  "text": "0,008",
+  "value": 0.008220000000000005
+ },
+ "cl.hybrid_k3_max_share": {
+  "text": "51,5%",
+  "value": 0.515203
+ },
+ "cl.hybrid_small_all_k5": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.hybrid_zavi_min": {
+  "text": "143",
+  "value": 142.974
+ },
+ "cl.icvi_l1_changed": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.icvi_l1_changes": {
+  "text": "(б) AVI и MQ — одна метрика — Louvain: K = 6 → 4; (в) качество в X без S_Dbw — Louvain: K = 6 → 3; (г) S_Dbw в варианте own — Leiden: K = 3 → 4; (г) S_Dbw в варианте own — Louvain: K = 6 → 4",
+  "value": "(б) AVI и MQ — одна метрика — Louvain: K = 6 → 4; (в) качество в X без S_Dbw — Louvain: K = 6 → 3; (г) S_Dbw в варианте own — Leiden: K = 3 → 4; (г) S_Dbw в варианте own — Louvain: K = 6 → 4"
+ },
+ "cl.icvi_l1_note": {
+  "text": "Число K на фронте основного правила у методов со сменой K: Louvain — 4; Leiden — 9. Лишняя или убранная метрика качества переставляет очки Копленда между K фронта.",
+  "value": "Число K на фронте основного правила у методов со сменой K: Louvain — 4; Leiden — 9. Лишняя или убранная метрика качества переставляет очки Копленда между K фронта."
+ },
+ "cl.icvi_l2_changed": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.icvi_l3_changed": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.icvi_l3_changes": {
+  "text": "нет",
+  "value": "нет"
+ },
+ "cl.icvi_l3_text": {
+  "text": "победителя не меняет ни одна из них",
+  "value": "победителя не меняет ни одна из них"
+ },
+ "cl.icvi_n": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.icvi_perms": {
+  "text": "200",
+  "value": 200
+ },
+ "cl.ik_joint": {
+  "text": "20",
+  "value": 20
+ },
+ "cl.ik_x": {
+  "text": "16",
+  "value": 16
+ },
+ "cl.imputed_age_old_share_rel": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.imputed_emp_sh_industry": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_emp_sh_market_services": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_emp_sh_primary": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_emp_sh_public": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_emp_sh_trade_transport": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_log_level_rel": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_log_pop_rel": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_log_wage_rel": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.imputed_market_access_rel": {
+  "text": "12",
+  "value": 12
+ },
+ "cl.imputed_urban_share_rel": {
+  "text": "47",
+  "value": 47
+ },
+ "cl.interp_diff": {
+  "text": "0,03",
+  "value": 0.028766999999999987
+ },
+ "cl.iso_min": {
+  "text": "0,88",
+  "value": 0.881189
+ },
+ "cl.jaccard_dissolved": {
+  "text": "0,50",
+  "value": 0.5
+ },
+ "cl.jaccard_stable": {
+  "text": "0,75",
+  "value": 0.75
+ },
+ "cl.k_max": {
+  "text": "12",
+  "value": 12
+ },
+ "cl.k_min": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.kbest_features": {
+  "text": "5",
+  "value": 5.0
+ },
+ "cl.kbest_graph": {
+  "text": "10",
+  "value": 10.0
+ },
+ "cl.kef_ari_max": {
+  "text": "0,41",
+  "value": 0.413323
+ },
+ "cl.kef_inputs_feasible": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.kef_z1_feasible": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.kef_z1_graph_share": {
+  "text": "52,2%",
+  "value": 0.521997
+ },
+ "cl.kef_z1_minshare_k4": {
+  "text": "1,2%",
+  "value": 0.0118243
+ },
+ "cl.kef_z_feasible": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.kef_z_feasible_ari_max": {
+  "text": "0,41",
+  "value": 0.413323
+ },
+ "cl.kef_z_feasible_graph_share_min": {
+  "text": "94,6%",
+  "value": 0.945866
+ },
+ "cl.kef_z_feasible_list": {
+  "text": "ξ/ρ = 16, K = 7; ξ/ρ = 16, K = 11; ξ/ρ = 16, K = 12; ξ/ρ = 64, K = 12",
+  "value": "ξ/ρ = 16, K = 7; ξ/ρ = 16, K = 11; ξ/ρ = 16, K = 12; ξ/ρ = 64, K = 12"
+ },
+ "cl.kef_z_feasible_min_xi": {
+  "text": "16,00",
+  "value": 16.0
+ },
+ "cl.kefrin_graph_share": {
+  "text": "24,8%",
+  "value": 0.2482491372
+ },
+ "cl.kefrin_zavi_max": {
+  "text": "52",
+  "value": 52.4998
+ },
+ "cl.l2_qg_hybrid_minus_leiden": {
+  "text": "0,25",
+  "value": 0.25
+ },
+ "cl.leiden_k_raw_mq": {
+  "text": "12",
+  "value": 12
+ },
+ "cl.leiden_missing": {
+  "text": "нет",
+  "value": "нет"
+ },
+ "cl.leiden_mq_k12": {
+  "text": "0,731",
+  "value": 0.731028
+ },
+ "cl.leiden_mq_k9": {
+  "text": "0,728",
+  "value": 0.727551
+ },
+ "cl.leiden_n_reached": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.leiden_stability": {
+  "text": "0,62",
+  "value": 0.615069
+ },
+ "cl.lex_all_hybrid": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.lex_all_leiden": {
+  "text": "8",
+  "value": 8
+ },
+ "cl.lex_all_level2_hybrid": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.lex_all_level2_leiden": {
+  "text": "12",
+  "value": 12
+ },
+ "cl.lex_all_level2_louvain": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.lex_all_level2_spectral": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.lex_all_louvain": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.lex_all_spectral": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.lex_l2_text": {
+  "text": "Leiden, K = 3 — 12 из 24; Louvain, K = 6 — 6 из 24; Гибрид, K = 4 — 6 из 24",
+  "value": "Leiden, K = 3 — 12 из 24; Louvain, K = 6 — 6 из 24; Гибрид, K = 4 — 6 из 24"
+ },
+ "cl.louvain_k_raw_mq": {
+  "text": "11",
+  "value": 11
+ },
+ "cl.louvain_missing": {
+  "text": "5, 9, 12",
+  "value": "5, 9, 12"
+ },
+ "cl.louvain_n_reached": {
+  "text": "7",
+  "value": 7
+ },
+ "cl.main_l2_n": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.market_max_mad": {
+  "text": "75",
+  "value": 74.55566699
+ },
+ "cl.max_noise": {
+  "text": "10,0%",
+  "value": 0.1
+ },
+ "cl.max_share": {
+  "text": "50,0%",
+  "value": 0.5
+ },
+ "cl.mean_degree": {
+  "text": "14,0",
+  "value": 13.98423423
+ },
+ "cl.min_share": {
+  "text": "2,0%",
+  "value": 0.02
+ },
+ "cl.min_share_nodes": {
+  "text": "36",
+  "value": 36
+ },
+ "cl.mq_raw_hybrid": {
+  "text": "0,590",
+  "value": 0.59005
+ },
+ "cl.mq_raw_leiden": {
+  "text": "0,606",
+  "value": 0.605895
+ },
+ "cl.n_candidates": {
+  "text": "87",
+  "value": 87
+ },
+ "cl.n_checks": {
+  "text": "8",
+  "value": 8
+ },
+ "cl.n_checks_same": {
+  "text": "8",
+  "value": 8
+ },
+ "cl.n_components": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.n_edges": {
+  "text": "12 418",
+  "value": 12418
+ },
+ "cl.n_feasible": {
+  "text": "29",
+  "value": 29
+ },
+ "cl.n_grid": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.n_init": {
+  "text": "20",
+  "value": 20
+ },
+ "cl.n_k3": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.n_methods": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.n_nodes": {
+  "text": "1776",
+  "value": 1776
+ },
+ "cl.n_seeds": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.n_small": {
+  "text": "108",
+  "value": 108
+ },
+ "cl.n_small_market": {
+  "text": "105",
+  "value": 105
+ },
+ "cl.n_tree": {
+  "text": "17",
+  "value": 17
+ },
+ "cl.n_x": {
+  "text": "11",
+  "value": 11
+ },
+ "cl.net_ari_cos_dist": {
+  "text": "0,32",
+  "value": 0.320248
+ },
+ "cl.orders_same": {
+  "text": "24",
+  "value": 24
+ },
+ "cl.orders_total": {
+  "text": "24",
+  "value": 24
+ },
+ "cl.pert_hybrid": {
+  "text": "0,98",
+  "value": 0.9812525000000001
+ },
+ "cl.pert_leiden": {
+  "text": "0,63",
+  "value": 0.6285178499999999
+ },
+ "cl.pert_louvain": {
+  "text": "0,61",
+  "value": 0.6118480500000001
+ },
+ "cl.pert_spectral": {
+  "text": "0,97",
+  "value": 0.9667799
+ },
+ "cl.raw_graph_verdict": {
+  "text": "побеждает «Leiden» с K = 3, а не победитель по z-оценкам — «Гибрид» с K = 4: z-оценки качества на G смещены по K (`docs/icvi.md`)",
+  "value": "побеждает «Leiden» с K = 3, а не победитель по z-оценкам — «Гибрид» с K = 4: z-оценки качества на G смещены по K (`docs/icvi.md`)"
+ },
+ "cl.raw_l2_changed": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.raw_l3_changed": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.raw_l3_changes": {
+  "text": "(з) качество на G: AVI с поправкой на случайность и сырая MQ — Leiden, K = 3; (и) то же и z AVU — Leiden, K = 3; (л) сырой SW и AVI с поправкой, сырая MQ — Leiden, K = 3",
+  "value": "(з) качество на G: AVI с поправкой на случайность и сырая MQ — Leiden, K = 3; (и) то же и z AVU — Leiden, K = 3; (л) сырой SW и AVI с поправкой, сырая MQ — Leiden, K = 3"
+ },
+ "cl.raw_l3_changes_graph": {
+  "text": "сменили победителя: (з) качество на G: AVI с поправкой на случайность и сырая MQ — Leiden, K = 3; (и) то же и z AVU — Leiden, K = 3; (л) сырой SW и AVI с поправкой, сырая MQ — Leiden, K = 3",
+  "value": "сменили победителя: (з) качество на G: AVI с поправкой на случайность и сырая MQ — Leiden, K = 3; (и) то же и z AVU — Leiden, K = 3; (л) сырой SW и AVI с поправкой, сырая MQ — Leiden, K = 3"
+ },
+ "cl.raw_l3_sw_note": {
+  "text": "победитель тот же, что по z-оценкам",
+  "value": "победитель тот же, что по z-оценкам"
+ },
+ "cl.raw_l3_winner_graph": {
+  "text": "Leiden",
+  "value": "Leiden"
+ },
+ "cl.raw_l3_winner_graph_k": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.raw_l3_winner_sw": {
+  "text": "Гибрид",
+  "value": "Гибрид"
+ },
+ "cl.raw_n": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.rl_disconnected": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.rl_min_inner": {
+  "text": "360",
+  "value": 360.135
+ },
+ "cl.rl_n_below": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.rl_n_cands": {
+  "text": "17",
+  "value": 17
+ },
+ "cl.rl_threshold": {
+  "text": "152",
+  "value": 151.747
+ },
+ "cl.rl_threshold_max": {
+  "text": "334",
+  "value": 334.151
+ },
+ "cl.sbm7_hybrid": {
+  "text": "0,04",
+  "value": 0.0366539
+ },
+ "cl.sbm7_kmeans": {
+  "text": "0,43",
+  "value": 0.426373
+ },
+ "cl.sbm7_shalileh_mirkin": {
+  "text": "0,40",
+  "value": 0.39619
+ },
+ "cl.sbm_degree": {
+  "text": "14",
+  "value": 14.0
+ },
+ "cl.sbm_high_graph_max": {
+  "text": "0,00",
+  "value": 0.00287318
+ },
+ "cl.sbm_low_leiden": {
+  "text": "0,98",
+  "value": 0.9813984
+ },
+ "cl.sbm_mid_hybrid": {
+  "text": "0,43",
+  "value": 0.42651459999999997
+ },
+ "cl.sbm_mid_hybrid_best": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.sbm_mid_hybrid_clear": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.sbm_mid_kefrin": {
+  "text": "0,18",
+  "value": 0.176781883
+ },
+ "cl.sbm_mid_kmeans": {
+  "text": "0,19",
+  "value": 0.18556651740000002
+ },
+ "cl.sbm_mid_leiden": {
+  "text": "0,17",
+  "value": 0.1674484
+ },
+ "cl.sbm_mid_n": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.sbm_mid_spectral": {
+  "text": "0,34",
+  "value": 0.3442036
+ },
+ "cl.sbm_mid_tie_spectral": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.sbm_mix_max": {
+  "text": "0,9",
+  "value": 0.9
+ },
+ "cl.sbm_mix_min": {
+  "text": "0,3",
+  "value": 0.3
+ },
+ "cl.sdbw_base_undef_median": {
+  "text": "35",
+  "value": 35.0
+ },
+ "cl.sdbw_undefined": {
+  "text": "12",
+  "value": 12
+ },
+ "cl.sdbw_undefined_kmin": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.seed": {
+  "text": "42",
+  "value": 42
+ },
+ "cl.seed_max": {
+  "text": "46",
+  "value": 46
+ },
+ "cl.seed_min": {
+  "text": "42",
+  "value": 42
+ },
+ "cl.seeds": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.sf_all_minari": {
+  "text": "Гибрид, K = 4 — 1,00; Спектральная, K = 4 — 1,00",
+  "value": "Гибрид, K = 4 — 1,00; Спектральная, K = 4 — 1,00"
+ },
+ "cl.sf_all_minari_min": {
+  "text": "1,00",
+  "value": 1.0
+ },
+ "cl.sf_prereg_all": {
+  "text": "Гибрид, K = 4 — 4 из 5; Спектральная, K = 4 — 1 из 5",
+  "value": "Гибрид, K = 4 — 4 из 5; Спектральная, K = 4 — 1 из 5"
+ },
+ "cl.sf_prereg_all_final": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.sf_prereg_all_n": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.sf_prereg_all_verdict": {
+  "text": "победитель меняется от seed",
+  "value": "победитель меняется от seed"
+ },
+ "cl.sf_prereg_eligible": {
+  "text": "Гибрид, K = 4 — 5 из 5",
+  "value": "Гибрид, K = 4 — 5 из 5"
+ },
+ "cl.sf_prereg_eligible_final": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.sf_prereg_lex": {
+  "text": "Leiden, K = 3 — 32 из 120; Спектральная, K = 4 — 26 из 120; Гибрид, K = 4 — 20 из 120; Louvain, K = 6 — 18 из 120; Louvain, K = 4 — 12 из 120; Гауссова смесь, K = 3 — 6 из 120; Гауссова смесь, K = 4 — 6 из 120",
+  "value": "Leiden, K = 3 — 32 из 120; Спектральная, K = 4 — 26 из 120; Гибрид, K = 4 — 20 из 120; Louvain, K = 6 — 18 из 120; Louvain, K = 4 — 12 из 120; Гауссова смесь, K = 3 — 6 из 120; Гауссова смесь, K = 4 — 6 из 120"
+ },
+ "cl.sf_tolerance_all": {
+  "text": "Гибрид, K = 4 — 3 из 5; Спектральная, K = 4 — 2 из 5",
+  "value": "Гибрид, K = 4 — 3 из 5; Спектральная, K = 4 — 2 из 5"
+ },
+ "cl.sf_tolerance_all_final": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.sf_tolerance_all_n": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.sf_tolerance_all_verdict": {
+  "text": "победитель меняется от seed",
+  "value": "победитель меняется от seed"
+ },
+ "cl.sf_tolerance_eligible": {
+  "text": "Гибрид, K = 4 — 5 из 5",
+  "value": "Гибрид, K = 4 — 5 из 5"
+ },
+ "cl.sf_tolerance_eligible_final": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.sf_tolerance_lex": {
+  "text": "Спектральная, K = 4 — 32 из 120; Leiden, K = 3 — 20 из 120; Гибрид, K = 4 — 20 из 120; Гауссова смесь, K = 3 — 18 из 120; Louvain, K = 6 — 12 из 120; Louvain, K = 4 — 12 из 120; Гауссова смесь, K = 4 — 6 из 120",
+  "value": "Спектральная, K = 4 — 32 из 120; Leiden, K = 3 — 20 из 120; Гибрид, K = 4 — 20 из 120; Гауссова смесь, K = 3 — 18 из 120; Louvain, K = 6 — 12 из 120; Louvain, K = 4 — 12 из 120; Гауссова смесь, K = 4 — 6 из 120"
+ },
+ "cl.small_hybrid_max": {
+  "text": "16",
+  "value": 16
+ },
+ "cl.small_hybrid_min": {
+  "text": "16",
+  "value": 16
+ },
+ "cl.small_kmeans_joint_max": {
+  "text": "33",
+  "value": 33
+ },
+ "cl.small_kmeans_joint_min": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.small_kmeans_max": {
+  "text": "34",
+  "value": 34
+ },
+ "cl.small_kmeans_min": {
+  "text": "2",
+  "value": 2
+ },
+ "cl.small_market_size_max": {
+  "text": "34",
+  "value": 34
+ },
+ "cl.small_market_size_min": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.small_shalileh_mirkin_max": {
+  "text": "32",
+  "value": 32
+ },
+ "cl.small_shalileh_mirkin_min": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.spectral_stability": {
+  "text": "0,90",
+  "value": 0.900995
+ },
+ "cl.stab_median_gmm": {
+  "text": "0,73",
+  "value": 0.7294235
+ },
+ "cl.stab_median_hybrid": {
+  "text": "0,61",
+  "value": 0.613802
+ },
+ "cl.stab_median_kmeans": {
+  "text": "0,85",
+  "value": 0.848509
+ },
+ "cl.stab_median_kmeans_joint": {
+  "text": "0,82",
+  "value": 0.8195585000000001
+ },
+ "cl.stab_median_leiden": {
+  "text": "0,54",
+  "value": 0.5415405
+ },
+ "cl.stab_median_louvain": {
+  "text": "0,53",
+  "value": 0.531806
+ },
+ "cl.stab_median_shalileh_mirkin": {
+  "text": "0,68",
+  "value": 0.677797
+ },
+ "cl.stab_median_spectral": {
+  "text": "0,71",
+  "value": 0.71025
+ },
+ "cl.stab_median_ward": {
+  "text": "0,53",
+  "value": 0.531141
+ },
+ "cl.subsample": {
+  "text": "80,0%",
+  "value": 0.8
+ },
+ "cl.suburbs_examples": {
+  "text": "Новосибирский муниципальный район (Новосибирская область), Уфимский муниципальный район (Республика Башкортостан), Волжский муниципальный район (Самарская область), Тюменский муниципальный район (Тюменская область), муниципальный округ Пермский (Пермский край)",
+  "value": "Новосибирский муниципальный район (Новосибирская область), Уфимский муниципальный район (Республика Башкортостан), Волжский муниципальный район (Самарская область), Тюменский муниципальный район (Тюменская область), муниципальный округ Пермский (Пермский край)"
+ },
+ "cl.suburbs_raw": {
+  "text": "261",
+  "value": 261.45
+ },
+ "cl.suburbs_scaled": {
+  "text": "26",
+  "value": 25.5573
+ },
+ "cl.suburbs_size": {
+  "text": "16",
+  "value": 16
+ },
+ "cl.sw_raw_hybrid": {
+  "text": "0,007",
+  "value": 0.00666255
+ },
+ "cl.sw_raw_leiden": {
+  "text": "0,004",
+  "value": 0.00371445
+ },
+ "cl.syn_all_cells": {
+  "text": "45",
+  "value": 45
+ },
+ "cl.syn_both_cells": {
+  "text": "16",
+  "value": 16
+ },
+ "cl.syn_both_clear": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.syn_both_hybrid_best": {
+  "text": "0",
+  "value": 0
+ },
+ "cl.syn_both_tie": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.syn_both_won": {
+  "text": "16",
+  "value": 16
+ },
+ "cl.syn_ci": {
+  "text": "95%",
+  "value": "95%"
+ },
+ "cl.syn_clear_cells": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.syn_counts": {
+  "text": "K-means корзина ⊕ X — 19, 6 и 14; Гибрид — 9, 2 и 20; Гауссова смесь — 5, 0 и 11; K-means — 4, 0 и 11; Leiden — 2, 1 и 10; Спектральная — 0, 0 и 12; KEFRiN — 0, 0 и 10; Уорд — 0, 0 и 8",
+  "value": "K-means корзина ⊕ X — 19, 6 и 14; Гибрид — 9, 2 и 20; Гауссова смесь — 5, 0 и 11; K-means — 4, 0 и 11; Leiden — 2, 1 и 10; Спектральная — 0, 0 и 12; KEFRiN — 0, 0 и 10; Уорд — 0, 0 и 8"
+ },
+ "cl.syn_degree": {
+  "text": "14,0",
+  "value": 14.0265354
+ },
+ "cl.syn_f0_best_text": {
+  "text": "K-means корзина ⊕ X — 3, Гибрид — 1",
+  "value": "K-means корзина ⊕ X — 3, Гибрид — 1"
+ },
+ "cl.syn_f0_both_tie": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.syn_f0_four_tie": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.syn_f0_n": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.syn_fmax": {
+  "text": "2,0",
+  "value": 2.0
+ },
+ "cl.syn_g0_hybrid": {
+  "text": "0,03",
+  "value": 0.0311606
+ },
+ "cl.syn_g0_kefrin_tie": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.syn_g0_kmeans": {
+  "text": "0,46",
+  "value": 0.460433
+ },
+ "cl.syn_g0_kmeans_joint": {
+  "text": "0,18",
+  "value": 0.183267
+ },
+ "cl.syn_g0_live": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.syn_g0_shalileh_mirkin": {
+  "text": "0,39",
+  "value": 0.393005
+ },
+ "cl.syn_gain_max": {
+  "text": "0,95",
+  "value": 0.951249
+ },
+ "cl.syn_graph_only_clear_n": {
+  "text": "1",
+  "value": 1
+ },
+ "cl.syn_graph_only_clear_text": {
+  "text": "табл. 1а, доля внешних рёбер 0,3, сигнал в X 0,0 — Leiden (ARI 0,98)",
+  "value": "табл. 1а, доля внешних рёбер 0,3, сигнал в X 0,0 — Leiden (ARI 0,98)"
+ },
+ "cl.syn_joint_clear": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.syn_joint_won": {
+  "text": "16",
+  "value": 16
+ },
+ "cl.syn_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.syn_live_best_min": {
+  "text": "0,149",
+  "value": 0.149136
+ },
+ "cl.syn_min_ari": {
+  "text": "0,05",
+  "value": 0.05
+ },
+ "cl.syn_n": {
+  "text": "600",
+  "value": 600
+ },
+ "cl.syn_n_cells": {
+  "text": "25",
+  "value": 25
+ },
+ "cl.syn_nofeat_feat_max": {
+  "text": "0,00",
+  "value": 0.000882025
+ },
+ "cl.syn_nograph_best_both": {
+  "text": "0,39",
+  "value": 0.393005
+ },
+ "cl.syn_nograph_best_feat": {
+  "text": "0,48",
+  "value": 0.475447
+ },
+ "cl.syn_noisy_live": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.syn_noisy_n": {
+  "text": "15",
+  "value": 15
+ },
+ "cl.syn_noisy_none": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.syn_noisy_x_tie": {
+  "text": "9",
+  "value": 9
+ },
+ "cl.syn_none_best_max": {
+  "text": "0,040",
+  "value": 0.0404013
+ },
+ "cl.syn_none_cells": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.syn_repeats": {
+  "text": "20",
+  "value": 20
+ },
+ "cl.syn_strong_hybrid": {
+  "text": "0,83",
+  "value": 0.8314121111111111
+ },
+ "cl.syn_strong_kmeans": {
+  "text": "0,29",
+  "value": 0.2855763333333333
+ },
+ "cl.syn_strong_kmeans_joint": {
+  "text": "0,91",
+  "value": 0.9053603333333334
+ },
+ "cl.syn_strong_leiden": {
+  "text": "0,78",
+  "value": 0.7835891111111111
+ },
+ "cl.syn_strong_shalileh_mirkin": {
+  "text": "0,44",
+  "value": 0.4362892222222222
+ },
+ "cl.syn_strong_spectral": {
+  "text": "0,80",
+  "value": 0.7983705555555556
+ },
+ "cl.syn_tie_cells": {
+  "text": "30",
+  "value": 30
+ },
+ "cl.tau_avi_mq": {
+  "text": "0,89",
+  "value": 0.8860398860398863
+ },
+ "cl.tau_avi_mq_n": {
+  "text": "27",
+  "value": 27
+ },
+ "cl.tau_k_avi_min": {
+  "text": "0,87",
+  "value": 0.8666666666666666
+ },
+ "cl.tau_k_mq_min": {
+  "text": "0,82",
+  "value": 0.8222222222222221
+ },
+ "cl.tie_interpretability": {
+  "text": "0,02",
+  "value": 0.02
+ },
+ "cl.tie_stability": {
+  "text": "0,02",
+  "value": 0.02
+ },
+ "cl.time_bootstrap_min": {
+  "text": "4",
+  "value": 3.948183333333333
+ },
+ "cl.time_total_min": {
+  "text": "69",
+  "value": 69.49283333333332
+ },
+ "cl.time_variants_min": {
+  "text": "13",
+  "value": 12.700766666666668
+ },
+ "cl.tol_all_winner": {
+  "text": "Гибрид, K = 4",
+  "value": "Гибрид, K = 4"
+ },
+ "cl.tol_eligible_winner": {
+  "text": "Гибрид, K = 4",
+  "value": "Гибрид, K = 4"
+ },
+ "cl.tol_grid_n": {
+  "text": "25",
+  "value": 25
+ },
+ "cl.tol_grid_winners": {
+  "text": "Гибрид, K = 4 — 25 из 25",
+  "value": "Гибрид, K = 4 — 25 из 25"
+ },
+ "cl.tol_jk_n": {
+  "text": "5",
+  "value": 5
+ },
+ "cl.tol_jk_qf_max": {
+  "text": "0,033",
+  "value": 0.033162535210434906
+ },
+ "cl.tol_jk_qf_min": {
+  "text": "0,031",
+  "value": 0.030514402199344055
+ },
+ "cl.tol_jk_qg_max": {
+  "text": "0,039",
+  "value": 0.039243517502894676
+ },
+ "cl.tol_jk_qg_min": {
+  "text": "0,030",
+  "value": 0.030255606041139995
+ },
+ "cl.tol_jk_winners": {
+  "text": "Гибрид, K = 4 — 5 из 5",
+  "value": "Гибрид, K = 4 — 5 из 5"
+ },
+ "cl.tol_qf": {
+  "text": "0,03",
+  "value": 0.03194382825
+ },
+ "cl.tol_qg": {
+  "text": "0,04",
+  "value": 0.04256194632
+ },
+ "cl.tree_depth": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.tree_root": {
+  "text": "Корзина: общепит",
+  "value": "Корзина: общепит"
+ },
+ "cl.type1_jaccard": {
+  "text": "0,94",
+  "value": 0.941794
+ },
+ "cl.type1_share": {
+  "text": "45,4%",
+  "value": 0.45382882882882886
+ },
+ "cl.type1_size": {
+  "text": "806",
+  "value": 806
+ },
+ "cl.type2_jaccard": {
+  "text": "0,94",
+  "value": 0.935267
+ },
+ "cl.type2_share": {
+  "text": "26,6%",
+  "value": 0.26632882882882886
+ },
+ "cl.type2_size": {
+  "text": "473",
+  "value": 473
+ },
+ "cl.type3_jaccard": {
+  "text": "0,93",
+  "value": 0.933849
+ },
+ "cl.type3_share": {
+  "text": "22,2%",
+  "value": 0.22184684684684686
+ },
+ "cl.type3_size": {
+  "text": "394",
+  "value": 394
+ },
+ "cl.type4_jaccard": {
+  "text": "0,90",
+  "value": 0.895929
+ },
+ "cl.type4_share": {
+  "text": "5,8%",
+  "value": 0.05799549549549549
+ },
+ "cl.type4_size": {
+  "text": "103",
+  "value": 103
+ },
+ "cl.val_diff_all_sig": {
+  "text": "29",
+  "value": 29
+ },
+ "cl.val_ip_per_1000_base_r2": {
+  "text": "0,18",
+  "value": 0.184942
+ },
+ "cl.val_ip_per_1000_beyond_attributes": {
+  "text": "0,006",
+  "value": 0.0058947
+ },
+ "cl.val_ip_per_1000_beyond_attributes_null": {
+  "text": "−0,002",
+  "value": -0.00171353
+ },
+ "cl.val_ip_per_1000_beyond_attributes_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_ip_per_1000_difference": {
+  "text": "0,152",
+  "value": 0.151688
+ },
+ "cl.val_ip_per_1000_difference_null": {
+  "text": "0,002",
+  "value": 0.00168054
+ },
+ "cl.val_ip_per_1000_difference_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_ip_per_1000_sign_clr_rel_cafe": {
+  "text": "0,32",
+  "value": 0.322321
+ },
+ "cl.val_ip_per_1000_sign_clr_rel_cafe_null": {
+  "text": "0,01",
+  "value": 0.0108861
+ },
+ "cl.val_ip_per_1000_sign_clr_rel_cafe_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_ip_per_1000_sign_log_level_rel": {
+  "text": "0,32",
+  "value": 0.322321
+ },
+ "cl.val_ip_per_1000_sign_log_level_rel_null": {
+  "text": "0,01",
+  "value": 0.0120472
+ },
+ "cl.val_ip_per_1000_sign_log_level_rel_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_n_cands": {
+  "text": "29",
+  "value": 29
+ },
+ "cl.val_n_sig": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.val_n_tests": {
+  "text": "10",
+  "value": 10
+ },
+ "cl.val_nights_n": {
+  "text": "1089",
+  "value": 1089
+ },
+ "cl.val_nights_pc_base_r2": {
+  "text": "0,07",
+  "value": 0.0741258
+ },
+ "cl.val_nights_pc_beyond_attributes": {
+  "text": "0,010",
+  "value": 0.0100378
+ },
+ "cl.val_nights_pc_beyond_attributes_null": {
+  "text": "−0,003",
+  "value": -0.00326943
+ },
+ "cl.val_nights_pc_beyond_attributes_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_nights_pc_difference": {
+  "text": "0,024",
+  "value": 0.0239317
+ },
+ "cl.val_nights_pc_difference_null": {
+  "text": "0,003",
+  "value": 0.0028321
+ },
+ "cl.val_nights_pc_difference_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_orgs_per_1000_base_r2": {
+  "text": "0,26",
+  "value": 0.260138
+ },
+ "cl.val_orgs_per_1000_beyond_attributes": {
+  "text": "0,026",
+  "value": 0.0261103
+ },
+ "cl.val_orgs_per_1000_beyond_attributes_null": {
+  "text": "−0,002",
+  "value": -0.001571
+ },
+ "cl.val_orgs_per_1000_beyond_attributes_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_orgs_per_1000_difference": {
+  "text": "0,194",
+  "value": 0.194085
+ },
+ "cl.val_orgs_per_1000_difference_null": {
+  "text": "0,002",
+  "value": 0.00167757
+ },
+ "cl.val_orgs_per_1000_difference_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_orgs_per_1000_sign_log_level_rel": {
+  "text": "0,31",
+  "value": 0.311449
+ },
+ "cl.val_orgs_per_1000_sign_log_level_rel_null": {
+  "text": "0,02",
+  "value": 0.0159408
+ },
+ "cl.val_orgs_per_1000_sign_log_level_rel_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_orgs_per_1000_sign_urban_share_rel": {
+  "text": "0,31",
+  "value": 0.311449
+ },
+ "cl.val_orgs_per_1000_sign_urban_share_rel_null": {
+  "text": "0,01",
+  "value": 0.00700098
+ },
+ "cl.val_orgs_per_1000_sign_urban_share_rel_q": {
+  "text": "1,0·10⁻³",
+  "value": 0.000999001
+ },
+ "cl.val_perms": {
+  "text": "1000",
+  "value": 1000
+ },
+ "cl.val_signs_n": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.val_signs_ok": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.val_wage_rho_max": {
+  "text": "0,29",
+  "value": 0.293702
+ },
+ "cl.var_graph_basket_cos_ari": {
+  "text": "0,28",
+  "value": 0.284525
+ },
+ "cl.var_graph_basket_cos_ari_same": {
+  "text": "0,22",
+  "value": 0.223621
+ },
+ "cl.var_graph_basket_cos_k": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.var_graph_basket_cos_nodes": {
+  "text": "1776",
+  "value": 1776
+ },
+ "cl.var_graph_basket_cos_winner": {
+  "text": "Гибрид",
+  "value": "Гибрид"
+ },
+ "cl.var_no_level_ari": {
+  "text": "1,00",
+  "value": 0.99573
+ },
+ "cl.var_no_level_ari_same": {
+  "text": "1,00",
+  "value": 0.99573
+ },
+ "cl.var_no_level_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.var_no_level_nodes": {
+  "text": "1776",
+  "value": 1776
+ },
+ "cl.var_no_level_winner": {
+  "text": "Гибрид",
+  "value": "Гибрид"
+ },
+ "cl.var_nodes_separate_ari": {
+  "text": "0,40",
+  "value": 0.397378
+ },
+ "cl.var_nodes_separate_ari_same": {
+  "text": "0,32",
+  "value": 0.316287
+ },
+ "cl.var_nodes_separate_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.var_nodes_separate_nodes": {
+  "text": "2016",
+  "value": 2016
+ },
+ "cl.var_nodes_separate_winner": {
+  "text": "K-means корзина ⊕ X",
+  "value": "K-means корзина ⊕ X"
+ },
+ "cl.var_x_clipped_ari": {
+  "text": "0,15",
+  "value": 0.148944
+ },
+ "cl.var_x_clipped_ari_same": {
+  "text": "0,97",
+  "value": 0.970924
+ },
+ "cl.var_x_clipped_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.var_x_clipped_nodes": {
+  "text": "1776",
+  "value": 1776
+ },
+ "cl.var_x_clipped_winner": {
+  "text": "KEFRiN",
+  "value": "KEFRiN"
+ },
+ "cl.weight_median": {
+  "text": "0,95",
+  "value": 0.9518198967
+ },
+ "cl.weight_min": {
+  "text": "0,11",
+  "value": 0.1113804579
+ },
+ "cl.win_gmm_k": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.win_hybrid_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.win_leiden_k": {
+  "text": "3",
+  "value": 3
+ },
+ "cl.win_louvain_k": {
+  "text": "6",
+  "value": 6
+ },
+ "cl.win_spectral_k": {
+  "text": "4",
+  "value": 4
+ },
+ "cl.workers": {
+  "text": "6",
+  "value": 6
+ }
+}

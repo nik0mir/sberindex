@@ -157,16 +157,53 @@ def tasks(sy) -> list[tuple]:
     return out
 
 
-def summarize(raw: pd.DataFrame, methods, families: dict[str, str]) -> pd.DataFrame:
-    """Средний ARI по повторам в каждой ячейке, победитель ячейки и выигрыш от графа: лучший метод на (G, X)
-    минус лучший метод только по X."""
+TIE, NONE = "tie", "none"
+
+
+def summarize(
+    raw: pd.DataFrame, methods, families: dict[str, str], min_ari: float = 0.05, ci_level: float = 0.95
+) -> pd.DataFrame:
+    """Средний ARI по наборам данных в каждой ячейке и его интервал (t-распределение), победитель ячейки
+    и выигрыш от графа: лучший метод на (G, X) минус лучший метод только по X.
+
+    Победитель — метод с наибольшим средним, если его интервал не перекрывается с интервалом второго;
+    иначе ``tie`` (``winner_set`` — все методы, чей интервал перекрывает интервал лучшего); если лучший
+    средний
+    ARI ниже ``min_ari`` — ``none``: в ячейке никто не восстанавливает группы."""
+    from scipy.stats import t as student
+
     g = raw.groupby(["design", "graph_signal", "feature_signal"])[list(methods)]
     mean = g.mean()
-    sd = g.std().add_suffix("_sd")
-    out = mean.join(sd)
+    sd = g.std()
+    n = g.count()
+    half = sd / np.sqrt(n) * student.ppf(0.5 + ci_level / 2, np.maximum(n - 1, 1))
+    out = (
+        mean.join(sd.add_suffix("_sd"))
+        .join((mean - half).add_suffix("_lo"))
+        .join((mean + half).add_suffix("_hi"))
+    )
+    out["n_sets"] = n.max(axis=1)
     avail = mean.dropna(axis=1, how="all")
-    out["winner"] = avail.idxmax(axis=1)
+    out["best"] = avail.idxmax(axis=1)
     out["winner_ari"] = avail.max(axis=1)
+    winners, sets = [], []
+    for idx in avail.index:
+        row = avail.loc[idx].dropna().sort_values(ascending=False)
+        best = row.index[0]
+        lo = float((mean - half).loc[idx, best])
+        hi = (mean + half).loc[idx, row.index]
+        tied = [m for m in row.index if m == best or float(hi[m]) >= lo]
+        if row.iloc[0] < min_ari:
+            winners.append(NONE)
+            sets.append("")
+        elif len(tied) > 1:
+            winners.append(TIE)
+            sets.append(",".join(tied))
+        else:
+            winners.append(best)
+            sets.append(best)
+    out["winner"] = winners
+    out["winner_set"] = sets
     feat = [m for m in methods if families.get(m) == "features"]
     graph = [m for m in methods if families.get(m) == "graph"]
     both = [m for m in methods if families.get(m) in ("attributed", "fusion")]

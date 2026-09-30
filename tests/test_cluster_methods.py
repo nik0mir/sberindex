@@ -250,3 +250,62 @@ def test_synthetic_generators_match_design():
     A = inp2.A.tocoo()
     between = (truth2[A.row] != truth2[A.col]).mean()
     assert abs(between - 0.3) < 0.05 and 12 <= inp2.A.getnnz(axis=1).mean() <= 16
+
+
+def test_synthetic_summary_winner_tie_and_none():
+    """Победитель ячейки: интервал лучшего не перекрыт — метод; перекрыт — «ничья» с набором; лучший средний
+    ARI ниже порога — «нет»."""
+    rng = np.random.default_rng(0)
+    rows = []
+    for cell, (a, b) in {"clear": (0.9, 0.3), "close": (0.6, 0.59), "weak": (0.02, 0.01)}.items():
+        for _ in range(20):
+            rows.append(
+                {
+                    "design": cell,
+                    "graph_signal": 1.0,
+                    "feature_signal": 1.0,
+                    "a": a + rng.normal(0, 0.02),
+                    "b": b + rng.normal(0, 0.02),
+                }
+            )
+    s = SY.summarize(pd.DataFrame(rows), ["a", "b"], {"a": "features", "b": "attributed"}, 0.05, 0.95)
+    s = s.set_index("design")
+    assert s.loc["clear", "winner"] == "a" and s.loc["clear", "best"] == "a"
+    assert s.loc["close", "winner"] == SY.TIE and set(s.loc["close", "winner_set"].split(",")) == {"a", "b"}
+    assert s.loc["weak", "winner"] == SY.NONE and s.loc["weak", "best"] == "a"
+    assert (s["n_sets"] == 20).all() and (s["a_lo"] < s["a"]).all() and (s["a"] < s["a_hi"]).all()
+
+
+def test_report_tradeoff_and_synthetic_counts():
+    """Отчёт: итог против кандидатов фронта — лучше и хуже сверх допуска; счёт ячеек синтетики по методам."""
+    from types import SimpleNamespace
+
+    from munnet.clustering import report as R
+
+    cands = pd.DataFrame({"method": ["hybrid", "leiden"], "k": [4, 3]}, index=["hybrid_k04", "leiden_k03"])
+    lw = pd.DataFrame(
+        {
+            "crit_quality_features": [0.2, 0.8],
+            "crit_quality_graph": [0.9, 0.1],
+            "crit_stability": [0.91, 0.62],
+            "crit_interpretability": [0.80, 0.81],
+            "on_front": [True, True],
+        },
+        index=["hybrid_k04", "leiden_k03"],
+    )
+    cp = SimpleNamespace(
+        tie={"quality_features": 0.0, "quality_graph": 0.0, "stability": 0.02, "interpretability": 0.02}
+    )
+    text = R._tradeoff(lw, "hybrid_k04", cands, cp)
+    assert text.startswith("против «Leiden, K = 3» гибрид лучше по качеству на G, устойчивости")
+    assert text.endswith("хуже — по качеству в X")  # разница объяснимости 0,01 меньше допуска — ничья
+    s = pd.DataFrame(
+        {
+            "best": ["kmeans", "hybrid", "kmeans"],
+            "winner": ["kmeans", "tie", "none"],
+            "winner_set": ["kmeans", "hybrid,kmeans", ""],
+            "kmeans": [0.9, 0.5, 0.01],
+            "hybrid": [0.1, 0.52, 0.0],
+        }
+    )
+    assert R._syn_counts(s) == "K-means — 1, 1 и 1; Гибрид — 1, 0 и 1"

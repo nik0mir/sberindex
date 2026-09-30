@@ -29,6 +29,8 @@ METHOD_LABELS: dict[str, str] = {
     "shalileh_mirkin": "KEFRiN",
     "hybrid": "Гибрид",
     "kmeans_joint": "K-means корзина ⊕ X",
+    "tie": "ничья",
+    "none": "нет",
 }
 FAMILY_LABELS: dict[str, str] = {
     "features": "по признакам X",
@@ -47,6 +49,8 @@ METHOD_COLORS: dict[str, str] = {
     "shalileh_mirkin": "#882255",
     "hybrid": "#CC79A7",
     "kmeans_joint": "#595959",
+    "tie": "#B8B8B8",
+    "none": "#E0E0E0",
 }
 # Типы итоговой типологии: палитра Окабе — Ито без жёлтого (плохо читается на белом) и чёрного.
 TYPE_COLORS: tuple[str, ...] = (
@@ -132,7 +136,9 @@ SRC_SYNTH = "синтетические данные (генератор эта�
 # --- C01: синтетика ------------------------------------------------------------------------------
 
 
-def fig_synthetic(out: Path, summary: pd.DataFrame, families: dict[str, str], repeats: int) -> FigureInfo:
+def fig_synthetic(
+    out: Path, summary: pd.DataFrame, families: dict[str, str], repeats: int, min_ari: float = 0.05
+) -> FigureInfo:
     """C01: какой метод выигрывает при каком сочетании сигнала в графе и в признаках (основной генератор)."""
     s = summary.loc[summary["design"] == "knn"].copy()
     gs = sorted(s["graph_signal"].unique())
@@ -156,9 +162,10 @@ def fig_synthetic(out: Path, summary: pd.DataFrame, families: dict[str, str], re
     )
     subtitle = (
         f"Средний ARI с посаженным разбиением, наборов данных на ячейку: {repeats};"
-        " слева — победитель ячейки, справа — выигрыш лучшего метода на (G, X) над лучшим "
+        " слева — победитель ячейки («ничья» — 95% интервалы лучших перекрываются, «нет» — лучший средний ARI"
+        f" ниже {style.fmt_num(min_ari, 2)}), справа — выигрыш лучшего метода на (G, X) над лучшим "
         f"методом только по X; сигнал есть в обоих источниках — в {style.fmt_pct(share_both, 0)} таких ячеек "
-        "побеждает метод, видящий оба"
+        "метод, видящий оба, побеждает без перекрытия интервалов"
     )
     with style.use():
         fig, axes = style.new_figure("tall", 1, 2)
@@ -178,9 +185,9 @@ def fig_synthetic(out: Path, summary: pd.DataFrame, families: dict[str, str], re
                     ha="center",
                     va="center",
                     fontsize=style.POINT_LABEL_PT - 1,
-                    color="white",
+                    color=style.TEXT if win.iloc[i, j] in ("tie", "none") else "white",
                 )
-        ax.set_title("Победитель (ARI)", fontsize=style.LABEL_PT)
+        ax.set_title("Победитель (лучший средний ARI)", fontsize=style.LABEL_PT)
         ax = axes[1]
         lim = max(0.05, float(np.nanmax(np.abs(gain.to_numpy()))))
         ax.imshow(gain.to_numpy(), cmap=style.DIV_CMAP, vmin=-lim, vmax=lim, origin="lower", aspect="auto")
