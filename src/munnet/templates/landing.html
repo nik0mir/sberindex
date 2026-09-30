@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="$lang">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<meta name="description" content="Типы муниципалитетов по корзине безналичных трат жителей относительно своего региона: карта, поиск и карточка муниципалитета. Данные СберИндекса (CC BY-SA 4.0), Росстата и ФНС в обработке «Если быть точным» (CC BY 4.0).">
+<meta name="color-scheme" content="light">
+<style>$css</style>
+</head>
+<body>
+<!--
+  Шаблон лендинга munnet (string.Template, собирает src/munnet/landing.py).
+  Подстановки: $$title $$lang $$css $$js $$story_json $$names_json $$first_screen_svg $$data_inline $$meta_json.
+  Статичная SVG карты ячеек ($$first_screen_svg) ожидается с id="hexmap", классами .cells-t1…t4 и .cells-t0
+  (без типа, штриховка), .regions, .labels, .callout и атрибутами решётки data-hex-size, data-hex-x0,
+  data-hex-y0, data-hex-orient="pointy" (осевые координаты q, r из mo.json: hq, hr;
+  x = x0 + size·√3·(q + r/2), y = y0 − size·1,5·r, ось y экрана вниз). Страница ничего не считает,
+  кроме форматирования и поиска по названию.
+-->
+<div class="banner" id="banner" role="status" hidden></div>
+<a class="skip" href="#search-input">К поиску муниципалитета</a>
+<header class="masthead">
+  <div class="masthead-in">
+    <a class="brand" href="#answer">munnet<span class="brand-sub"> · типы локальных экономик по тратам жителей</span></a>
+    <nav aria-label="Разделы страницы">
+      <ul class="nav">
+        <li><a href="#answer">Ответ</a></li>
+        <li><a href="#find">Найти муниципалитет</a></li>
+        <li><a href="#sources">Источники</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="content">
+  <section id="answer" class="answer" aria-labelledby="answer-title">
+      <p class="kicker" id="answer-question" data-slot="question"></p>
+      <h1 id="answer-title" data-slot="title"></h1>
+      <p class="lead" id="answer-lead" data-slot="lead"></p>
+      <div class="findings">
+        <ol class="points" id="answer-points" aria-label="Три вывода"></ol>
+        <div class="notes">
+          <div class="caveat" id="answer-caveat"></div>
+          <p class="scope" id="answer-scope" data-slot="scope"></p>
+        </div>
+      </div>
+
+      <div class="finder" id="find" role="search" aria-label="Поиск муниципалитета">
+        <label class="finder-label" for="search-input">Найдите свой муниципалитет</label>
+        <div class="combo">
+          <input id="search-input" class="combo-input" type="text" autocomplete="off" spellcheck="false"
+                 role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-list"
+                 aria-describedby="search-hint"
+                 placeholder="Найдите свой город или район — например, Кириши">
+          <ul id="search-list" class="combo-list" role="listbox" aria-label="Найденные муниципалитеты" hidden></ul>
+        </div>
+        <p class="hint" id="search-hint">Название — регион — тип. Одинаковые названия бывают в разных регионах: смотрите на регион.</p>
+        <p class="sr-only" id="search-status" aria-live="polite"></p>
+        <div class="examples" id="examples" aria-label="Примеры муниципалитетов"></div>
+      </div>
+
+    <figure class="answer-map" id="map0">
+      <div class="map-tools" id="map-tools" hidden>
+        <button type="button" class="tool" data-zoom="in" aria-label="Увеличить карту">+</button>
+        <button type="button" class="tool" data-zoom="out" aria-label="Уменьшить карту">−</button>
+        <button type="button" class="tool tool-text" data-zoom="reset">Сбросить</button>
+      </div>
+      <div class="map-frame" id="map-frame">
+$first_screen_svg
+        <div class="tip" id="map-tip" hidden></div>
+        <div class="pick" id="map-pick" role="dialog" aria-label="Выберите муниципалитет" hidden></div>
+      </div>
+      <ul class="map-key" id="map-key" aria-label="Типы на карте"></ul>
+      <figcaption class="source" id="map-caption">
+        Одна ячейка — один муниципалитет (Москва и Петербург — по ячейке на город); ячейки сдвинуты с мест, чтобы
+        не перекрываться<span id="map-shift"></span>. Штриховка — нет типа: ряд трат неполный (меньше 24 месяцев
+        или с пропусками). Источник: СберИндекс (CC BY-SA 4.0), расчёт munnet.
+      </figcaption>
+    </figure>
+  </section>
+
+  <aside class="card" id="card" role="region" aria-labelledby="card-title" hidden>
+    <div class="card-grip" id="card-grip" aria-hidden="true"></div>
+    <div class="card-head">
+      <button type="button" class="back" id="card-back" hidden>← к исходному муниципалитету</button>
+      <h2 id="card-title" tabindex="-1"></h2>
+      <p class="card-sub" id="card-sub"></p>
+      <div class="card-actions">
+        <button type="button" class="tool tool-text show-map" id="card-showmap">Показать на карте</button>
+        <button type="button" class="tool close" id="card-close" aria-label="Закрыть карточку">×</button>
+      </div>
+    </div>
+    <div class="card-body" id="card-body"></div>
+  </aside>
+  <p class="sr-only" id="card-status" aria-live="polite"></p>
+</main>
+
+<footer class="sources" id="sources" aria-labelledby="sources-title">
+  <h2 id="sources-title">Источники и лицензии</h2>
+  <ul id="sources-list">
+    <li>СберИндекс: безналичные потребительские расходы жителей муниципалитетов, справочник границ — CC BY-SA 4.0.</li>
+    <li>Росстат, база данных показателей муниципальных образований в обработке «Если быть точным» — CC BY 4.0.</li>
+    <li>ФНС, форма 5-НДФЛ в обработке «Если быть точным» — CC BY 4.0.</li>
+  </ul>
+  <p class="meta" id="meta-line"></p>
+</footer>
+
+<script type="application/json" id="story">$story_json</script>
+<script type="application/json" id="names">$names_json</script>
+<script type="application/json" id="meta">$meta_json</script>
+$data_inline
+<script type="module">$js</script>
+</body>
+</html>

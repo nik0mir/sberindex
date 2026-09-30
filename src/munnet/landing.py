@@ -17,11 +17,13 @@
 - ``demo`` — синтетический ``facts.json`` (``"synthetic": true``): пишет в ``site.demo.out`` с плашкой
   ``site.demo.banner``.
 
-TODO (следующая порция, план §10, п. 5): ``mo.json``, ``types.json``, ``checks.json``, ``methods.json``,
-``hexgrid.json``, ``geo.json``, выгрузки CSV, ``index.html`` и PDF; контрольные числа (1776, 169, 247,
-размеры типов) против файлов (поузловая сверка типов с ``cluster_final`` и sha256 меток — уже
-в ``check_bound_to_labels``); подпись раскладки ``{preserved}`` и реальные МО ролей. Пока их нет, обычный
-режим после всех проверок завершается кодом 2 и ничего не пишет в ``site/``.
+Данные страницы (§5): ``mo.json`` (2190 МО и 2 узла-города колонками), ``types.json``, ``checks.json``,
+``methods.json``, ``hexgrid.json`` (карта равных ячеек — ``site_hexgrid``), статичная SVG экрана 0, выгрузки
+``data/download/*.csv`` и ``index.html`` по шаблону ``src/munnet/templates/landing.html``. Контрольные числа
+(``site.build.controls``: 1776 узлов, 169 МО без типа, 247 районов столиц; ``facts.scope``; размеры типов
+``facts.ladder``) сверяются с файлами — расхождение код 3. Выгрузки этапа 5, которых нет (``--demo``), дают
+пустые поля: блок скрывается, landing.py ничего не пересчитывает. Пока не собираются ``geo.json`` (режим
+«Площадь») и PDF (план §10, пп. 9 и 11).
 """
 
 from __future__ import annotations
@@ -30,15 +32,16 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
-from munnet import style
+from munnet import site_hexgrid, style
 from munnet.config import Config
 from munnet.contracts import MissingInputError, QCError
 from munnet.site_headlines import SLOT, HeadlineChecker, check_headlines, freeze_hash, norm
@@ -62,8 +65,6 @@ TESTS = (
     "T6_bank_coverage",
     "T7_utility",
 )
-# Выходы, которые собирает следующая порция (контракт §5); сейчас — заглушки
-PENDING_OUTPUTS = ("mo.json", "types.json", "checks.json", "methods.json", "hexgrid.json", "index.html")
 LICENSES = [
     {"source": "СберИндекс", "license": "CC BY-SA 4.0"},
     {"source": "Росстат, БД ПМО в обработке «Если быть точным»", "license": "CC BY 4.0"},
@@ -447,7 +448,6 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "site_freeze_sha256": freeze_hash(site),
             "facts_sha256": _sha(facts),
             "licenses": LICENSES,
-            "pending": list(PENDING_OUTPUTS),
         },
         "verdicts": {t: v[t] for t in (*TESTS, "T7_type_gain", "one_in_ten", "caveat")},
         "screen0": screen0,
@@ -646,59 +646,1137 @@ def dumps(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
-def check_budget(payloads: Mapping[str, bytes], budget: Mapping[str, float]) -> list[str]:
-    """Жёсткий предел ``budget_mb.hard`` на всю страницу — код 3; мягкие пределы — предупреждение в логе."""
-    mb = sum(len(b) for b in payloads.values()) / 2**20
-    if mb > float(budget["total"]):
-        log.warning("site: страница %.2f МБ больше budget_mb.total %.2f", mb, float(budget["total"]))
-    first = sum(len(b) for n, b in payloads.items() if n in ("index.html", "data/story.json")) / 2**20
-    if first > float(budget["first_screen"]):
-        log.warning("site: первый экран %.2f МБ больше budget_mb.first_screen", first)
-    if mb > float(budget["hard"]):
-        return [f"страница {mb:.2f} МБ больше budget_mb.hard {budget['hard']} МБ"]
-    return []
+# --- данные страницы: входы ---------------------------------------------------------------------------------
 
-
-# Заглушки выходов следующей порции (контракт §5): каждая вернёт байты файла в site/data/
-Builder = Callable[[Config, Mapping], bytes | None]
-
-
-def build_mo(cfg: Config, facts: Mapping) -> bytes | None:
-    """TODO: mo.json — 2190 строк колонками (§5): тип, окна, узел, соседи, корзина, устойчивость."""
-    return None
-
-
-def build_types(cfg: Config, facts: Mapping) -> bytes | None:
-    """TODO: types.json — 4 записи: названия, правило, размер, профиль, примеры, фигуры."""
-    return None
-
-
-def build_checks(cfg: Config, facts: Mapping) -> bytes | None:
-    """TODO: checks.json — T1, T3, T5, T7, R1, потоки 4 × 4 из outputs/interpret и outputs/dynamics."""
-    return None
-
-
-def build_methods(cfg: Config, facts: Mapping) -> bytes | None:
-    """TODO: methods.json — методы × SW, CH, S_Dbw, AVI, AVU, MQ из outputs/evaluate."""
-    return None
-
-
-def build_hexgrid(cfg: Config, facts: Mapping) -> bytes | None:
-    """TODO: hexgrid.json — ячейки, контуры регионов, подписи (site.build.hex)."""
-    return None
-
-
-BUILDERS: dict[str, Builder] = {
-    "data/mo.json": build_mo,
-    "data/types.json": build_types,
-    "data/checks.json": build_checks,
-    "data/methods.json": build_methods,
-    "data/hexgrid.json": build_hexgrid,
+PARTS = ("food", "marketplace", "transport", "health", "cafe", "other")
+PART_LABELS = {
+    "food": "продукты",
+    "marketplace": "маркетплейсы",
+    "transport": "транспорт",
+    "health": "здоровье",
+    "cafe": "кафе и рестораны",
+    "other": "прочее",
+}
+KIND_RU = {
+    "mr": "муниципальный район",
+    "mo": "муниципальный округ",
+    "go": "городской округ",
+    "vgt": "внутригородская территория",
+    "city": "город федерального значения",
+}
+OKRUG_RU = {
+    "central": "Центральный",
+    "northwestern": "Северо-Западный",
+    "southern": "Южный",
+    "north_caucasian": "Северо-Кавказский",
+    "volga": "Приволжский",
+    "ural": "Уральский",
+    "siberian": "Сибирский",
+    "far_eastern": "Дальневосточный",
+}
+STATUS_CODE = {"no_change": "n", "reliable": "r", "within_noise": "w"}
+N_WINDOWS = 13
+ICVI_BETTER = {
+    "sw": "max",
+    "ch": "max",
+    "s_dbw": "min",
+    "avi": "max",
+    "avu": "min",
+    "mq": "max",
+    "anui": "max",
+}
+ICVI_LABELS = {
+    "sw": "SW",
+    "ch": "CH",
+    "s_dbw": "S_Dbw",
+    "avi": "AVI",
+    "avu": "AVU",
+    "mq": "MQ",
+    "anui": "ANUI",
 }
 
 
+def _num(x: Any, nd: int = 2) -> float | int | None:
+    """Число для JSON: пропуск -> None, округление до ``nd`` знаков (целые остаются целыми)."""
+    if x is None or (isinstance(x, float) and not np.isfinite(x)) or pd.isna(x):
+        return None
+    if isinstance(x, (int, np.integer)) and not isinstance(x, bool):
+        return int(x)
+    v = round(float(x), nd)
+    return int(v) if nd == 0 else v
+
+
+@dataclass
+class SiteData:
+    """Входы этапа site, прочитанные один раз. Номера типов — как на странице (после ``ladder.transfer``)."""
+
+    cfg: Config
+    mode: Mode
+    facts: Mapping
+    terr: pd.DataFrame  # territories (2190 МО)
+    nodes: pd.DataFrame  # features_nodes (1945: узлы сети и МО без типа), индекс — territory_id
+    members: pd.DataFrame  # features_members (2190: МО -> узел)
+    transfer: dict[int, int]  # номер cluster_final -> номер страницы
+    node_type: pd.Series  # узел -> тип страницы
+    type_source: str
+
+    def opt(self, name: str) -> pd.DataFrame | None:
+        """Выгрузка этапа interpret (``outputs/interpret/<name>``); нет файла — None (блок скрывается)."""
+        p = self.mode.interpret_dir / name
+        return pd.read_csv(p) if p.exists() else None
+
+    def processed(self, name: str, **kw: Any) -> pd.DataFrame:
+        p = Path(self.cfg["paths"]["processed"]) / f"{name}.parquet"
+        if not p.exists():
+            raise MissingInputError(f"site: нет {p} — этапы panel, features, network, cluster, dynamics")
+        return pd.read_parquet(p, **kw)
+
+    def outputs(self, rel: str) -> Path:
+        return self.cfg.dir("outputs") / rel
+
+    def tmap(self, s: pd.Series) -> pd.Series:
+        """Номера cluster (окна, dynamics) -> номера страницы."""
+        return s.map(lambda v: self.transfer.get(int(v)) if pd.notna(v) else None)
+
+
+def load_site_data(cfg: Config, mode: Mode, facts: Mapping) -> SiteData:
+    """Справочник, узлы, состав узлов и тип каждого узла. Тип — из ``types.csv`` этапа interpret (в обычном
+    режиме он уже сверен с ``cluster_final`` поузлово); без него (``--demo``) — ``cluster_final`` через
+    ``facts.ladder.transfer`` (нет переноса — номера как есть)."""
+    proc = Path(cfg["paths"]["processed"])
+    need = [
+        proc / f"{n}.parquet" for n in ("territories", "features_nodes", "features_members", "cluster_final")
+    ]
+    missing = [str(p) for p in need if not p.exists()]
+    if missing:
+        raise MissingInputError(f"site: нет {missing} — этапы panel, features, cluster")
+    terr = pd.read_parquet(need[0])
+    nodes = pd.read_parquet(need[1]).set_index("territory_id", drop=False)
+    members = pd.read_parquet(need[2])
+    final = pd.read_parquet(need[3], columns=["territory_id", "type"])
+    tr = (facts.get("ladder") or {}).get("transfer") or {}
+    transfer = {int(k): int(v) for k, v in tr.items()} or {int(t): int(t) for t in final["type"].unique()}
+    types_csv = mode.interpret_dir / "types.csv"
+    if types_csv.exists():
+        t = pd.read_csv(types_csv, usecols=["territory_id", "type"])
+        node_type = pd.Series(t["type"].astype(int).to_numpy(), index=t["territory_id"].astype(int))
+        source = "types.csv"
+    else:
+        node_type = pd.Series(
+            [transfer[int(v)] for v in final["type"]], index=final["territory_id"].astype(int)
+        )
+        source = "cluster_final + ladder.transfer"
+    return SiteData(cfg, mode, facts, terr, nodes, members, transfer, node_type.sort_index(), source)
+
+
+def check_controls(d: SiteData) -> list[str]:
+    """Код 3: контрольные числа ``site.build.controls`` и ``facts.scope`` против файлов, размеры типов
+    ``facts.ladder.sizes_territorial`` против типов узлов (в ``--demo`` размеры синтетические — пропуск)."""
+    ctl = d.cfg["site"]["build"]["controls"]
+    scope = d.facts.get("scope") or {}
+    nodes = d.nodes
+    got = {
+        "n_nodes": int(nodes["is_node"].sum()),
+        "n_untyped": int((~nodes["is_node"]).sum()),
+        "n_inner": int((d.members["role"] == "city_member").sum()),
+    }
+    bad = []
+    for k, v in got.items():
+        if int(ctl[k]) != v:
+            bad.append(f"{k}: в файлах {v}, в site.build.controls {ctl[k]}")
+        if k in scope and scope[k] is not None and int(scope[k]) != v:
+            bad.append(f"{k}: в файлах {v}, в facts.scope {scope[k]}")
+    n_members = int(nodes.loc[nodes["is_city_node"], "n_members"].sum())
+    if n_members != got["n_inner"]:
+        bad.append(f"n_inner: районов в узлах-городах {n_members} ≠ city_member {got['n_inner']}")
+    if len(d.node_type) != got["n_nodes"] or set(d.node_type.index) != set(nodes.index[nodes["is_node"]]):
+        bad.append(f"типы есть у {len(d.node_type)} узлов ({d.type_source}), узлов сети {got['n_nodes']}")
+    n_regions = int(nodes.loc[nodes["is_node"], "region_code"].nunique())
+    if scope.get("n_regions") is not None and int(scope["n_regions"]) != n_regions:
+        bad.append(f"n_regions: в файлах {n_regions}, в facts.scope {scope['n_regions']}")
+    lad = d.facts.get("ladder") or {}
+    if d.mode.name == "demo":
+        log.warning("site --demo: размеры типов в facts синтетические — сверка с файлами пропущена")
+    elif lad.get("order") and lad.get("sizes_territorial"):
+        terr_nodes = nodes.index[nodes["is_node"] & ~nodes["is_city_node"]]
+        counts = d.node_type.reindex(terr_nodes).value_counts()
+        for t, n in zip(lad["order"], lad["sizes_territorial"], strict=True):
+            if int(counts.get(int(t), 0)) != int(n):
+                bad.append(f"тип {t}: территориальных узлов {int(counts.get(int(t), 0))}, в facts.ladder {n}")
+    for c in scope.get("city_nodes") or []:
+        have = d.node_type.get(int(c["territory_id"]))
+        if have is not None and int(have) != int(c["type"]):
+            bad.append(f"узел-город {c['name']}: тип {have}, в facts.scope {c['type']}")
+    return bad
+
+
+# --- карта ячеек --------------------------------------------------------------------------------------------
+
+
+def okrug_of(cfg: Config) -> dict[int, str]:
+    """Регион -> федеральный округ (``interpret.federal_districts``)."""
+    out = {}
+    for k, regs in cfg["interpret"]["federal_districts"].items():
+        for r in regs:
+            out[int(r)] = OKRUG_RU.get(k, k)
+    return out
+
+
+@dataclass
+class HexMap:
+    """Ячейки страницы: ``hq``, ``hr`` каждого из 1945 объектов, решётка и качество раскладки."""
+
+    cells: pd.DataFrame  # territory_id, hq, hr, shift_km, region_code
+    grid: site_hexgrid.PageGrid
+    stats: dict[str, Any]
+
+
+def build_hexmap(d: SiteData) -> HexMap:
+    hp = d.cfg["site"]["build"]["hex"]
+    n = d.nodes
+    res = site_hexgrid.build_grid(
+        n["territory_id"].to_numpy(),
+        n["x_aea"].to_numpy() / 1000.0,
+        n["y_aea"].to_numpy() / 1000.0,
+        n["region_code"].to_numpy(),
+        hp,
+    )
+    hq, hr = site_hexgrid.page_axial(res.q, res.r)
+    grid = site_hexgrid.page_grid(hq, hr, float(hp["size"]), float(hp["margin"]))
+    cells = pd.DataFrame(
+        {
+            "territory_id": res.ids.astype(int),
+            "hq": hq.astype(int),
+            "hr": hr.astype(int),
+            "shift_km": res.shift_km,
+            "region_code": n["region_code"].to_numpy().astype(int),
+        }
+    )
+    if res.stats["groups_split"]:
+        raise QCError(f"site: ячейки регионов разорваны: {res.stats['split']} — подберите site.build.hex")
+    return HexMap(cells, grid, res.stats)
+
+
+def build_hexgrid_json(d: SiteData, hm: HexMap, types_by_cell: pd.Series) -> dict:
+    """``hexgrid.json``: решётка, контуры регионов и округов по сторонам ячеек, подписи, смещения."""
+    c = hm.cells
+    ok = okrug_of(d.cfg)
+    region_names = d.nodes.set_index("territory_id")["region_name"]
+    okrug = c["region_code"].map(lambda r: ok.get(int(r), "—"))
+    x, y = hm.grid.center(c["hq"], c["hr"])
+    regions = []
+    for code, g in c.assign(x=x, y=y).groupby("region_code"):
+        regions.append(
+            {
+                "code": int(code),
+                "name": str(region_names.loc[g["territory_id"].iloc[0]]),
+                "okrug": ok.get(int(code)),
+                "n": int(len(g)),
+                "x": round(float(g["x"].median()), 1),
+                "y": round(float(g["y"].median()), 1),
+            }
+        )
+    okrugs = [
+        {"name": name, "x": round(float(g["x"].median()), 1), "y": round(float(g["y"].median()), 1)}
+        for name, g in c.assign(x=x, y=y, okrug=okrug.to_numpy()).groupby("okrug")
+    ]
+    return {
+        "grid": hm.grid.as_dict(),
+        "formula": "x = x0 + size·√3·(hq + hr/2), y = y0 − size·1,5·hr",
+        "cell_km": hm.stats["cell_km"],
+        "n_cells": hm.stats["n_cells"],
+        "shift_km": {
+            "median": int(round(hm.stats["shift_median_km"])),
+            "p90": int(round(hm.stats["shift_p90_km"])),
+            "max": int(round(hm.stats["shift_max_km"])),
+        },
+        "regions_split": hm.stats["groups_split"],
+        "knn10_preserved": round(hm.stats["knn10_preserved"], 3),
+        "paths": {
+            "regions": site_hexgrid.borders(c["hq"], c["hr"], c["region_code"].to_numpy(), hm.grid),
+            "okrugs": site_hexgrid.borders(c["hq"], c["hr"], okrug.to_numpy(), hm.grid),
+        },
+        "regions": regions,
+        "okrugs": okrugs,
+        "cities": city_labels(d, hm),
+    }
+
+
+def city_labels(d: SiteData, hm: HexMap) -> list[dict]:
+    """Подписи крупнейших по ``pop_avg`` городов (узлы-города и городские округа): чтобы узнавалась карта."""
+    n = int(d.cfg["site"]["build"]["hex"]["n_city_labels"])
+    pop = node_pop(d)
+    nodes = d.nodes
+    cand = nodes[nodes["is_node"] & (nodes["is_city_node"] | (nodes["mo_type"].astype(str) == "go"))]
+    top = pop.reindex(cand.index).dropna().sort_values(ascending=False).head(n)
+    cells = hm.cells.set_index("territory_id")
+    x, y = hm.grid.center(cells.loc[top.index, "hq"], cells.loc[top.index, "hr"])
+    return [
+        {
+            "id": int(i),
+            "name": str(nodes.loc[i, "name_short"]),
+            "x": round(float(a), 1),
+            "y": round(float(b), 1),
+        }
+        for i, a, b in zip(top.index, x, y, strict=True)
+    ]
+
+
+def node_pop(d: SiteData) -> pd.Series:
+    """Население: ``pop_avg`` 2024 года, иначе 2023-го (``context_annual``; города — ``features_place``)."""
+    ca = d.processed("context_annual", columns=["territory_id", "year", "pop_avg"])
+    pl = d.processed("features_place", columns=["territory_id", "year", "pop_avg"])
+    both = pd.concat([ca, pl[pl["territory_id"].isin(d.nodes.index[d.nodes["is_city_node"]])]])
+    both = both.dropna(subset=["pop_avg"]).sort_values(["territory_id", "year"])
+    return both.groupby("territory_id")["pop_avg"].last()
+
+
+def first_screen_svg(d: SiteData, hm: HexMap, hexgrid: Mapping, mo: pd.DataFrame, story: Mapping) -> str:
+    """Статичная SVG карты ячеек экрана 0 (работает без JS): ячейки по типам (цвет и подпись), без типа —
+    штриховка, контуры регионов и округов, подписи городов и округов, выноски примеров типов."""
+    g = hm.grid
+    view = story["view"]
+    colors = view["type_colors"]
+    names = story["names"]["final"]
+    cells = mo[mo["role"].isin(["territorial", "city", "untyped"])]
+    parts = [
+        # класс hexmap — по нему landing.css стилизует линии эго-сети, выделение и подписи
+        '<svg id="hexmap" class="hexmap" xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {g.width:.0f} {g.height:.0f}" '
+        f'role="img" aria-label="{_esc(map_summary(d, mo, story))}" data-hex-size="{g.size}" '
+        f'data-hex-x0="{g.x0:.2f}" data-hex-y0="{g.y0:.2f}" data-hex-orient="pointy">',
+        f"<title>{_esc(map_summary(d, mo, story))}</title>",
+        '<defs><pattern id="hatch0" width="3" height="3" patternUnits="userSpaceOnUse" '
+        f'patternTransform="rotate(45)"><rect width="3" height="3" fill="{style.NODATA}"/>'
+        f'<line x1="0" y1="0" x2="0" y2="3" stroke="{style.HATCH}" stroke-width="1.2"/></pattern></defs>',
+    ]
+    order = [int(t) for t in view["legend_order"]]
+    for t in [*order, 0]:
+        sub = cells[cells["t"].fillna(0).astype(int) == t]
+        if sub.empty:
+            continue
+        x, y = g.center(sub["hq"], sub["hr"])
+        fill = "url(#hatch0)" if t == 0 else colors[str(t)]
+        label = "нет типа" if t == 0 else names.get(str(t), f"Тип {t}")
+        parts.append(
+            f'<path class="cells-t{t}" fill="{fill}" stroke="#fff" stroke-width="0.6" '
+            f'aria-label="{_esc(label)}: {len(sub)}" d="{site_hexgrid.hex_path(x, y, g.size)}"/>'
+        )
+    paths = hexgrid["paths"]
+    parts.append(
+        f'<path class="regions" fill="none" stroke="#595959" stroke-width="0.8" stroke-linejoin="round" '
+        f'd="{paths["regions"]}"/>'
+        f'<path class="okrugs" fill="none" stroke="#111" stroke-width="1.8" stroke-linejoin="round" '
+        f'd="{paths["okrugs"]}"/>'
+    )
+    lab = [
+        '<g class="labels" font-size="11" paint-order="stroke" stroke="#fff" stroke-width="3" fill="#222">'
+    ]
+    taken: list[tuple[float, float, float, float]] = []
+    for c in hexgrid["cities"]:
+        x, y = c["x"] + g.size, c["y"] + 4
+        taken.append((x, y - LINE_H, x + CHAR_W * len(c["name"]), y))
+        lab.append(f'<text x="{x:.1f}" y="{y:.1f}">{_esc(c["name"])}</text>')
+    for o in hexgrid["okrugs"]:
+        # подпись округа — в первом свободном месте у медианы его ячеек; нет места — без подписи
+        half = CHAR_W * 1.1 * len(o["name"]) / 2
+        for dy in (0, LINE_H + 2, -(LINE_H + 2), 2 * (LINE_H + 2)):
+            box = (o["x"] - half, o["y"] + dy - LINE_H, o["x"] + half, o["y"] + dy)
+            if _free(box, taken, g.width, g.height):
+                taken.append(box)
+                lab.append(
+                    f'<text class="okrug" x="{o["x"]:.1f}" y="{o["y"] + dy:.1f}" text-anchor="middle" '
+                    f'font-size="10" fill="#595959" letter-spacing="0.08em">{_esc(o["name"].upper())}</text>'
+                )
+                break
+    lab.append("</g>")
+    parts += lab
+    parts += callouts(d, hm, mo, story, taken)
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+CHAR_W = 6.6  # ширина знака подписи 11 px с запасом, оценка для раскладки подписей
+LINE_H = 13.0
+
+
+def _free(box: tuple[float, float, float, float], taken: list, w: float, h: float) -> bool:
+    x0, y0, x1, y1 = box
+    if x0 < 0 or y0 < 0 or x1 > w or y1 > h:
+        return False
+    return all(x1 < a or x0 > c or y1 < b or y0 > e for a, b, c, e in taken)
+
+
+def callouts(d: SiteData, hm: HexMap, mo: pd.DataFrame, story: Mapping, taken: list) -> list[str]:
+    """Выноски у типичного примера каждого типа (``examples.csv``, kind = typical, ранг 1): две строки
+    «Название (регион)» и «— тип». Место — первое свободное из восьми вокруг ячейки (без наложений на другие
+    подписи, в пределах холста). Без выгрузки примеров (``--demo``) выносок нет — остаётся ключ под картой."""
+    ex = d.opt("examples.csv")
+    if ex is None:
+        return []
+    ex = ex[(ex["kind"] == "typical") & (ex["rank"] == 1)].sort_values("type")
+    names = story["names"]["final"]
+    rows = mo.set_index("id")
+    g = hm.grid
+    out = [
+        '<g class="callout" font-size="11" paint-order="stroke" stroke="#fff" stroke-width="3" fill="#222">'
+    ]
+    offsets = [(1, -1), (1, 1), (-1, -1), (-1, 1), (1, -2.5), (-1, -2.5), (1, 2.5), (-1, 2.5)]
+    for _, e in ex.iterrows():
+        tid = int(e["territory_id"])
+        if tid not in rows.index or pd.isna(rows.loc[tid, "hq"]):
+            continue
+        r = rows.loc[tid]
+        x, y = g.center([r["hq"]], [r["hr"]])
+        cx, cy = float(x[0]), float(y[0])
+        lines = [f"{r['ns']} ({r['r']})", f"— {names.get(str(int(e['type'])), '')}"]
+        w = CHAR_W * max(len(t) for t in lines)
+        h = LINE_H * len(lines)
+        cands = []
+        for sx, sy in offsets:
+            tx, ty = cx + sx * 16, cy + sy * 16
+            box = (
+                tx if sx > 0 else tx - w,
+                ty - h if sy < 0 else ty,
+                tx + w if sx > 0 else tx,
+                ty if sy < 0 else ty + h,
+            )
+            cands.append((sx, sy, tx, ty, box))
+        # первое свободное место; нет свободного — первое в пределах холста (наложение лучше обрезки)
+        pick = next((c for c in cands if _free(c[4], taken, g.width, g.height)), None) or next(
+            (c for c in cands if _free(c[4], [], g.width, g.height)), cands[0]
+        )
+        sx, sy, tx, ty, box = pick
+        taken.append(box)
+        anchor = "start" if sx > 0 else "end"
+        y_first = box[1] + LINE_H - 3
+        tspans = "".join(
+            f'<tspan x="{tx:.1f}" y="{y_first + i * LINE_H:.1f}">{_esc(t)}</tspan>'
+            for i, t in enumerate(lines)
+        )
+        out.append(
+            f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{tx:.1f}" y2="{ty:.1f}" stroke="#222" '
+            f'stroke-width="0.8"/>'
+            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{g.size * 1.1:.1f}" fill="none" stroke="#222" '
+            f'stroke-width="1.4"/><text text-anchor="{anchor}">{tspans}</text>'
+        )
+    out.append("</g>")
+    return out
+
+
+def map_summary(d: SiteData, mo: pd.DataFrame, story: Mapping) -> str:
+    """Итоговая строка карты для aria-label (числа — из файлов)."""
+    names = story["names"]["final"]
+    nodes = mo[mo["role"].isin(["territorial", "city"])]
+    counts = nodes["t"].value_counts()
+    types = "; ".join(
+        f"{names.get(str(t), f'Тип {t}')} — {style.fmt_num(int(counts.get(int(t), 0)))}"
+        for t in story["view"]["legend_order"]
+    )
+    n_reg = int(d.nodes.loc[d.nodes["is_node"], "region_code"].nunique())
+    n_untyped = int((mo["role"] == "untyped").sum())
+    return (
+        f"Карта равных ячеек: {style.fmt_num(len(nodes))} муниципалитетов в {n_reg} регионах, "
+        f"Москва и Петербург — по одной ячейке. Типы: {types}. "
+        f"Ещё {style.fmt_num(n_untyped)} без типа — штриховка"
+    )
+
+
+def _esc(s: str) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+# --- mo.json ------------------------------------------------------------------------------------------------
+
+
+def build_mo_frame(d: SiteData, hm: HexMap, nxy: pd.DataFrame, values: pd.DataFrame | None) -> pd.DataFrame:
+    """Строка на каждое из 2190 МО и на 2 узла-города (``role`` = city): все поля контракта §5 ``mo.json``."""
+    terr = d.terr.set_index("territory_id", drop=False).sort_index()
+    nodes = d.nodes
+    mem = d.members.set_index("territory_id")
+    city_ids = [int(i) for i in nodes.index[nodes["is_city_node"]]]
+    rows = []
+    for tid, t in terr.iterrows():
+        role = str(mem.loc[tid, "role"])
+        node = mem.loc[tid, "node_id"]
+        if role == "city_member":
+            kind = "inner"
+        elif tid in nodes.index and bool(nodes.loc[tid, "is_node"]):
+            kind = "territorial"
+        else:
+            kind = "untyped"
+        rows.append(
+            {
+                "id": int(tid),
+                "n": t["name"],
+                "ns": t["name_short"],
+                "r": t["region_name"],
+                "k": KIND_RU.get(str(t["mo_type"]), str(t["mo_type"])),
+                "role": kind,
+                "node": int(node) if kind != "untyped" and pd.notna(node) else None,
+                "region_code": int(t["region_code"]),
+            }
+        )
+    for cid in city_ids:
+        c = nodes.loc[cid]
+        rows.append(
+            {
+                "id": cid,
+                "n": c["name"],
+                "ns": c["name_short"] if pd.notna(c["name_short"]) else c["name"],
+                "r": c["region_name"],
+                "k": KIND_RU["city"],
+                "role": "city",
+                "node": cid,
+                "region_code": int(c["region_code"]),
+            }
+        )
+    mo = pd.DataFrame(rows).set_index("id", drop=False).rename_axis(None)
+    node = mo["node"]
+    # МО без типа: причина словами (ряд неполный — число месяцев из 24 и пропуски внутри ряда)
+    un = mo["role"] == "untyped"
+    src = nodes.reindex(mo.index[un])
+    mo["why_null"] = None
+    mo.loc[un, "why_null"] = [
+        f"ряд трат неполный — есть {int(m)} из 24 месяцев" + (", с пропусками" if g else "")
+        for m, g in zip(src["n_months"], src["has_internal_gap"], strict=True)
+    ]
+    by_node = lambda s: node.map(s)  # noqa: E731 — значение узла для МО (район столицы — значение города)
+    mo["t"] = by_node(d.node_type)
+    dyn = d.outputs("dynamics/nodes.csv")
+    if not dyn.exists():
+        raise MissingInputError(f"site: нет {dyn} — этап dynamics")
+    dn = pd.read_csv(dyn).set_index("territory_id")
+    mo["t23"] = by_node(d.tmap(dn["type_2023"]))
+    mo["t24"] = by_node(d.tmap(dn["type_2024"]))
+    mo["rel"] = by_node(dn["reliable"].astype(bool))
+    hist = d.processed("dynamics_history", columns=["territory_id", "window_index", "type", "status"])
+    hist = hist.sort_values(["territory_id", "window_index"])
+    win = hist.groupby("territory_id")["type"].apply(
+        lambda s: "".join(str(d.transfer.get(int(v), int(v))) for v in s)
+    )
+    st = hist.groupby("territory_id")["status"].apply(lambda s: "".join(STATUS_CODE[str(v)] for v in s))
+    if not (win.str.len() == N_WINDOWS).all():
+        raise QCError(f"site: в dynamics_history не у всех узлов {N_WINDOWS} окон")
+    mo["win"], mo["st"] = by_node(win), by_node(st)
+    # ячейка: у района столицы — ячейка города
+    cells = hm.cells.set_index("territory_id")
+    own = mo["role"].isin(["territorial", "city", "untyped"])
+    key = mo["id"].where(own, mo["node"])
+    mo["hq"] = key.map(cells["hq"])
+    mo["hr"] = key.map(cells["hr"])
+    if mo.loc[own | (mo["role"] == "inner"), ["hq", "hr"]].isna().any().any():
+        raise QCError("site: не у всех МО есть ячейка")
+    lay = nxy.set_index("territory_id") if len(nxy) else None
+    mo["nx"] = by_node(lay["nx"]) if lay is not None else None
+    mo["ny"] = by_node(lay["ny"]) if lay is not None else None
+    pop = node_pop(d)
+    mo["pop"] = mo["id"].map(pop).round()
+    ca = d.processed("context_annual", columns=["territory_id", "year", "workplace_based"])
+    mo["wp"] = mo["id"].map(ca.sort_values("year").groupby("territory_id")["workplace_based"].last())
+    fw = d.processed("features_windows", columns=["territory_id", "window", *[f"clr_rel_{p}" for p in PARTS]])
+    for year in ("2023", "2024"):
+        w = fw[fw["window"] == year].set_index("territory_id")[[f"clr_rel_{p}" for p in PARTS]]
+        b = pd.Series([[_num(v) for v in row] for row in w.to_numpy()], index=w.index, dtype=object)
+        # своё окно — у самого МО (есть у узлов); у района столицы — корзина города
+        mo["b" + year[2:]] = mo["id"].where(mo["id"].isin(b.index), mo["node"]).map(b)
+    # «почему этот тип»: значения признаков названия типа у узла
+    feats = why_features(d)
+    if values is not None and feats:
+        mo["why"] = [
+            [
+                _num(values.at[n, f], 3) if n in values.index and f in values.columns else None
+                for f in feats[t]
+            ]
+            if pd.notna(n) and pd.notna(t) and int(t) in feats
+            else None
+            for n, t in zip(mo["node"], mo["t"], strict=True)
+        ]
+    else:
+        mo["why"] = None
+    rh = d.processed("features_rhythm", columns=["territory_id", "own_reliable"]).set_index("territory_id")
+    rm = d.processed(
+        "features_rhythm_monthly",
+        columns=["territory_id", "category", "month", "own"],
+        filters=[("category", "==", "all")],
+    )
+    prof = rm.groupby(["territory_id", "month"])["own"].mean().unstack("month")
+    reliable = rh.index[rh["own_reliable"].astype(bool)]
+    prof = prof.reindex(reliable)
+    rh_list = pd.Series(
+        [[_num(v, 3) for v in row] for row in prof.to_numpy()], index=prof.index, dtype=object
+    )
+    mo["rh"] = by_node(rh_list)
+    mo["nb"] = by_node(main_neighbors(d))
+    extra = node_tables(d)
+    for col, s in extra.items():
+        mo[col] = by_node(s)
+    return mo.drop(columns=["region_code"]).sort_values(["role", "id"], key=_role_key)
+
+
+def _role_key(s: pd.Series) -> pd.Series:
+    if s.name == "role":
+        return s.map({"territorial": 0, "city": 1, "inner": 2, "untyped": 3})
+    return s
+
+
+def main_neighbors(d: SiteData) -> pd.Series:
+    """До 10 соседей узла в основной сети корзин (``basket_dist``, ``is_main``) по убыванию веса."""
+    k = int(d.cfg["site"]["similarity_layout"]["n_net_neighbors"])
+    e = d.processed(
+        "network_edges",
+        columns=["rule", "source", "target", "weight", "is_main"],
+        filters=[("rule", "==", "basket_dist"), ("is_main", "==", True)],
+    )
+    both = pd.concat(
+        [
+            e[["source", "target", "weight"]],
+            e.rename(columns={"source": "target", "target": "source"})[["source", "target", "weight"]],
+        ]
+    ).sort_values(["source", "weight", "target"], ascending=[True, False, True])
+    return both.groupby("source")["target"].apply(lambda s: [int(x) for x in s.head(k)])
+
+
+def node_tables(d: SiteData) -> dict[str, pd.Series]:
+    """Поузловые выгрузки этапа 5 (§5): сопоставимые (набор продукта), устойчивость, граничные, R1, соперник.
+    Нет файла — поле пустое у всех (блок скрывается); ничего не пересчитывается."""
+    out: dict[str, pd.Series] = {}
+    k = int(d.cfg["site"]["n_similar_shown"])
+    comp = d.opt("node_comparable.csv")
+    if comp is not None:
+        c = comp[comp["product"].astype(bool) & (comp["rank"] <= k)].sort_values(["territory_id", "rank"])
+        out["sim"] = c.groupby("territory_id").apply(
+            lambda g: [[int(i), int(round(km))] for i, km in zip(g["other_id"], g["km"], strict=True)],
+            include_groups=False,
+        )
+    seed = d.opt("node_seed.csv")
+    if seed is not None:
+        for kind, col in (("variant", "rob_rule"), ("seed", "rob_seed")):
+            s = seed[seed["kind"] == kind].set_index("territory_id")
+            out[col] = s["n_same"].astype(int).astype(str) + "/" + s["n_runs"].astype(int).astype(str)
+    mg = d.opt("node_margin.csv")
+    if mg is not None:
+        m = mg.set_index("territory_id")
+        # граничное — узел ближе к центру другого типа, чем к своему (own_nearest = False): второй тип
+        out["second"] = m["second_type"].where(~m["own_nearest"].astype(bool))
+    r1 = d.opt("node_r1.csv")
+    if r1 is not None:
+        v = r1[r1["kind"] == "variant"]
+        variants = sorted(v["variant"].unique())
+        piv = v.pivot_table(index="territory_id", columns="variant", values="matched_type", aggfunc="first")
+        piv = piv.reindex(columns=variants)
+        out["var"] = pd.Series(
+            [[_num(x, 0) for x in row] for row in piv.to_numpy()], index=piv.index, dtype=object
+        )
+    rv = d.opt("node_rival.csv")
+    if rv is not None:
+        best = rv[rv["sources"].astype(str).str.contains("T5:max_ami", regex=False)]
+        out["rival"] = best.set_index("territory_id")["best_partition_label"]
+    return out
+
+
+def mo_json(mo: pd.DataFrame) -> dict:
+    """Колонки ``mo.json`` (массивы одинаковой длины)."""
+    cols = [
+        "id", "n", "ns", "r", "k", "role", "node", "why_null", "t", "t23", "t24", "win", "st", "rel",
+        "hq", "hr", "nx", "ny", "pop", "wp", "b23", "b24", "why", "rh", "nb", "sim", "rob_rule", "rob_seed",
+        "second", "var", "rival",
+    ]  # fmt: skip
+    ints = {"id", "node", "t", "t23", "t24", "hq", "hr", "nx", "ny", "pop", "second", "rival"}
+    out: dict[str, list] = {}
+    for c in cols:
+        s = mo[c] if c in mo.columns else pd.Series([None] * len(mo), index=mo.index)
+        if c in ints:
+            out[c] = [None if pd.isna(v) else int(v) for v in s]
+        elif c in ("rel", "wp"):
+            out[c] = [None if pd.isna(v) else bool(v) for v in s]
+        else:
+            out[c] = [None if (not isinstance(v, list) and pd.isna(v)) else v for v in s]
+    return out
+
+
+# --- types.json, checks.json, methods.json ------------------------------------------------------------------
+
+
+def clustering_values(cfg: Config) -> pd.DataFrame | None:
+    """Признаки узлов так, как их видела кластеризация (корзина B и признаки места X до стандартизации) — для
+    полос «почему этот тип». Нет ``outputs/cluster/final.json`` — None."""
+    fin_p = cfg.dir("outputs") / "cluster" / "final.json"
+    if not fin_p.exists():
+        return None
+    from types import SimpleNamespace
+
+    from munnet.clustering import inputs as CI
+
+    fin = json.loads(fin_p.read_text(encoding="utf-8"))
+    g = fin["inputs"]["graph"]
+    cp = SimpleNamespace(
+        graph_rule=str(g["rule"]),
+        graph_sparsify=str(g["sparsify"]),
+        graph_k=int(g["k"]),
+        attributes=tuple(fin["inputs"]["features"]),
+        place_year=int(fin["inputs"]["place_year"]),
+    )
+    base = CI.load_inputs(cfg, cp).inputs
+    vals = pd.DataFrame(
+        np.hstack([base.B, base.X_raw.to_numpy(dtype=np.float64)]),
+        columns=[*base.b_names, *base.x_names],
+        index=np.asarray(base.ids, dtype=np.int64),
+    )
+    return vals
+
+
+def why_features(d: SiteData) -> dict[int, list[str]]:
+    """Признаки полос «почему»: части корзины и признак места из названия типа (``facts.names``)."""
+    out = {}
+    for t, v in (d.facts.get("names") or {}).items():
+        if not isinstance(v, Mapping):
+            continue
+        feats = [str(p) for p in v.get("parts") or []][:2]
+        if v.get("place"):
+            feats.append(str(v["place"]))
+        if feats:
+            out[int(t)] = feats
+    return out
+
+
+def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFrame | None) -> list[dict]:
+    """Четыре записи типов (§5): названия, правило, размер, профиль, корзина, полосы «почему», примеры."""
+    from munnet.clustering.figures import FEATURE_LABELS
+
+    view = story["view"]
+    names = story["names"]
+    nodes = mo[mo["role"].isin(["territorial", "city"])]
+    pop = nodes["pop"].fillna(0)
+    prof = d.opt("profile.csv")
+    rules = d.opt("tree_rules.csv")
+    ex = d.opt("examples.csv")
+    jac = pd.read_parquet(
+        Path(d.cfg["paths"]["processed"]) / "cluster_final.parquet", columns=["type", "type_jaccard"]
+    ).drop_duplicates("type")
+    jac_by = {
+        d.transfer.get(int(t), int(t)): float(j)
+        for t, j in zip(jac["type"], jac["type_jaccard"], strict=True)
+    }
+    min_j = float(d.cfg["interpret"]["examples"]["unstable_type_jaccard"])  # «неустойчивый тип» ниже порога
+    feats = why_features(d)
+    unstable = list(view.get("unstable_parts") or [])
+    out = []
+    qs = np.linspace(0, 1, 21)
+    for t in [int(x) for x in view["legend_order"]]:
+        sel = nodes[nodes["t"] == t]
+        rec: dict[str, Any] = {
+            "t": t,
+            "name": names["final"].get(str(t)),
+            "name_descr": names["descriptive"].get(str(t)),
+            "caption": names.get("caption"),
+            "fig": view["shapes"].get(str(t)),
+            "color": view["type_colors"].get(str(t)),
+            "size": int(len(sel)),
+            "size_territorial": int((sel["role"] == "territorial").sum()),
+            "share_nodes": _num(len(sel) / max(len(nodes), 1), 4),
+            "pop_share": _num(pop[sel.index].sum() / max(pop.sum(), 1), 4),
+            "jaccard": _num(jac_by.get(t), 3),
+            "unstable": (jac_by.get(t, 1.0) < min_j) if t in jac_by else None,
+            "unstable_parts": [p.split(":", 1)[1] for p in unstable if p.startswith(f"{t}:")],
+            "rule_text": None,
+            "profile": [],
+            "basket": None,
+            "why": None,
+            "examples": {"typical": [], "borderline": [], "largest": []},
+        }
+        if rules is not None:
+            r = rules[(rules["type"] == t) & rules["journalist"].astype(bool)]
+            rec["rule_text"] = str(r["rule"].iloc[0]) if len(r) else None
+        if prof is not None:
+            p = prof[prof["type"] == t]
+            rec["profile"] = [
+                {
+                    "feature": str(f),
+                    "label": FEATURE_LABELS.get(str(f), str(f)),
+                    "median": _num(m, 4),
+                    "lo": _num(lo, 4),
+                    "hi": _num(hi, 4),
+                    "q25": _num(a, 4),
+                    "q75": _num(b, 4),
+                }
+                for f, m, lo, hi, a, b in zip(
+                    p["feature"], p["median"], p["median_lo"], p["median_hi"], p["q25"], p["q75"], strict=True
+                )
+            ]
+            pb = p.set_index("feature")
+            rec["basket"] = {
+                k: [_num(pb.at[f"clr_rel_{x}", c], 4) if f"clr_rel_{x}" in pb.index else None for x in PARTS]
+                for k, c in (("med", "median"), ("q25", "q25"), ("q75", "q75"))
+            }
+        if values is not None and t in feats:
+            vt = values.reindex([int(i) for i in sel["id"]])
+            rec["why"] = [
+                {
+                    "feature": f,
+                    "label": FEATURE_LABELS.get(f, f),
+                    "kind": "basket" if f.startswith("clr_rel_") else "place",
+                    "q": [_num(v, 3) for v in np.nanquantile(values[f].to_numpy(dtype=float), qs)],
+                    "med": _num(np.nanmedian(vt[f].to_numpy(dtype=float)), 3),
+                    "lo": _num(np.nanquantile(vt[f].to_numpy(dtype=float), 0.25), 3),
+                    "hi": _num(np.nanquantile(vt[f].to_numpy(dtype=float), 0.75), 3),
+                }
+                for f in feats[t]
+                if f in values.columns
+            ]
+        if ex is not None:
+            e = ex[ex["type"] == t]
+            for kind in ("typical", "borderline", "largest"):
+                ek = e[e["kind"] == kind].sort_values(["rank", "territory_id"], na_position="last")
+                rec["examples"][kind] = [int(i) for i in ek["territory_id"]]
+        out.append(rec)
+    return out
+
+
+def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> dict:
+    """Проверки для глав 4–7 (§5): T1, T3, T5, T7, R1, потоки 4 × 4, сеть, раскладка и карта ячеек.
+    Всё — из выгрузок этапов; нет выгрузки — None."""
+    f = d.facts
+    out: dict[str, Any] = {}
+    t1 = (f.get("t1") or {}).get("per")
+    out["t1"] = None
+    if t1:
+        out["t1"] = {
+            name: {
+                "rho_a": _num(v.get("rho_a"), 3),
+                "rho_a_ci": [_num(x, 3) for x in v.get("rho_a_ci") or []],
+                "rho_b": _num(v.get("rho_b"), 3),
+                "rho_b_ci": [_num(x, 3) for x in v.get("rho_b_ci") or []],
+                "overall": v.get("overall"),
+                "beyond": v.get("beyond"),
+                "line": "solid" if v.get("beyond") else ("dashed" if v.get("overall") else "none"),
+                "med_a": [_num(x, 4) for x in v.get("med_a") or []],
+                "med_b": [_num(x, 4) for x in v.get("med_b") or []],
+                "best_rival": v.get("best_rival_label"),
+                "best_rival_rho": _num(v.get("best_rival_rho"), 3),
+            }
+            for name, v in t1.items()
+        }
+    ctr = d.opt("controls.csv")
+    out["t1_rivals"] = (
+        None
+        if ctr is None
+        else [
+            {
+                "name": r["name"],
+                "label": r["label"],
+                "group": r["group"],
+                "rho_b_catering": _num(r.get("rho_b_catering"), 3),
+                "rho_b_retail": _num(r.get("rho_b_retail"), 3),
+            }
+            for r in ctr.to_dict("records")
+        ]
+    )
+    pl = d.opt("t3_placebo.csv")
+    t3 = (f.get("t3") or {}).get("main") or {}
+    out["t3"] = None
+    if pl is not None and t3:
+        main = pl[(pl["run"] == "main") & (pl["scheme"] == "main")]
+        out["t3"] = {
+            "placebo": [int(x) for x in main["n_reliable"]],
+            "p95": _num(t3.get("p95"), 2),
+            "median": _num(t3.get("median"), 2),
+            "observed": _num(t3.get("n_reliable"), 0),
+            "passed": t3.get("passed"),
+        }
+    ami = d.opt("t5_ami.csv")
+    out["t5"] = (
+        None
+        if ami is None
+        else {
+            "ami": [
+                {"partition": p, "label": lab, "ami": _num(a, 4)}
+                for p, lab, a in sorted(
+                    zip(ami["partition"], ami["label"], ami["ami"], strict=True), key=lambda x: -x[2]
+                )
+            ],
+        }
+    )
+    t7 = f.get("t7") or {}
+    out["t7"] = (
+        {
+            "product": t7.get("product"),
+            "median_error": {k: _num(v, 4) for k, v in (t7.get("median_error") or {}).items()},
+            "median_error_abs": {k: _num(v, 4) for k, v in (t7.get("median_error_abs") or {}).items()},
+            "diffs": {
+                k: [_num(v[0], 4), [_num(x, 4) for x in v[1]]] for k, v in (t7.get("diffs") or {}).items()
+            },
+            "example": t7.get("example"),
+        }
+        if t7.get("median_error")
+        else None
+    )
+    r1 = d.opt("r1_runs.csv")
+    out["r1"] = {
+        "runs": None if r1 is None else r1.to_dict("records"),
+        "unstable_label": (f.get("r1") or {}).get("unstable_label"),
+        "circularity": (f.get("r1") or {}).get("circularity"),
+    }
+    out["flows"] = flows_matrix(d, mo)
+    out["network"] = network_numbers(d)
+    out["layout"] = dict(layout)
+    out["hex"] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in hm.stats.items()}
+    return out
+
+
+def flows_matrix(d: SiteData, mo: pd.DataFrame) -> dict:
+    """Потоки 4 × 4 «тип окна 2023 → тип окна 2024» (``outputs/dynamics/nodes.csv``): всего и надёжных."""
+    nodes = mo[mo["role"].isin(["territorial", "city"])]
+    order = sorted({int(t) for t in nodes["t"].dropna()})
+    tot = {f"{a}-{b}": 0 for a in order for b in order}
+    rel = dict(tot)
+    for a, b, r in zip(nodes["t23"], nodes["t24"], nodes["rel"], strict=True):
+        if pd.isna(a) or pd.isna(b):
+            continue
+        k = f"{int(a)}-{int(b)}"
+        tot[k] = tot.get(k, 0) + 1
+        rel[k] = rel.get(k, 0) + int(bool(r) and a != b)
+    return {"types": order, "total": tot, "reliable": rel}
+
+
+def network_numbers(d: SiteData) -> dict:
+    """Доля рёбер основной сети корзин внутри своего региона и медиана их длины, км."""
+    e = d.processed(
+        "network_edges",
+        columns=["rule", "is_main", "same_region", "dist_km"],
+        filters=[("rule", "==", "basket_dist"), ("is_main", "==", True)],
+    )
+    return {
+        "n_edges": int(len(e)),
+        "share_same_region": _num(float(e["same_region"].mean()) if len(e) else None, 4),
+        "median_km": _num(float(e["dist_km"].median()) if len(e) else None, 0),
+    }
+
+
+def build_methods(d: SiteData) -> dict | None:
+    """Таблица «метод × метрика» (``outputs/evaluate``): значения, z к случайному базису, допустимость."""
+    cand_p, long_p = d.outputs("evaluate/candidates.csv"), d.outputs("evaluate/icvi_long.csv")
+    if not (cand_p.exists() and long_p.exists()):
+        log.warning("site: нет outputs/evaluate — methods.json пустой")
+        return None
+    cand = pd.read_csv(cand_p)
+    lg = pd.read_csv(long_p)
+    val = lg.pivot_table(index="candidate", columns="metric", values="value", aggfunc="first")
+    z = lg.pivot_table(index="candidate", columns="metric", values="z", aggfunc="first")
+    metrics = [m for m in ICVI_BETTER if m in val.columns]
+    rows = []
+    for r in cand.to_dict("records"):
+        c = r["candidate"]
+        rows.append(
+            {
+                "candidate": c,
+                "method": r["method"],
+                "family": r["family"],
+                "k": int(r["k"]),
+                "feasible": bool(r["feasible"]),
+                "winner": bool(r["is_method_winner"]),
+                "final": bool(r["is_final"]),
+                "v": {m: _num(val.at[c, m], 4) if c in val.index else None for m in metrics},
+                "z": {m: _num(z.at[c, m], 2) if c in z.index else None for m in metrics},
+            }
+        )
+    return {
+        "metrics": metrics,
+        "labels": {m: ICVI_LABELS[m] for m in metrics},
+        "better": {m: ICVI_BETTER[m] for m in metrics},
+        "rows": rows,
+        "source": "outputs/evaluate/candidates.csv, icvi_long.csv",
+    }
+
+
+def similarity(cfg: Config) -> tuple[dict, pd.DataFrame]:
+    """Раскладка «по сходству трат» по правилу ``site.similarity_layout`` (``site_layout``): сводка
+    и координаты ``nx``, ``ny`` выбранной раскладки (перестановки нет — пустая таблица)."""
+    from munnet import site_layout
+
+    if not (cfg.dir("outputs") / "cluster" / "final.json").exists():
+        raise MissingInputError("site: нет outputs/cluster/final.json — этап cluster (раскладка главы 2)")
+    res = site_layout.build(cfg)
+    summary = res.summary()
+    if res.chosen:
+        summary["caption"] = fill(
+            str(cfg["site"]["similarity_layout"]["caption"]),
+            {"preserved": style.fmt_pct(res.preserved[res.chosen])},
+        )
+    return summary, res.nxy()
+
+
+# --- выгрузки CSV и HTML ------------------------------------------------------------------------------------
+
+
+def download_csvs(mo: pd.DataFrame, types: list[dict], checks: Mapping, story: Mapping) -> dict[str, bytes]:
+    """``data/download/*.csv`` (CC BY-SA 4.0): все МО, типы, потоки; UTF-8 с BOM — открывается в Excel."""
+    names = story["names"]["final"]
+    tname = lambda t: None if pd.isna(t) else names.get(str(int(t)))  # noqa: E731
+    m = pd.DataFrame(
+        {
+            "territory_id": mo["id"],
+            "name": mo["n"],
+            "region": mo["r"],
+            "kind": mo["k"],
+            "role": mo["role"],
+            "node_id": mo["node"],
+            "type": mo["t"],
+            "type_name": mo["t"].map(tname),
+            "type_2023": mo["t23"],
+            "type_2024": mo["t24"],
+            "reliable_change": mo["rel"],
+            "why_no_type": mo["why_null"],
+            "pop_avg": mo["pop"],
+        }
+    )
+    ty = pd.DataFrame(
+        [
+            {
+                "type": r["t"],
+                "name": r["name"],
+                "rule": r["rule_text"],
+                "nodes": r["size"],
+                "share_nodes": r["share_nodes"],
+                "pop_share": r["pop_share"],
+            }
+            for r in types
+        ]
+    )
+    fl = checks["flows"]
+    flows = pd.DataFrame(
+        [
+            {"from_type": int(a), "to_type": int(b), "n": fl["total"][k], "n_reliable": fl["reliable"][k]}
+            for k in fl["total"]
+            for a, b in [k.split("-")]
+        ]
+    )
+    enc = lambda df: df.to_csv(index=False).encode("utf-8-sig")  # noqa: E731
+    readme = (
+        "Выгрузки лендинга munnet. Данные: СберИндекс (CC BY-SA 4.0), Росстат и ФНС в обработке "
+        "«Если быть точным» "
+        "(CC BY 4.0). Выгрузки распространяются на условиях CC BY-SA 4.0 с указанием источников.\n"
+        "mo.csv — все муниципалитеты и два узла-города (role = city); тип района Москвы или Петербурга — "
+        "тип города.\n"
+        "types.csv — типы; flows.csv — смены типа между окнами 2023 и 2024 годов.\n"
+    )
+    return {
+        "data/download/mo.csv": enc(m),
+        "data/download/types.csv": enc(ty),
+        "data/download/flows.csv": enc(flows),
+        "data/download/README.txt": readme.encode("utf-8"),
+    }
+
+
+FALLBACK_TEMPLATE = """<!doctype html>
+<html lang="$lang"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title><style>$css</style></head><body>
+<main id="answer"><div class="map-frame">$first_screen_svg</div></main>
+<script type="application/json" id="story">$story_json</script>
+<script type="application/json" id="names">$names_json</script>
+<script type="application/json" id="meta">$meta_json</script>
+$data_inline
+<script type="module">$js</script>
+</body></html>
+"""
+
+
+def _json_script(obj: Any) -> str:
+    """JSON для ``<script type="application/json">``: «</» экранируется, чтобы не закрыть тег."""
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+
+def git_sha() -> str | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"], capture_output=True, text=True, timeout=10, check=True
+        )
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def render_html(
+    story: Mapping, names: Mapping, meta: Mapping, svg: str, data: Mapping[str, Any], inline: bool
+) -> tuple[bytes, int]:
+    """``index.html`` из ``src/munnet/templates/landing.html`` (``string.Template``) со встроенными CSS и JS.
+    Возвращает байты страницы и размер встроенных данных (для бюджета первого экрана)."""
+    from string import Template
+
+    tdir = Path(__file__).parent / "templates"
+    html_p = tdir / "landing.html"
+    tpl = html_p.read_text(encoding="utf-8") if html_p.exists() else FALLBACK_TEMPLATE
+    css = (tdir / "landing.css").read_text(encoding="utf-8") if (tdir / "landing.css").exists() else ""
+    js = (tdir / "landing.js").read_text(encoding="utf-8") if (tdir / "landing.js").exists() else ""
+    blocks = (
+        "\n".join(
+            f'<script type="application/json" id="data-{k}">{_json_script(v)}</script>'
+            for k, v in data.items()
+            if v is not None
+        )
+        if inline
+        else ""
+    )
+    title = f"{story['screen0']['title']} — munnet"
+    page = Template(tpl).substitute(
+        title=_esc(title),
+        lang="ru",
+        css=css,
+        js=js,
+        story_json=_json_script(story),
+        names_json=_json_script(names),
+        first_screen_svg=svg,
+        data_inline=blocks,
+        meta_json=_json_script(meta),
+    )
+    return page.encode("utf-8"), len(blocks.encode("utf-8"))
+
+
+def check_budget(payloads: Mapping[str, bytes], budget: Mapping[str, float], inline_bytes: int) -> list[str]:
+    """Вес страницы — ``index.html`` плюс данные, которые она не встроила (выгрузки CSV не загружаются);
+    первый экран — ``index.html`` без встроенных блоков данных. Больше ``budget_mb.hard`` — код 3; мягкие
+    пределы — предупреждение в логе."""
+    mb = 2**20
+    html = len(payloads.get("index.html", b""))
+    first = (html - inline_bytes) / mb
+    if inline_bytes:
+        page = html / mb
+    else:
+        page = sum(len(b) for n, b in payloads.items() if n == "index.html" or n.endswith(".json")) / mb
+    log.info("site: страница %.2f МБ, первый экран %.2f МБ", page, first)
+    if page > float(budget["total"]):
+        log.warning("site: страница %.2f МБ больше budget_mb.total %.2f", page, float(budget["total"]))
+    if first > float(budget["first_screen"]):
+        log.warning(
+            "site: первый экран %.2f МБ больше budget_mb.first_screen %.2f", first, budget["first_screen"]
+        )
+    if page > float(budget["hard"]):
+        return [f"страница {page:.2f} МБ больше budget_mb.hard {budget['hard']} МБ"]
+    return []
+
+
+def names_index(mo: pd.DataFrame) -> dict:
+    """Индекс поиска (встроен в страницу): id, короткое название (полное — в ``mo.json``), регион, тип.
+    Регион — номер в списке ``rl`` (77 названий вместо 2192 строк: так первый экран укладывается в бюджет)."""
+    regions = sorted({str(r) for r in mo["r"]})
+    pos = {r: i for i, r in enumerate(regions)}
+    return {
+        "id": [int(i) for i in mo["id"]],
+        "n": [s if isinstance(s, str) else n for s, n in zip(mo["ns"], mo["n"], strict=True)],
+        "r": [pos[str(r)] for r in mo["r"]],
+        "t": [None if pd.isna(t) else int(t) for t in mo["t"]],
+        "rl": regions,
+    }
+
+
+# --- запуск -------------------------------------------------------------------------------------------------
+
+
 def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | None = None) -> dict:
-    """Собрать данные лендинга. Коды выхода — ``site.exit_codes``; возвращает story.json (для тестов)."""
+    """Собрать лендинг. Коды выхода — ``site.exit_codes``; возвращает story.json (для тестов)."""
     mode = resolve_mode(cfg, dev_blind, demo)
     facts = load_facts(cfg, mode)
     numbers = site_numbers(cfg)
@@ -710,29 +1788,67 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     bad = lint_story(cfg, story, facts)
     if bad:
         raise QCError("site: линт текста: " + "; ".join(bad[:10]))
-    payloads: dict[str, bytes] = {"data/story.json": dumps(story)}
-    pending = []
-    for name, fn in BUILDERS.items():
-        b = fn(cfg, facts)
-        if b is None:
-            pending.append(name)
-        else:
-            payloads[name] = b
-    over = check_budget(payloads, cfg["site"]["budget_mb"])
+    d = load_site_data(cfg, mode, facts)
+    bad = check_controls(d)
+    if bad:
+        raise QCError("site: контрольные числа: " + "; ".join(bad[:10]))
+    layout, nxy = similarity(cfg)
+    story["chapters"]["similarity"]["layout_caption"] = layout.get("caption")
+    story["view"]["similarity_layout"] = layout.get("chosen")
+    hm = build_hexmap(d)
+    values = clustering_values(cfg)
+    mo = build_mo_frame(d, hm, nxy, values)
+    types = build_types(d, mo, story, values)
+    checks = build_checks(d, mo, layout, hm)
+    if checks["t1"]:
+        story["view"]["line_by_turnover"] = {k: v["line"] for k, v in checks["t1"].items()}
+    hexgrid = build_hexgrid_json(d, hm, mo.set_index("id")["t"])
+    methods = build_methods(d)
+    story["meta"]["pending"] = ["geo.json", "munnet_landing.pdf"]
+    story["meta"]["type_source"] = d.type_source
+    meta = {
+        "seed": cfg["seed"],
+        "sha": git_sha(),
+        "date": pd.Timestamp.now(tz="Europe/Moscow").strftime("%Y-%m-%d"),
+        "mode": mode.name,
+        "banner": mode.banner,
+        "licenses": LICENSES,
+        "site_freeze_sha256": story["meta"]["site_freeze_sha256"],
+        "facts_sha256": story["meta"]["facts_sha256"],
+    }
+    data = {
+        "mo": mo_json(mo),
+        "types": {"types": types, "parts": list(PARTS), "part_labels": PART_LABELS},
+        "checks": checks,
+        "methods": methods,
+        "hexgrid": hexgrid,
+    }
+    svg = first_screen_svg(d, hm, hexgrid, mo, story)
+    inline = bool(cfg["site"]["build"].get("inline_all", True))
+    html, inline_bytes = render_html(story, names_index(mo), meta, svg, data, inline)
+    payloads: dict[str, bytes] = {"index.html": html, "data/story.json": dumps(story)}
+    for k, v in data.items():
+        if v is not None:
+            payloads[f"data/{k}.json"] = dumps(v)
+    payloads.update(download_csvs(mo, types, checks, story))
+    over = check_budget(payloads, cfg["site"]["budget_mb"], inline_bytes)
     if over:
         raise QCError("site: бюджет: " + "; ".join(over))
-    if mode.name == "normal" and pending:
-        raise NotImplementedError(f"site: ещё не собраны {pending} (план §10, п. 5); site/ не тронут")
     mode.out.mkdir(parents=True, exist_ok=True)
     for name, b in payloads.items():
         p = mode.out / name
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b)
     log.info(
-        "site (%s): story.json записан в %s; заглушки: %s%s",
+        "site (%s): %d файлов в %s (%s); строк mo.json %d; ячеек %d%s",
         mode.name,
+        len(payloads),
         mode.out,
-        ", ".join(pending) or "нет",
+        ", ".join(
+            f"{n} {len(b) / 1024:.0f} КБ" for n, b in payloads.items() if not n.startswith("data/download")
+        ),
+        len(mo),
+        hm.stats["n_cells"],
         f"; плашка «{mode.banner}»" if mode.banner else "",
     )
     return story

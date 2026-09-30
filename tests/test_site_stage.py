@@ -7,17 +7,27 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from fixtures.site.synth_facts import (
     all_combos,
     combo_levels,
     make_facts,
-    make_inputs,
     site_config,
-    write_bound_interpret,
     write_interpret,
+)
+from fixtures.site.synth_inputs import (
+    CITY,
+    CONTROLS,
+    INNER,
+    UNTYPED,
+    bound_interpret,
+    facts_over,
+    make_site_inputs,
+    page_types,
 )
 
 from munnet import cli, landing
@@ -184,15 +194,23 @@ def test_t1_text_cap_used():
 # --- run(): коды выхода и режимы ----------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_layout(monkeypatch):
+    """Раскладка главы 2 требует выходов cluster — в синтетике её заменяет сводка «перестановки нет»."""
+    empty = pd.DataFrame({"territory_id": [], "nx": [], "ny": []})
+    monkeypatch.setattr(landing, "similarity", lambda cfg: ({"chosen": None, "preserved": {}}, empty))
+
+
 def _setup(tmp_path, **over):
-    make_inputs(tmp_path)
+    make_site_inputs(tmp_path)
     d = site_config(CFG.data, tmp_path)
+    d["site"]["build"]["controls"] = dict(CONTROLS)
     cfg = Config(d, tmp_path / "cfg.yaml")
     combo = next(all_combos(CFG.data)) | {
         "T3_reliable_placebo": "confirmed",
         "T1_ladder_external": "confirmed",
     }
-    facts = make_facts(CFG.data, combo, **over)
+    facts = make_facts(CFG.data, combo, **(facts_over() | over))
     return cfg, facts
 
 
@@ -291,7 +309,7 @@ def test_code3_blind_with_marks_stripped(tmp_path):
     cfg, facts = _setup(tmp_path, blind=20260930, label="СЛЕПОЙ ПРОГОН")
     for k in ("synthetic", "blind", "label"):
         facts.pop(k)
-    write_bound_interpret(tmp_path, tmp_path / "outputs", facts, shuffle=True)
+    bound_interpret(tmp_path, tmp_path / "outputs", facts, shuffle=True)
     with pytest.raises(QCError, match="слепые или чужие"):
         landing.run(cfg)
     assert cli.main(["--config", str(_write_cfg(cfg)), "site"]) == 3
@@ -302,7 +320,7 @@ def test_code3_labels_sha_mismatch(tmp_path):
     """Выходы interpret другого прогона cluster: sha256 меток в facts ≠ файлу — код 3."""
     cfg, facts = _setup(tmp_path)
     facts.pop("synthetic")
-    d = write_bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    d = bound_interpret(tmp_path, tmp_path / "outputs", facts)
     f = json.loads((d / "facts.json").read_text(encoding="utf-8"))
     f["qc"]["inputs_sha256"]["cluster_final"] = "0" * 64
     (d / "facts.json").write_text(json.dumps(f, ensure_ascii=False), encoding="utf-8")
@@ -314,21 +332,97 @@ def test_code1_no_types_csv(tmp_path):
     """Без types.csv сверить типы нельзя — код 1."""
     cfg, facts = _setup(tmp_path)
     facts.pop("synthetic")
-    d = write_bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    d = bound_interpret(tmp_path, tmp_path / "outputs", facts)
     (d / "types.csv").unlink()
     with pytest.raises(MissingInputError, match="types.csv"):
         landing.run(cfg)
 
 
-def test_normal_mode_pending_is_code2(tmp_path):
-    """Все проверки прошли, но mo.json и остальное ещё заглушки: код 2, site/ не тронут."""
+def test_normal_mode_builds_site(tmp_path):
+    """Все проверки прошли: страница и данные — в site.build.out, код 0; районы города — в его ячейке."""
     cfg, facts = _setup(tmp_path)
     facts.pop("synthetic")
-    write_bound_interpret(tmp_path, tmp_path / "outputs", facts)
-    with pytest.raises(NotImplementedError, match="mo.json"):
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    assert cli.main(["--config", str(_write_cfg(cfg)), "site"]) == 0
+    site = tmp_path / "site"
+    for name in ("index.html", *(f"data/{n}.json" for n in ("story", "mo", "types", "checks", "hexgrid"))):
+        assert (site / name).exists(), name
+    mo = json.loads((site / "data" / "mo.json").read_text(encoding="utf-8"))
+    rows = {i: {k: v[j] for k, v in mo.items()} for j, i in enumerate(mo["id"])}
+    assert len(mo["id"]) == 8 and all(len(v) == 8 for v in mo.values())
+    assert {r["role"] for r in rows.values()} == {"territorial", "city", "inner", "untyped"}
+    want = page_types()
+    for i, t in want.items():
+        assert rows[i]["t"] == t
+    for i in INNER:  # тип и ячейка района — города
+        assert rows[i]["node"] == CITY and rows[i]["t"] == want[CITY]
+        assert (rows[i]["hq"], rows[i]["hr"]) == (rows[CITY]["hq"], rows[CITY]["hr"])
+    u = rows[UNTYPED]
+    assert u["t"] is None and u["node"] is None and "12 из 24" in u["why_null"] and u["hq"] is not None
+    cells = {(r["hq"], r["hr"]) for r in rows.values() if r["role"] != "inner"}
+    assert len(cells) == 6  # 5 узлов + 1 без типа, каждая ячейка — одна
+    assert rows[1]["win"] == "222222" + "1" * 7  # номера окон — после переноса (1 -> 2, 2 -> 1)
+    assert (rows[1]["t23"], rows[1]["t24"]) == (2, 1)
+    assert rows[1]["st"].count("r") == 7 and rows[1]["rel"] is True
+    assert rows[1]["nb"] == [2] and rows[2]["nb"] == [1, 3]
+    assert rows[1]["rh"] is not None and rows[2]["rh"] is None  # свой ритм — только надёжный
+    html = (site / "index.html").read_text(encoding="utf-8")
+    assert (
+        '<svg id="hexmap" class="hexmap"' in html
+        and 'data-hex-size="' in html
+        and "$" not in html.split("<style>")[0]
+    )
+    assert 'id="data-mo"' in html  # inline_all: работает по file://
+    # индекс поиска: регион — номер в списке rl, а не строка у каждого МО (бюджет первого экрана)
+    names = json.loads(re.search(r'<script type="application/json" id="names">(.*?)</script>', html, re.S)[1])
+    assert set(names) == {"id", "n", "r", "t", "rl"} and len(names["rl"]) == len(set(names["rl"]))
+    by_id = dict(zip(names["id"], names["r"], strict=True))
+    assert all(names["rl"][by_id[i]] == rows[i]["r"] for i in rows)
+
+
+def test_code3_controls(tmp_path):
+    """Контрольные числа site.build.controls и facts.scope против файлов: расхождение — код 3."""
+    cfg, facts = _setup(tmp_path)
+    cfg.data["site"]["build"]["controls"]["n_inner"] = 247
+    with pytest.raises(QCError, match="n_inner"):
+        _demo(tmp_path, facts, cfg)
+    cfg, facts = _setup(tmp_path)
+    facts["scope"]["n_nodes"] = 1776
+    with pytest.raises(QCError, match="n_nodes"):
+        _demo(tmp_path, facts, cfg)
+
+
+def test_code3_type_sizes(tmp_path):
+    """Размеры типов facts.ladder против типов узлов (обычный режим): расхождение — код 3."""
+    cfg, facts = _setup(tmp_path)
+    facts.pop("synthetic")
+    facts["ladder"]["sizes_territorial"] = [2, 1, 1, 0]
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    with pytest.raises(QCError, match="контрольные числа"):
         landing.run(cfg)
-    assert not (tmp_path / "site").exists()
-    assert cli.main(["--config", str(_write_cfg(cfg)), "site"]) == 2
+
+
+def test_node_tables_to_mo(tmp_path):
+    """Поузловые выгрузки этапа 5 попадают в mo.json как есть; без них — пустые поля (блок скрывается)."""
+    cfg, facts = _setup(tmp_path)
+    d = write_interpret(tmp_path / "synth", facts)
+    pd.DataFrame(
+        {"territory_id": [1, 1], "kind": ["variant", "seed"], "n_same": [2, 5], "n_runs": [3, 5]}
+    ).to_csv(d / "node_seed.csv", index=False)
+    pd.DataFrame(
+        {"territory_id": [1, 2], "second_type": [3, 4], "margin": [0.01, 0.2], "own_nearest": [False, True]}
+    ).to_csv(d / "node_margin.csv", index=False)
+    pd.DataFrame(
+        {"territory_id": [1] * 3, "set": ["D"] * 3, "product": [True] * 3, "rank": [1, 2, 3],
+         "other_id": [3, 4, 2], "km": [900.4, 960.6, 60.0]}
+    ).to_csv(d / "node_comparable.csv", index=False)  # fmt: skip
+    landing.run(cfg, demo=d)
+    mo = json.loads((tmp_path / "outputs" / "site_demo" / "data" / "mo.json").read_text(encoding="utf-8"))
+    rows = {i: {k: v[j] for k, v in mo.items()} for j, i in enumerate(mo["id"])}
+    assert rows[1]["rob_rule"] == "2/3" and rows[1]["rob_seed"] == "5/5" and rows[2]["rob_rule"] is None
+    assert rows[1]["second"] == 3 and rows[2]["second"] is None  # граничное — ближе к чужому центру
+    assert rows[1]["sim"] == [[3, 900], [4, 961], [2, 60]]
+    assert rows[3]["sim"] is None and rows[1]["var"] is None
 
 
 def _demo(tmp_path, facts, cfg):
