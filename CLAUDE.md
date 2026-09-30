@@ -109,10 +109,9 @@
 
 Дальше:
 
-1. Перерасчёт `interpret` (запущен 12:40, лог — scratchpad сессии `stage5/real2/real.log`, снимок первого прогона —
-   `stage5/real2/outputs_run1`): сверить, что `verdicts_final` и тексты совпали с первым прогоном; проверить
-   `docs/interpretation.md` (журнал после вскрытия, названия), check-facts; закоммитить `docs/interpretation.md`,
-   `docs/img/interpret/`, `report/report.md` и `report/numbers.md` (§1 и §8 написаны expert-writer, числа ещё сверить
+1. Перерасчёт `interpret` завершён 30.09 14:41: вердикты и числа побайтно совпали с первым прогоном, отчёт
+   `docs/interpretation.md` с журналом после вскрытия и названиями закоммичен (234ff35). Осталось: check-facts
+   по нему; закоммитить `report/report.md` и `report/numbers.md` (§1 и §8 написаны expert-writer, числа ещё сверить
    по новому `outputs/interpret`, пункты ⟨после пересчёта⟩). Затем devils-advocate и повторный judge-c5.
 2. Лендинг: переделать экран 0 по рамке участника (заголовок-описание, «что устояло», блок «что с этим делать»)
    с записью отступления от блока `site` в журнал; замечания check-ux (язык, номера типов против порядка, внутренние
