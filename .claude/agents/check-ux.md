@@ -14,6 +14,7 @@ color: yellow
 skills:
   - munnet-agents
   - ru-text
+  - ui-ux-pro-max
 hooks:
   PreToolUse:
     - matcher: Bash

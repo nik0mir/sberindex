@@ -15,6 +15,7 @@ color: red
 skills:
   - munnet-agents
   - tufte
+  - ui-ux-pro-max
 hooks:
   PreToolUse:
     - matcher: Bash
