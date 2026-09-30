@@ -1609,8 +1609,10 @@ site:
     headlines: preregistered_and_checked
     default_map: equal_cells_both_sizes   # карта по умолчанию — равные ячейки на 1440 и 375 px
     mo_stability: show_with_label
-    fonts: system_stack
-    js: vanilla             # d3-модули под ISC — только если без них сильно дольше, с записью в THIRD_PARTY.md
+    fonts: golos_unbounded_vendored   # 30.09, после вскрытия (решение участника): Golos Text и Unbounded (OFL) из
+                            # vendor/fonts, без внешних запросов; было system_stack (docs/landing_spec.md, §4.3)
+    js: vanilla_plus_threejs   # 30.09, после вскрытия (решение участника): объёмная карта — three.js 0.170.0 (MIT)
+                            # из vendor/; было vanilla (d3-модули под ISC — только если без них сильно дольше)
     business_role: keep_with_label
     pages: submission_day   # GitHub Pages — в день подачи, после открытия репозитория
   freeze:                   # заморозка словарей до вскрытия этапа 5: этап site считает sha256 канонического JSON
@@ -1619,7 +1621,7 @@ site:
                             # в отдельном коммите с записью в docs/landing_spec.md, §4.3 («Журнал правок»)
     covers: [verdicts, headlines, forbidden_words, roles, palette_rule, similarity_layout, always, n_similar_shown,
              similar_caption, decisions]
-    sha256: 3b4a08b0620bb592c5825405b46b33c27c1fd172b56f458293ed96b85665df76   # последний шаг перед коммитом блока; пересчёт — после любой правки covers
+    sha256: d3845f9f178bab27802b9466af147f2a2d4097b343bda4d723aece688e5a69df   # последний шаг перед коммитом блока; пересчёт — после любой правки covers
   build:                    # НЕ ПРЕДРЕГИСТРАЦИЯ: технические параметры сборки (docs/landing_spec.md, §5); от вердиктов
                             # не зависят, в freeze.covers не входят и меняются без нового хеша
     out: site               # каталог страницы для GitHub Pages (относительно корня репозитория)
