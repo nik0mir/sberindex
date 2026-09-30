@@ -6,6 +6,10 @@
 <title>$title</title>
 <meta name="description" content="Типы муниципалитетов по корзине безналичных трат жителей относительно своего региона: карта, поиск и карточка муниципалитета. Данные СберИндекса (CC BY-SA 4.0), Росстата и ФНС в обработке «Если быть точным» (CC BY 4.0).">
 <meta name="color-scheme" content="light">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=Unbounded:wght@500;600;700&amp;display=swap">
+<script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
 <style>$css</style>
 </head>
 <body>
@@ -13,7 +17,10 @@
   Шаблон лендинга munnet (string.Template, собирает src/munnet/landing.py).
   Подстановки: $$title $$lang $$css $$js $$story_json $$names_json $$first_screen_svg $$data_inline $$meta_json;
   тексты экрана 0 вписывает landing.py (screen0_html): $$banner_html $$answer_head $$answer_findings $$map_shift
-  $$map_key $$examples_html $$meta_line;
+  $$map_key $$examples_html $$meta_line; первый экран (порция 5a, hero_parts): $$hero_head $$hero_legend $$hero_note,
+  подписи кнопок и название — $$brand $$brand_sub $$to_types $$to_map $$howto $$howto_touch $$more $$reset $$zoom_in
+  $$zoom_out $$canvas_label $$checked_label; объёмная карта — $$js3d (templates/landing3d.js, three.js из vendor/ через
+  import map); без WebGL или без JS видна статичная SVG карты ($$first_screen_svg);
   главы 1, 3, 4, 5, 6, 7, 9 — $$chapters_html (site_chapters.py и site_chapters_tail.py: HTML и статичные SVG) — страница
   читается без JS, JS только добавляет поведение; источники и выгрузки в подвале — $$sources_html.
   Статичная SVG карты ячеек ($$first_screen_svg) ожидается с id="hexmap", классами .cells-t1…t4 и .cells-t0
@@ -26,10 +33,10 @@ $banner_html
 <a class="skip" href="#search-input">К поиску муниципалитета</a>
 <header class="masthead">
   <div class="masthead-in">
-    <a class="brand" href="#answer">munnet<span class="brand-sub"> · типы локальных экономик по тратам жителей</span></a>
+    <a class="brand" href="#answer">$brand<span class="brand-sub"> · $brand_sub</span></a>
     <nav aria-label="Разделы страницы">
       <ul class="nav">
-        <li><a href="#answer">Ответ</a></li>
+        <li><a href="#answer">Карта</a></li>
         <li><a href="#find">Найти муниципалитет</a></li>
         <li><a href="#types">Типы</a></li>
         <li><a href="#dynamics">Динамика</a></li>
@@ -42,11 +49,9 @@ $banner_html
 </header>
 
 <main id="content">
-  <section id="answer" class="answer" aria-labelledby="answer-title">
-    <div class="answer-head">
-$answer_head
-    </div>
-
+  <section id="answer" class="hero" aria-labelledby="hero-title">
+    <div class="hero-text">
+$hero_head
       <div class="finder" id="find" role="search" aria-label="Поиск муниципалитета">
         <label class="finder-label" for="search-input">Найдите свой муниципалитет</label>
         <div class="combo">
@@ -60,27 +65,56 @@ $answer_head
         <p class="sr-only" id="search-status" aria-live="polite"></p>
         <div class="examples" id="examples" aria-label="Примеры муниципалитетов">$examples_html</div>
       </div>
-$answer_findings
+      <div class="h0-actions" id="h0-actions" hidden>
+        <button type="button" class="h0-btn" id="h0-types">$to_types</button>
+        <button type="button" class="h0-btn ghost" id="h0-map" hidden>$to_map</button>
+      </div>
+    </div>
 
-    <figure class="answer-map" id="map0">
-      <div class="map-tools" id="map-tools" hidden>
-        <button type="button" class="tool" data-zoom="in" aria-label="Увеличить карту">+</button>
-        <button type="button" class="tool" data-zoom="out" aria-label="Уменьшить карту">−</button>
-        <button type="button" class="tool tool-text" data-zoom="reset">Сбросить</button>
+    <div class="hero-stage" id="map0">
+      <canvas id="scene" class="h0-scene" role="img" aria-label="$canvas_label" hidden></canvas>
+      <div class="h0-ui" id="h0-ui" hidden>
+        <div class="h0-zoom">
+          <button type="button" id="h0-zin" aria-label="$zoom_in">+</button>
+          <button type="button" id="h0-zout" aria-label="$zoom_out">−</button>
+          <button type="button" id="h0-zreset" class="txt">$reset</button>
+        </div>
+        <p class="h0-howto" id="h0-howto" data-touch="$howto_touch">$howto</p>
+        <a class="h0-more" href="#types">$more <span aria-hidden="true">↓</span></a>
+        <div class="h0-labels" id="h0-labels" aria-hidden="true"></div>
+        <div class="h0-tip" id="h0-tip" hidden></div>
       </div>
-      <div class="map-frame" id="map-frame">
+      <figure class="answer-map h0-fallback" id="map-fig">
+        <div class="map-tools" id="map-tools" hidden>
+          <button type="button" class="tool" data-zoom="in" aria-label="Увеличить карту">+</button>
+          <button type="button" class="tool" data-zoom="out" aria-label="Уменьшить карту">−</button>
+          <button type="button" class="tool tool-text" data-zoom="reset">Сбросить</button>
+        </div>
+        <div class="map-frame" id="map-frame">
 $first_screen_svg
-        <div class="tip" id="map-tip" hidden></div>
-        <div class="pick" id="map-pick" role="dialog" aria-label="Выберите муниципалитет" hidden></div>
-      </div>
-      <p class="ego-note" id="ego-note" hidden></p>
-      <ul class="map-key" id="map-key" aria-label="Типы на карте">$map_key</ul>
-      <figcaption class="source" id="map-caption">
-        Одна ячейка — один муниципалитет (Москва и Петербург — по ячейке на город); ячейки сдвинуты с мест, чтобы
-        не перекрываться<span id="map-shift">$map_shift</span>. Штриховка — нет типа: ряд трат неполный (меньше 24 месяцев
-        или с пропусками). Источник: СберИндекс (CC BY-SA 4.0), расчёт munnet.
-      </figcaption>
-    </figure>
+          <div class="tip" id="map-tip" hidden></div>
+          <div class="pick" id="map-pick" role="dialog" aria-label="Выберите муниципалитет" hidden></div>
+        </div>
+        <p class="ego-note" id="ego-note" hidden></p>
+        <ul class="map-key" id="map-key" aria-label="Типы на карте">$map_key</ul>
+        <figcaption class="source" id="map-caption">
+          Одна ячейка — один муниципалитет (Москва и Петербург — по ячейке на город); ячейки сдвинуты с мест, чтобы
+          не перекрываться<span id="map-shift">$map_shift</span>. Штриховка — нет типа: ряд трат неполный (меньше 24 месяцев
+          или с пропусками). Источник: СберИндекс (CC BY-SA 4.0), расчёт «Корзина и регион».
+        </figcaption>
+      </figure>
+    </div>
+
+    <aside class="h0-legend" aria-label="Типы и высота столбиков">$hero_legend</aside>
+    <p class="h0-note source">$hero_note Источник: СберИндекс (CC BY-SA 4.0), расчёт «Корзина и регион».</p>
+  </section>
+
+  <section id="checked" class="answer checked" aria-labelledby="answer-title">
+    <p class="kicker">$checked_label</p>
+    <div class="answer-head">
+$answer_head
+    </div>
+$answer_findings
   </section>
 
 $chapters_html
@@ -111,5 +145,6 @@ $sources_html
 <script type="application/json" id="meta">$meta_json</script>
 $data_inline
 <script type="module">$js</script>
+<script type="module">$js3d</script>
 </body>
 </html>

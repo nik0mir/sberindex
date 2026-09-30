@@ -41,7 +41,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from munnet import site_chapters, site_chapters_tail, site_hexgrid, style
+from munnet import site_chapters, site_chapters_tail, site_hexgrid, site_scene, style
 from munnet.config import Config
 from munnet.contracts import MissingInputError, QCError
 from munnet.site_headlines import SLOT, HeadlineChecker, check_headlines, freeze_hash, norm
@@ -492,6 +492,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "labels": {k: TX.get(k) for k in ("question_label", "how_checked", "caveat_label") if TX.get(k)},
         "gloss": dict(TX.get("gloss") or {}),
         "regions_note": regions_note(TX.get("regions_note"), numbers),
+        "hero": hero_texts(cfg, TX.get("hero") or {}, scope, n_types),
     }
     flows = P["t3_flows"][t3]
     n_set = int(it["tests"]["T7_utility"]["k"])
@@ -584,6 +585,31 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         },
         "view": view,
     }
+
+
+def hero_texts(cfg: Config, tx: Mapping[str, str], scope: Mapping, n_types: int) -> dict[str, str] | None:
+    """Тексты первого экрана (``site.build.texts.hero``, порция 5a): поля — числа из ``facts.scope``,
+    число типов словами и годы периода из конфига. Шаблон подписи острова ``island_note`` (поле ``{ratio}``)
+    в story не идёт: готовые подписи — в ``scene.json``, их линтует ``run`` (``lint_texts``).
+    Нет блока — None (прежний экран 0)."""
+    if not tx:
+        return None
+    nom, gen = site_scene.num_words(n_types)
+    y0, y1 = (str(cfg["period"][k])[:4] for k in ("start", "end"))
+    n_nodes = int(scope.get("n_nodes") or 0)
+    n_reg = int(scope.get("n_regions") or 0)
+    n_cells = n_nodes + int(scope.get("n_untyped") or 0)
+    vals = {
+        "n_nodes": style.fmt_num(n_nodes) if n_nodes else "",
+        "mo_word": plural_ru(n_nodes, "муниципалитет", "муниципалитета", "муниципалитетов"),
+        "n_regions": style.fmt_num(n_reg) if n_reg else "",
+        "region_word": plural_ru(n_reg, "регионе", "регионах", "регионах"),
+        "years": f"{y0}–{y1} годов" if y0 != y1 else f"{y0} года",
+        "n_types_gen": gen,
+        "n_types": f"{nom} {plural_ru(n_types, 'тип', 'типа', 'типов')}",
+        "n_cells": style.fmt_num(n_cells) if n_cells else "",
+    }
+    return {k: fill(str(v), vals) for k, v in tx.items() if k != "island_note"}
 
 
 def regions_note(tpl: str | None, numbers: Mapping[str, str]) -> str | None:
@@ -769,6 +795,8 @@ def lint_story(cfg: Config, story: Mapping, facts: Mapping) -> list[str]:
     headlines += [h for hs in s0h.get("point_heads") or [] for h in hs] + (
         [s0h["caveat_head"]] if s0h.get("caveat_head") else []
     )
+    if (s0h.get("hero") or {}).get("title"):  # h1 первого экрана (порция 5a) — тоже заголовок
+        headlines.append(s0h["hero"]["title"])
     banned_h = list(fw["headlines_always"]) + list(cfg["interpret"]["naming"]["banned"])
     for h in headlines:
         bad += [f"запрет в заголовке: «{w}» в «{h}»" for w in banned_h if norm(w) in norm(h)]
@@ -833,7 +861,7 @@ def lint_templates(cfg: Config, story: Mapping, svg: str) -> list[str]:
     read = lambda n: (tdir / n).read_text(encoding="utf-8") if (tdir / n).exists() else ""  # noqa: E731
     hc = HeadlineChecker(cfg.data)
     texts = (
-        template_strings(read("landing.html"), read("landing.js"), svg)
+        template_strings(read("landing.html"), read("landing.js") + "\n" + read("landing3d.js"), svg)
         + site_chapters.ui_strings()
         + site_chapters_tail.ui_strings()
     )
@@ -842,8 +870,20 @@ def lint_templates(cfg: Config, story: Mapping, svg: str) -> list[str]:
     ]
 
 
-def screen_examples(types: list[dict], story: Mapping, n: int = 3) -> list[int]:
-    """Кнопки-примеры экрана 0: первый типичный пример каждого типа (``examples.csv``) в порядке легенды."""
+def lint_texts(cfg: Config, story: Mapping, texts: Iterable[str]) -> list[str]:
+    """Линт готовых строк, которых нет в story.json (подписи островов ``scene.json``): те же запреты
+    ``page_always`` и ``by_verdict`` при текущих вердиктах, пустые поля ``{…}``. Нарушение — код 3."""
+    texts = [t for t in texts if t]
+    hc = HeadlineChecker(cfg.data)
+    bad = [f"пустое поле {SLOT.findall(t)}: «{t}»" for t in texts if SLOT.search(t)]
+    return bad + [
+        f"{kind}: «{w}» в «{t[:80]}»" for kind, w, t in hc.text_violations(texts, dict(story["verdicts"]))
+    ]
+
+
+def screen_examples(types: list[dict], story: Mapping, n: int = 4) -> list[int]:
+    """Кнопки-примеры экрана 0: первый типичный пример каждого типа (``examples.csv``) в порядке легенды;
+    по одному на каждый из четырёх типов (решение участника 30.09, было три — тип 4 оставался без примера)."""
     out = []
     for r in types:
         ex = (r.get("examples") or {}).get("typical") or []
@@ -2077,7 +2117,10 @@ def screen0_html(
     head = []
     if s0.get("intro"):
         head.append(f'<p class="intro" id="answer-intro">{_t(_dot(s0["intro"]))}</p>')
-    head.append(f'<h1 id="answer-title">{_t(s0["title"])}</h1>')
+    # порция 5a: h1 страницы — заголовок первого экрана (site.build.texts.hero.title); заголовок по T1
+    # остаётся    # заголовком раздела «Что проверяли» (h2) и главы 4
+    tag = "h2" if s0.get("hero") else "h1"
+    head.append(f'<{tag} id="answer-title" class="answer-h">{_t(s0["title"])}</{tag}>')
     head.append(f'<p class="lead" id="answer-lead">{_t(s0["lead"])}</p>')
     head += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, [s0["title"], s0["lead"]])]
     out["answer_head"] = "\n".join(head)
@@ -2153,6 +2196,56 @@ def screen0_html(
     if meta.get("facts_sha256"):
         bits.append(f"выводы — facts.json sha256 {str(meta['facts_sha256'])[:12]}")
     out["meta_line"] = _t("Воспроизводимость: " + " · ".join(bits)) if bits else ""
+    out |= hero_parts(story, out["map_shift"], mo)
+    return out
+
+
+HERO_KEYS = (
+    "brand", "brand_sub", "to_types", "to_map", "howto", "howto_touch", "more", "reset", "zoom_in",
+    "zoom_out",
+    "canvas_label", "checked_label",
+)  # fmt: skip
+
+
+def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[str, str]:
+    """Первый экран (порция 5a): вписанные при сборке надзаголовок, h1, пояснение, легенда типов в порядке
+    ``view.legend_order`` с числом ячеек, ключ высоты и подпись с охватом (``descriptive.coverage`` —
+    всегда)."""
+    s0 = story["screen0"]
+    hx = s0.get("hero") or {}
+    out = {k: _t(hx.get(k, "")) for k in HERO_KEYS}
+    out["hero_head"] = (
+        f'<p class="h0-kicker" id="hero-kicker">{_t(hx.get("kicker", ""))}</p>'
+        f'<h1 id="hero-title">{_t(hx.get("title") or s0["title"])}</h1>'
+        f'<p class="h0-lede" id="hero-lede">{_t(hx.get("lede", ""))}</p>'
+    )
+    colors = story["view"]["type_colors"]
+    names = story["names"]["final"]
+    leg = []
+    if mo is not None:
+        counts = mo[mo["role"].isin(["territorial", "city"])]["t"].value_counts()
+        for t in story["view"]["legend_order"]:
+            leg.append(
+                f'<li><i class="hx" style="--c:{_esc(colors.get(str(t), ""))}" aria-hidden="true"></i>'
+                f"<span>{_t(names.get(str(t), f'Тип {t}'))}</span>"
+                f"<b>{style.fmt_num(int(counts.get(int(t), 0)))}</b></li>"
+            )
+        n0 = int((mo["role"] == "untyped").sum())
+        leg.append(
+            f'<li><i class="hx hx0" aria-hidden="true"></i><span>{_t(hx.get("untyped", "Без типа"))}</span>'
+            f"<b>{style.fmt_num(n0)}</b></li>"
+        )
+    bars = "".join(
+        f'<span style="height:{10 * k}px"><em>×{style.fmt_num(k / 2, 0 if k % 2 == 0 else 1)}</em></span>'
+        for k in (1, 2, 4)
+    )
+    out["hero_legend"] = (
+        f'<ul class="h0-types">{"".join(leg)}</ul>'
+        f'<div class="h0-hkey"><div class="h0-bars" aria-hidden="true">{bars}</div>'
+        f"<p>{_t(_dot(hx.get('height_key', '')))}</p></div>"
+    )
+    note = _dot(hx.get("cells_note", "") + (map_shift or ""))
+    out["hero_note"] = " ".join(x for x in (_t(note), _t(_dot(s0.get("coverage") or ""))) if x)
     return out
 
 
@@ -2196,6 +2289,7 @@ def render_html(
     tpl = nbsp(tpl)  # ru-text и для статичного текста шаблона (подстановки $… и теги не затрагиваются)
     css = (tdir / "landing.css").read_text(encoding="utf-8") if (tdir / "landing.css").exists() else ""
     js = (tdir / "landing.js").read_text(encoding="utf-8") if (tdir / "landing.js").exists() else ""
+    js3d = (tdir / "landing3d.js").read_text(encoding="utf-8") if (tdir / "landing3d.js").exists() else ""
     blocks = (
         "\n".join(
             f'<script type="application/json" id="data-{k}">{_json_script(v)}</script>'
@@ -2205,7 +2299,12 @@ def render_html(
         if inline
         else ""
     )
-    title = f"{story['screen0']['title']} — munnet"
+    hx = story["screen0"].get("hero") or {}
+    title = (
+        f"{hx['brand']} — {hx.get('brand_sub', '')}".rstrip(" —")
+        if hx.get("brand")
+        else f"{story['screen0']['title']} — munnet"
+    )
     if meta.get("banner"):
         title = f"{meta['banner']}. {title}"
     parts = dict(parts or {})
@@ -2219,6 +2318,10 @@ def render_html(
         "meta_line",
         "chapters_html",
         "sources_html",
+        "hero_head",
+        "hero_legend",
+        "hero_note",
+        *HERO_KEYS,
     ):
         parts.setdefault(k, "")
     page = Template(tpl).substitute(
@@ -2227,6 +2330,7 @@ def render_html(
         lang="ru",
         css=css,
         js=js,
+        js3d=js3d,
         story_json=_json_script(story),
         names_json=_json_script(names),
         first_screen_svg=svg,
@@ -2243,11 +2347,15 @@ def check_budget(payloads: Mapping[str, bytes], budget: Mapping[str, float], inl
     mb = 2**20
     html = len(payloads.get("index.html", b""))
     first = (html - inline_bytes) / mb
+    # сторонние модули (vendor/*.js, порция 5a) грузит страница — они входят в её вес
+    vendor = sum(len(b) for n, b in payloads.items() if n.startswith("vendor/") and n.endswith(".js")) / mb
     if inline_bytes:
-        page = html / mb
+        page = html / mb + vendor
     else:
-        page = sum(len(b) for n, b in payloads.items() if n == "index.html" or n.endswith(".json")) / mb
-    log.info("site: страница %.2f МБ, первый экран %.2f МБ", page, first)
+        page = (
+            sum(len(b) for n, b in payloads.items() if n == "index.html" or n.endswith(".json")) / mb + vendor
+        )
+    log.info("site: страница %.2f МБ (из них vendor %.2f МБ), первый экран %.2f МБ", page, vendor, first)
     if page > float(budget["total"]):
         log.warning("site: страница %.2f МБ больше budget_mb.total %.2f", page, float(budget["total"]))
     if first > float(budget["first_screen"]):
@@ -2257,6 +2365,58 @@ def check_budget(payloads: Mapping[str, bytes], budget: Mapping[str, float], inl
     if page > float(budget["hard"]):
         return [f"страница {page:.2f} МБ больше budget_mb.hard {budget['hard']} МБ"]
     return []
+
+
+VENDOR = ("three.module.min.js", "OrbitControls.js", "three-LICENSE.txt", "README.md")
+
+
+def vendor_files() -> dict[str, bytes]:
+    """three.js 0.170.0 (MIT) из ``templates/vendor`` — в ``vendor/`` рядом с ``index.html`` (import map
+    страницы,
+    без CDN); sha256 сверяются с ``templates/vendor/README.md`` — расхождение (файл заменён) — код 3."""
+    vdir = Path(__file__).parent / "templates" / "vendor"
+    readme = (vdir / "README.md").read_text(encoding="utf-8")
+    out = {}
+    for name in VENDOR:
+        b = (vdir / name).read_bytes()
+        if name != "README.md":
+            want = re.search(rf"`{re.escape(name)}`.*?`([0-9a-f]{{64}})`", readme)
+            if not want or hashlib.sha256(b).hexdigest() != want[1]:
+                raise QCError(f"site: vendor/{name}: sha256 не совпал с templates/vendor/README.md")
+        out[f"vendor/{name}"] = b
+    return out
+
+
+def build_scene(
+    cfg: Config, story: dict, mo: pd.DataFrame, hm: HexMap, values: pd.DataFrame | None
+) -> dict | None:
+    """``scene.json`` объёмной карты (``site_scene``) и линт подписей островов; нет значений признаков
+    кластеризации — None (первый экран — статичная карта)."""
+    hx = (cfg["site"]["build"].get("texts") or {}).get("hero") or {}
+    sp = cfg["site"]["build"].get("scene")
+    if not hx or not sp:
+        return None
+    try:
+        scene = site_scene.build_scene(
+            mo,
+            hm.grid,
+            values,
+            [int(t) for t in story["view"]["legend_order"]],
+            story["names"]["final"],
+            story["view"]["type_colors"],
+            hx,
+            sp,
+        )
+    except ValueError as e:
+        raise QCError(str(e)) from e
+    if scene is None:
+        log.warning("site: нет значений признаков кластеризации — объёмной карты не будет, только статичная")
+        return None
+    scene["unit_h"] = float(sp["unit"])
+    bad = lint_texts(cfg, story, [x for i in scene["islands"] for x in (i["name"], i["note"])])
+    if bad:
+        raise QCError("site: линт подписей островов: " + "; ".join(bad[:10]))
+    return scene
 
 
 def cells_geo(hm: HexMap, mo: pd.DataFrame) -> dict:
@@ -2338,6 +2498,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     if checks["t1"]:
         story["view"]["line_by_turnover"] = {k: v["line"] for k, v in checks["t1"].items()}
     hexgrid = build_hexgrid_json(d, hm, mo.set_index("id")["t"])
+    scene = build_scene(cfg, story, mo, hm, values)
     methods = build_methods(d)
     story["meta"]["pending"] = ["geo.json", "munnet_landing.pdf"]
     story["meta"]["type_source"] = d.type_source
@@ -2356,6 +2517,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         "checks": checks,
         "methods": methods,
         "hexgrid": hexgrid,
+        "scene": scene,
     }
     story["screen0"]["examples"] = screen_examples(types, story)
     data["types"]["reference"] = profile_reference(d)
@@ -2384,6 +2546,8 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         if v is not None:
             payloads[f"data/{k}.json"] = dumps(v)
     payloads.update(csvs)
+    if scene is not None:
+        payloads.update(vendor_files())
     over = check_budget(payloads, cfg["site"]["budget_mb"], inline_bytes)
     if over:
         raise QCError("site: бюджет: " + "; ".join(over))

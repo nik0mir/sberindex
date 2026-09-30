@@ -87,7 +87,7 @@ UI: dict[str, str] = {
     "ex_col_km": "км по прямой",
     "src_comp": (
         "Источник: СберИндекс (CC BY-SA 4.0); оборот розничной торговли — Росстат, БД ПМО в обработке "
-        "«Если быть точным» (CC BY 4.0), без МСП; расчёт munnet."
+        "«Если быть точным» (CC BY 4.0), без МСП; расчёт «Корзина и регион»."
     ),
     # глава 7 (§3.10)
     "limits_kicker": "Чего данные не показывают",
@@ -165,6 +165,7 @@ UI: dict[str, str] = {
     # глава 10
     "src_downloads": "Выгрузки (CSV, UTF-8, CC BY-SA 4.0)",
     "src_code": "Код — лицензия MIT. Производные данные страницы и выгрузки — CC BY-SA 4.0.",
+    "src_tools": "Программы и шрифты страницы",
 }
 
 METHOD_WORDS = {
@@ -221,6 +222,13 @@ SOURCES = [
         "https://www.openstreetmap.org/copyright",
     ),
 ]
+# программы и шрифты, которые загружает страница (порция 5a): название, для чего, лицензия, ссылка
+TOOLS = [
+    ("three.js 0.170.0", "объёмная карта первого экрана (файлы в vendor/)", "MIT", "https://threejs.org"),
+    ("Golos Text", "шрифт текста (Google Fonts)", "SIL Open Font License 1.1", "https://fonts.google.com/specimen/Golos+Text"),
+    ("Unbounded", "шрифт названия и крупных чисел (Google Fonts)", "SIL Open Font License 1.1",
+     "https://fonts.google.com/specimen/Unbounded"),
+]  # fmt: skip
 DOWNLOADS = [
     ("mo.csv", "все муниципалитеты: регион, тип, типы 2023 и 2024 годов, смена, причина, если типа нет"),
     ("types.csv", "типы: название, число муниципалитетов, доля жителей"),
@@ -237,6 +245,7 @@ def ui_strings() -> list[str]:
         + list(FAMILY_WORDS.values())
         + list(ICVI_GLOSS.values())
         + [x for s in SOURCES for x in s[:3]]
+        + [x for s in TOOLS for x in s[:3]]
         + [d for _, d in DOWNLOADS]
     )
 
@@ -894,6 +903,13 @@ def sources_html(story: Mapping, downloads: Mapping[str, int], esc: Esc) -> str:
         f'<h2 id="sources-title">{esc(title)}</h2><ul id="sources-list">{src}</ul>'
         + (f'<h3>{esc(UI["src_downloads"])}</h3><ul class="downloads">{dl}</ul>' if dl else "")
         + f"<p>{esc(UI['src_code'])}</p>"
+        + f'<h3>{esc(UI["src_tools"])}</h3><ul class="tools">'
+        + "".join(
+            f"<li><b>{esc(name)}</b>: {esc(what)} — {esc(lic)}. "
+            f"{_link(url, url.split('//', 1)[1].split('/', 1)[0], esc)}</li>"
+            for name, what, lic, url in TOOLS
+        )
+        + "</ul>"
     )
 
 

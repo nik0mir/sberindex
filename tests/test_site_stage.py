@@ -546,7 +546,8 @@ def _squash(s: str) -> str:
 
 def test_screen0_readable_without_js(tmp_path):
     """§5 и §7: заголовок, подзаголовок, вводная, три пункта (короткие заголовки и все тексты пункта
-    дословно под «Как проверяли»), оговорка, охват, ключ карты и подпись о смещении — в HTML при сборке."""
+    дословно под «Как проверяли»), оговорка, охват, ключ карты и подпись о смещении — в HTML при сборке.
+    С порции 5a (§4.7) заголовок по T1 — h2 раздела «Что проверяли» под первым экраном, а не h1 страницы."""
     cfg, facts = _setup(tmp_path)
     facts.pop("synthetic")
     bound_interpret(tmp_path, tmp_path / "outputs", facts)
@@ -554,7 +555,7 @@ def test_screen0_readable_without_js(tmp_path):
     html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     text = _html_text(html)
     s0 = story["screen0"]
-    assert '<h1 id="answer-title">' in html
+    assert '<h2 id="answer-title" class="answer-h">' in html and html.count("<h1") == 1
     assert _squash(s0["title"]) in text and _squash(s0["lead"]) in text
     assert s0["intro"] and _squash(s0["intro"]) in text
     assert html.count('<li class="pt') == 3 and html.count('<details class="how">') >= 3
@@ -574,11 +575,13 @@ def test_screen0_readable_without_js(tmp_path):
         < body.index('id="answer-lead"')
         < body.index('<div class="findings">')
     )
-    # поиск стоит в DOM раньше выводов и карты — на 375 px он на первом экране
+    # порция 5a: первый экран (h1, поиск, карта) — раньше раздела «Что проверяли»; на 375 px поиск —
+    # сразу под заголовком и пояснением, до карты
     assert (
-        body.index('id="search-input"')
-        < body.index('<div class="findings">')
+        body.index('id="hero-title"')
+        < body.index('id="search-input"')
         < body.index('<svg id="hexmap"')
+        < body.index('id="answer-title"')
     )
 
 
@@ -700,3 +703,139 @@ def test_chapters_in_html_with_story_titles(tmp_path):
         assert m, cid
         assert _squash(_html_text(m[1])) == _squash(story["chapters"][key]["title"]), cid
     assert '<a href="#types">' in html and '<a href="#dynamics">' in html
+
+
+# --- порция 5a: первый экран — объёмная карта (§4.7) -------------------------------------------------------
+
+CAFE = {1: -0.5, 2: 0.1, 3: 0.7, 4: -0.05, CITY: 1.2}
+
+
+def _values(cafe):
+    """Значения признаков кластеризации (как landing.clustering_values) для синтетики: clr_rel_cafe узла."""
+    return pd.DataFrame({"clr_rel_cafe": list(cafe.values()), "log_pop_rel": 0.0}, index=list(cafe))
+
+
+def _build_with_scene(tmp_path, monkeypatch):
+    cfg, facts = _setup(tmp_path)
+    facts.pop("synthetic")
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    monkeypatch.setattr(landing, "clustering_values", lambda cfg: _values(CAFE))
+    story = landing.run(cfg)
+    site = tmp_path / "site"
+    scene = json.loads((site / "data" / "scene.json").read_text(encoding="utf-8"))
+    return cfg, story, site, scene
+
+
+def test_hero_screen0(tmp_path, monkeypatch):
+    """h1 — текст участника (site.build.texts.hero.title), числа надзаголовка — из facts.scope, охват —
+    descriptive.coverage, легенда — в порядке view.legend_order с числом ячеек и «Без типа»; название проекта
+    в <title> и шапке; three.js — из vendor/ через import map (без CDN), sha256 как в README."""
+    import hashlib
+
+    _, story, site, _ = _build_with_scene(tmp_path, monkeypatch)
+    html = (site / "index.html").read_text(encoding="utf-8")
+    text = _html_text(html)
+    hx = CFG["site"]["build"]["texts"]["hero"]
+    h1 = re.search(r'<h1 id="hero-title">(.*?)</h1>', html, re.S)[1]
+    assert _squash(_html_text(h1)).strip() == hx["title"]
+    s0 = story["screen0"]
+    assert s0["hero"]["kicker"].startswith(f"{CONTROLS['n_nodes']} муниципалитетов в ")
+    note = html.split('class="h0-note')[1].split("</p>")[0]
+    assert _squash(s0["coverage"]) in _squash(_html_text(note))
+    assert re.search(r"<title>Корзина и регион — типы муниципалитетов по тратам жителей</title>", html)
+    brand = landing._t("Корзина и регион")  # ru-text: неразрывный пробел после «и»
+    assert f'<a class="brand" href="#answer">{brand}' in html and "munnet<span" not in html
+    names = story["names"]["final"]
+    legend = html.split('<ul class="h0-types">')[1].split("</ul>")[0]
+    pos = [legend.index(landing._t(names[str(t)])) for t in story["view"]["legend_order"]]
+    assert pos == sorted(pos) and "Без типа" in legend
+    assert "Без типа" in text and "×1" in text
+    assert '"three": "./vendor/three.module.min.js"' in html and "cdn.jsdelivr" not in html
+    readme = (Path(landing.__file__).parent / "templates" / "vendor" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    for name in ("three.module.min.js", "OrbitControls.js", "three-LICENSE.txt"):
+        b = (site / "vendor" / name).read_bytes()
+        assert hashlib.sha256(b).hexdigest() in readme, name
+    assert 'id="data-scene"' in html and 'aria-label="Объёмная карта:' in html
+
+
+def test_scene_heights_are_exp_clr_cafe(tmp_path, monkeypatch):
+    """Высота ячейки = exp(clr_rel_cafe) из значений признаков кластеризации; у МО без типа — пусто."""
+    import math
+
+    _, _, _, scene = _build_with_scene(tmp_path, monkeypatch)
+    c = scene["cells"]
+    h = dict(zip(c["id"], c["h"], strict=True))
+    for i, v in CAFE.items():
+        assert h[i] == pytest.approx(math.exp(v), abs=1e-3), i
+    assert h[UNTYPED] is None
+    assert set(c["id"]) == {1, 2, 3, 4, CITY, UNTYPED}  # районы столицы — в ячейке города, отдельных нет
+    t = dict(zip(c["id"], c["t"], strict=True))
+    assert t[UNTYPED] == 0 and all(t[i] > 0 for i in CAFE)
+
+
+def test_scene_islands(tmp_path, monkeypatch):
+    """Острова: каждая ячейка ровно один раз, ячейки не пересекаются, острова — в порядке легенды (по размеру
+    при T1 ≠ confirmed) и затем «Без типа», внутри острова от центра к краю — по убыванию высоты."""
+    _, story, _, scene = _build_with_scene(tmp_path, monkeypatch)
+    c = scene["cells"]
+    isl = scene["islands"]
+    present = set(c["t"])
+    assert [i["t"] for i in isl] == [int(t) for t in story["view"]["legend_order"] if int(t) in present] + [0]
+    assert sum(i["n"] for i in isl) == len(c["id"]) == len(set(c["id"]))
+    xs = [i["x"] for i in isl]
+    assert xs == sorted(xs)
+    pts = list(zip(c["ix"], c["iy"], strict=True))
+    step = scene["grid"]["size"] * 3**0.5
+    for a in range(len(pts)):
+        for b in range(a + 1, len(pts)):
+            d = ((pts[a][0] - pts[b][0]) ** 2 + (pts[a][1] - pts[b][1]) ** 2) ** 0.5
+            assert d >= step * 0.99
+    for s in isl:
+        mem = [j for j, t in enumerate(c["t"]) if t == s["t"]]
+        dist = [((c["ix"][j] - s["x"]) ** 2 + (c["iy"][j] - s["y"]) ** 2) ** 0.5 for j in mem]
+        if s["t"]:
+            hs = [c["h"][j] for j in mem]
+            by_dist = sorted(range(len(mem)), key=lambda k: dist[k])
+            assert by_dist[0] == max(range(len(mem)), key=lambda k: hs[k])
+            assert s["note"].startswith("у медианы типа доля кафе ")
+        assert max(dist) <= s["rad"]
+
+
+def test_scene_absent_without_values(tmp_path):
+    """Без значений признаков кластеризации (синтетика) объёмной карты нет: первый экран — статичная SVG,
+    vendor/ не копируется."""
+    cfg, facts = _setup(tmp_path)
+    facts.pop("synthetic")
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    landing.run(cfg)
+    site = tmp_path / "site"
+    assert not (site / "data" / "scene.json").exists() and not (site / "vendor").exists()
+    assert '<svg id="hexmap"' in (site / "index.html").read_text(encoding="utf-8")
+
+
+def test_code3_forbidden_word_in_hero_text(tmp_path):
+    """Тексты первого экрана (site.build.texts.hero) линтуются как текст сайта; h1 — ещё и как заголовок."""
+    cfg, facts = _setup(tmp_path)
+    cfg.data["site"]["build"]["texts"]["hero"] = dict(cfg["site"]["build"]["texts"]["hero"]) | {
+        "lede": "Высота столбика — прогноз доли кафе"
+    }
+    with pytest.raises(QCError, match="прогноз"):
+        _demo(tmp_path, facts, cfg)
+    cfg, facts = _setup(tmp_path)
+    cfg.data["site"]["build"]["texts"]["hero"] = dict(cfg["site"]["build"]["texts"]["hero"]) | {
+        "title": "Жители тратят на кафе по-разному"
+    }
+    with pytest.raises(QCError, match="запрет в заголовке"):
+        _demo(tmp_path, facts, cfg)
+
+
+def test_code3_by_verdict_word_in_island_note(tmp_path):
+    """Подписи островов (scene.json) проходят те же запреты: «надёжн» при T3 not и пустое поле — код 3."""
+    cfg, facts = _setup(tmp_path)
+    story = landing.build_story(cfg, facts, NUMBERS, DEMO)
+    story["verdicts"]["T3_reliable_placebo"] = "not"
+    assert landing.lint_texts(cfg, story, ["у медианы типа надёжно больше"])
+    assert landing.lint_texts(cfg, story, ["доля {ratio}"])
+    assert landing.lint_texts(cfg, story, ["у медианы типа доля кафе на 3% меньше, чем в регионе"]) == []

@@ -85,6 +85,23 @@
         "outputs/site_proto"
       ],
       "port": 8770
+    },
+    {
+      "name": "site-5a",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--frozen",
+        "python",
+        "-m",
+        "http.server",
+        "8771",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "outputs/site_5a"
+      ],
+      "port": 8771
     }
   ]
 }

@@ -1,4 +1,4 @@
-// Лендинг munnet: экран 0 (ответ и карта ячеек), поиск муниципалитета и карточка МО.
+// Лендинг «Корзина и регион» (пакет munnet): экран 0 (ответ и карта ячеек), поиск муниципалитета и карточка МО.
 // Страница ничего не считает, кроме форматирования, поиска по названию и перевода указателя в ячейку.
 // Данные: встроенные <script type="application/json"> (story, names, meta, data-*) или data/*.json (fetch).
 
@@ -60,7 +60,7 @@ const PART_LABELS = story.part_labels || {
   health: "здоровье", cafe: "кафе и рестораны", other: "прочее",
 };
 const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-const SRC = "Источник: СберИндекс (CC BY-SA 4.0); Росстат и ФНС в обработке «Если быть точным» (CC BY 4.0); расчёт munnet.";
+const SRC = "Источник: СберИндекс (CC BY-SA 4.0); Росстат и ФНС в обработке «Если быть точным» (CC BY 4.0); расчёт «Корзина и регион».";
 
 // палитра типов — из story.view (порядковая или номинальная по вердикту T1)
 for (const [t, c] of Object.entries(view.type_colors || {})) doc.documentElement.style.setProperty("--t" + t, c);
@@ -224,8 +224,13 @@ window.addEventListener("hashchange", () => {
 
 const card = $("#card");
 const cardBody = $("#card-body");
+// объёмная карта первого экрана (landing3d.js) слушает выбор и сама открывает карточку через window.munnet.go
+// sim — сопоставимые территории карточки (mo.json, набор продукта T7): объёмная карта рисует к ним линии
+function announce(id, sim = []) { doc.dispatchEvent(new CustomEvent("munnet:select", { detail: { id, sim } })); }
+window.munnet = { go: (id) => go(id), ready: () => MO.size > 0 };
 function closeCard() {
   card.hidden = true;
+  announce(null);
   card.classList.remove("peek");
   current = null;
   trail = [];
@@ -252,7 +257,7 @@ doc.addEventListener("keydown", (e) => {
 
 function route() {
   const id = parseHash();
-  if (id == null) { if (!card.hidden) { card.hidden = true; clearEgo(); current = null; } return; }
+  if (id == null) { if (!card.hidden) { card.hidden = true; clearEgo(); current = null; announce(null); } return; }
   if (!MO.size) return; // данные ещё грузятся: route() вызовется после загрузки
   const r = MO.get(id);
   if (!r) { $("#card-status").textContent = "Муниципалитет не найден"; return; }
@@ -265,6 +270,8 @@ function route() {
   $("#card-title").focus({ preventScroll: true });
   $("#card-status").textContent = `Карточка: ${r.n}, ${r.r}`;
   drawEgo(r);
+  const nd = nodeOf(r) || r; // район столицы — ячейка города
+  announce(nd.hq != null ? nd.id : null, (nd.sim || []).map((p) => p[0]));
 }
 
 // --- карточка ------------------------------------------------------------------------------------------------
