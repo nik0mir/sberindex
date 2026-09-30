@@ -5,7 +5,7 @@
 CONFIG ?= configs/default.yaml
 ONLY ?=
 RUN = uv run --frozen python -m munnet --config $(CONFIG)
-STAGES = data panel eda features network cluster evaluate dynamics site
+STAGES = data panel eda features network cluster evaluate dynamics interpret site
 
 .PHONY: setup all $(STAGES) test lint requirements clean
 

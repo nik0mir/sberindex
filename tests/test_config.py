@@ -37,6 +37,7 @@ def test_stage_order():
         "cluster",
         "evaluate",
         "dynamics",
+        "interpret",
         "site",
     ]
 

@@ -25,11 +25,14 @@ STAGES = {
     "cluster": ("munnet.clustering", "кластеризовать узлы сети разными методами"),
     "evaluate": ("munnet.icvi", "посчитать ICVI: SW, CH, S_Dbw, AVI, AVU, MQ"),
     "dynamics": ("munnet.dynamics", "проследить изменения кластеров во времени"),
+    "interpret": ("munnet.interpret", "проверки тезиса, профили, названия и примеры типов (этап 5)"),
     "site": ("munnet.landing", "собрать данные для интерактивного лендинга"),
 }
 
 # Этап, для которого действует --only: разделы разведки считаются по одному.
 ONLY_STAGE = "eda"
+# Этап, для которого действует --blind: слепой прогон с перемешанными метками типов (отладка).
+BLIND_STAGE = "interpret"
 
 EXIT_OK, EXIT_MISSING_INPUT, EXIT_NOT_IMPLEMENTED, EXIT_QC = 0, 1, 2, 3
 
@@ -66,10 +69,20 @@ def main(argv: list[str] | None = None) -> int:
         help="для этапа eda: только эти разделы через запятую (e1…e5; syn — сводка и отчёт из сохранённых "
         "итогов разделов); общие выходы разведки пишет только полный прогон или syn",
     )
+    parser.add_argument(
+        "--blind",
+        type=int,
+        metavar="SEED",
+        help="для этапа interpret: слепой прогон — типы и переходы перемешаны по узлам с этим seed "
+        "(не общим); "
+        "выходы — outputs/interpret_blind, отчёт с пометкой «СЛЕПОЙ ПРОГОН»",
+    )
     parser.add_argument("stages", nargs="+", choices=[*STAGES, "all"], metavar="этап")
     args = parser.parse_args(argv)
     names = list(STAGES) if "all" in args.stages else args.stages
     only = _parse_only(parser, args.only, names)
+    if args.blind is not None and BLIND_STAGE not in names:
+        parser.error(f"--blind действует только вместе с этапом {BLIND_STAGE}")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = load_config(args.config)
@@ -80,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
             module = importlib.import_module(module_name)
             if name == ONLY_STAGE and only:
                 module.run_sections(cfg, only)
+            elif name == BLIND_STAGE and args.blind is not None:
+                module.run(cfg, blind=args.blind)
             else:
                 module.run(cfg)
         except NotImplementedError as e:
