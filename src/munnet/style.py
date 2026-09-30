@@ -675,3 +675,307 @@ def save(fig: Figure, stem: Path, formats: Sequence[str] = ("png", "svg"), dpi: 
             fig.savefig(path, format=fmt, dpi=dpi, metadata=metadata.get(fmt))
             paths.append(path)
     return paths
+
+
+# --- Палитры типов и их проверка (лендинг, docs/landing_spec.md §3.1) ----------------------------
+#
+# Тип кодируется тремя каналами: цвет, фигура и название — цвет никогда не единственный носитель смысла.
+# Палитру выбирает вердикт T1 (site.palette_rule.type_palette): порядковая — только при confirmed, иначе
+# номинальная. Обе проверяет ``palette_audit`` (этап site переводит нарушение в код 3).
+
+# Порядковая: один оттенок (индиго, h ≈ 290° в CIELCh — нет среди цветов корзины), 4 ступени светлоты
+# L* ≈ 59 / 47 / 35 / 20 по interpret.ladder.order снизу вверх: ступень 1 светлее всех. Индекс кортежа —
+# ступень − 1, а не номер типа: номер типа ставит ``type_palette``.
+TYPE_PALETTE_ORDERED: tuple[str, ...] = ("#848BC7", "#606CAF", "#444E80", "#292F51")
+# Номинальная: оттенки Окабе — Ито (красно-пурпурный, киноварь, небесно-голубой, голубовато-зелёный),
+# подобранные по светлоте: L* ≈ 20 / 48 / 59 / 35 у типов 1 / 2 / 3 / 4 — различимы в сером, а в порядке
+# ladder.order (2, 1, 3, 4) идут 48 / 20 / 59 / 35, то есть не монотонно. Не текст на заливке в полосе
+# L* 50–57, где ни белый, ни тёмный текст не даёт 4,5 : 1. Цвета отличаются от PALETTE частей корзины
+# (ΔE2000 ≥ 10; полосы корзины на лендинге — серые) и от акцента FOCUS.
+TYPE_PALETTE_NOMINAL: dict[int, str] = {1: "#501D42", 2: "#B4561D", 3: "#3198C8", 4: "#185D4C"}
+TYPE_SHAPES: dict[int, str] = {1: "●", 2: "▲", 3: "■", 4: "◆"}  # по номеру типа, порядка не несут
+TYPE_MARKERS: dict[int, str] = {1: "o", 2: "^", 3: "s", 4: "D"}  # те же фигуры для matplotlib
+FOCUS = "#A50F15"  # единственный акцент лендинга: выбранное МО, наблюдаемое значение над плацебо
+PAGE_BG = "#FFFFFF"
+
+# Пороги проверки. Контраст — формулы WCAG 2.2: графический объект ≥ 3 : 1 (SC 1.4.11), обычный текст
+# ≥ 4,5 : 1 (SC 1.4.3). Серый — разность L* CIELAB. Дальтонизм — симуляция Machado, Oliveira, Fernandes
+# (2009), полная тяжесть, в линейном sRGB; различимость — ΔE2000 (Sharma, Wu, Dalal, 2005).
+AUDIT_GRAPHIC_CONTRAST = 3.0
+AUDIT_TEXT_CONTRAST = 4.5
+AUDIT_GREY_DELTA_L = 10.0
+AUDIT_CVD_DELTA_E = 10.0
+AUDIT_OTHER_DELTA_E = 10.0  # цвет типа не похож на цвета частей корзины PALETTE и на акцент FOCUS
+TEXT_COLORS: tuple[str, ...] = (TEXT, TEXT2)  # цвета текста страницы: ≥ 4,5 : 1 с фоном
+
+_CVD: dict[str, np.ndarray] = {  # Machado и др., 2009, тяжесть 1,0; строки в сумме 1 — серый не меняется
+    "protan": np.array(
+        [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]]
+    ),
+    "deutan": np.array(
+        [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]]
+    ),
+    "tritan": np.array(
+        [[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.303900]]
+    ),
+}
+_SRGB_TO_XYZ = np.array(
+    [[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750], [0.0193339, 0.1191920, 0.9503041]]
+)
+_WHITE_D65 = np.array([0.95047, 1.0, 1.08883])
+
+
+def hex_rgb(color: str) -> np.ndarray:
+    """``#RRGGBB`` → sRGB в [0, 1]."""
+    h = color.lstrip("#")
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", h):
+        raise ValueError(f"цвет {color!r}: нужен формат #RRGGBB")
+    return np.array([int(h[i : i + 2], 16) / 255 for i in (0, 2, 4)], dtype=np.float64)
+
+
+def _to_linear(rgb: np.ndarray) -> np.ndarray:
+    rgb = np.asarray(rgb, dtype=np.float64)
+    return np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+
+
+def _lab_linear(lin: np.ndarray) -> np.ndarray:
+    xyz = _SRGB_TO_XYZ @ np.clip(lin, 0.0, 1.0) / _WHITE_D65
+    e, k = 216 / 24389, 24389 / 27
+    f = np.where(xyz > e, np.cbrt(xyz), (k * xyz + 16) / 116)
+    return np.array([116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])])
+
+
+def lab(color: str) -> np.ndarray:
+    """CIELAB (D65) цвета ``#RRGGBB``."""
+    return _lab_linear(_to_linear(hex_rgb(color)))
+
+
+def lightness(color: str) -> float:
+    """L* CIELAB — светлота цвета в оттенках серого, 0…100."""
+    return float(lab(color)[0])
+
+
+def luminance(color: str) -> float:
+    """Относительная яркость по WCAG 2.2."""
+    return float(np.array([0.2126, 0.7152, 0.0722]) @ _to_linear(hex_rgb(color)))
+
+
+def contrast(a: str, b: str) -> float:
+    """Контраст двух цветов по WCAG 2.2, 1…21."""
+    la, lb = sorted((luminance(a), luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def simulate_cvd(color: str, kind: str) -> np.ndarray:
+    """CIELAB цвета глазами человека с протанопией, дейтеранопией или тританопией (``protan``, ``deutan``,
+    ``tritan``); ``grey`` — только светлота (a* = b* = 0)."""
+    lin = _to_linear(hex_rgb(color))
+    if kind == "grey":
+        return np.array([_lab_linear(lin)[0], 0.0, 0.0])
+    if kind not in _CVD:
+        raise ValueError(f"simulate_cvd: вид {kind!r} не из protan, deutan, tritan, grey")
+    return _lab_linear(_CVD[kind] @ lin)
+
+
+def delta_e2000(lab1: Sequence[float], lab2: Sequence[float]) -> float:
+    """ΔE2000 (CIEDE2000; Sharma, Wu, Dalal, 2005), kL = kC = kH = 1."""
+    L1, a1, b1 = (float(v) for v in lab1)
+    L2, a2, b2 = (float(v) for v in lab2)
+    c_bar = (math.hypot(a1, b1) + math.hypot(a2, b2)) / 2
+    g = 0.5 * (1 - math.sqrt(c_bar**7 / (c_bar**7 + 25.0**7)))
+    a1p, a2p = (1 + g) * a1, (1 + g) * a2
+    c1p, c2p = math.hypot(a1p, b1), math.hypot(a2p, b2)
+    h1p = math.degrees(math.atan2(b1, a1p)) % 360 if c1p else 0.0
+    h2p = math.degrees(math.atan2(b2, a2p)) % 360 if c2p else 0.0
+    dLp, dCp = L2 - L1, c2p - c1p
+    if c1p * c2p == 0:
+        dhp = 0.0
+    elif abs(h2p - h1p) <= 180:
+        dhp = h2p - h1p
+    else:
+        dhp = h2p - h1p - 360 if h2p > h1p else h2p - h1p + 360
+    dHp = 2 * math.sqrt(c1p * c2p) * math.sin(math.radians(dhp / 2))
+    Lp, Cp = (L1 + L2) / 2, (c1p + c2p) / 2
+    if c1p * c2p == 0:
+        hp = h1p + h2p
+    elif abs(h1p - h2p) <= 180:
+        hp = (h1p + h2p) / 2
+    else:
+        hp = (h1p + h2p + 360) / 2 if h1p + h2p < 360 else (h1p + h2p - 360) / 2
+    t = (
+        1
+        - 0.17 * math.cos(math.radians(hp - 30))
+        + 0.24 * math.cos(math.radians(2 * hp))
+        + 0.32 * math.cos(math.radians(3 * hp + 6))
+        - 0.20 * math.cos(math.radians(4 * hp - 63))
+    )
+    d_theta = 30 * math.exp(-(((hp - 275) / 25) ** 2))
+    rc = 2 * math.sqrt(Cp**7 / (Cp**7 + 25.0**7))
+    sl = 1 + 0.015 * (Lp - 50) ** 2 / math.sqrt(20 + (Lp - 50) ** 2)
+    sc, sh = 1 + 0.045 * Cp, 1 + 0.015 * Cp * t
+    rt = -math.sin(math.radians(2 * d_theta)) * rc
+    return math.sqrt((dLp / sl) ** 2 + (dCp / sc) ** 2 + (dHp / sh) ** 2 + rt * (dCp / sc) * (dHp / sh))
+
+
+def text_on(fill: str) -> str:
+    """Цвет текста поверх заливки: тёмный TEXT или белый — у кого контраст больше."""
+    return TEXT if contrast(TEXT, fill) >= contrast("#FFFFFF", fill) else "#FFFFFF"
+
+
+def type_palette(kind: str, order: Sequence[int]) -> dict[int, str]:
+    """Цвета типов по номеру: ``ordered`` — ступени TYPE_PALETTE_ORDERED по ``order`` (ladder.order,
+    снизу вверх), ``nominal`` — TYPE_PALETTE_NOMINAL (от порядка не зависит)."""
+    order = [int(t) for t in order]
+    if kind == "ordered":
+        if len(order) != len(TYPE_PALETTE_ORDERED):
+            raise ValueError(f"type_palette: ступеней {len(order)}, цветов {len(TYPE_PALETTE_ORDERED)}")
+        return {t: TYPE_PALETTE_ORDERED[i] for i, t in enumerate(order)}
+    if kind == "nominal":
+        if sorted(order) != sorted(TYPE_PALETTE_NOMINAL):
+            raise ValueError(f"type_palette: типы {sorted(order)} ≠ {sorted(TYPE_PALETTE_NOMINAL)}")
+        return dict(TYPE_PALETTE_NOMINAL)
+    raise ValueError(f"type_palette: вид {kind!r} не из ordered, nominal")
+
+
+def monotone(values: Sequence[float]) -> bool:
+    """Строго возрастает или строго убывает (светлоты палитры по ступеням)."""
+    d = np.diff(np.asarray(values, dtype=np.float64))
+    return bool(np.all(d > 0) or np.all(d < 0))
+
+
+@dataclass
+class PaletteAudit:
+    """Итог ``palette_audit``: строки проверок; ``exit_code`` — 0 или 3, как у этапов."""
+
+    checks: list[dict[str, Any]] = field(default_factory=list)
+
+    def add(self, name: str, passed: bool, value: Any, threshold: Any, detail: str) -> None:
+        self.checks.append(
+            {"check": name, "passed": bool(passed), "value": value, "threshold": threshold, "detail": detail}
+        )
+
+    @property
+    def ok(self) -> bool:
+        return all(c["passed"] for c in self.checks)
+
+    @property
+    def failures(self) -> list[dict[str, Any]]:
+        return [c for c in self.checks if not c["passed"]]
+
+    @property
+    def exit_code(self) -> int:
+        return 0 if self.ok else 3
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"ok": self.ok, "exit_code": self.exit_code, "checks": self.checks}
+
+
+def _audit_colors(
+    res: PaletteAudit, name: str, colors: dict[int, str], background: str, avoid: dict[str, str]
+) -> None:
+    """Контраст с фоном, текст на заливке, серый, три вида дальтонизма, непохожесть на цвета ``avoid``."""
+    items = sorted(colors.items())
+    for t, c in items:
+        cr = contrast(c, background)
+        res.add(
+            f"{name}.contrast_bg.{t}",
+            cr >= AUDIT_GRAPHIC_CONTRAST,
+            round(cr, 2),
+            AUDIT_GRAPHIC_CONTRAST,
+            f"{c} на фоне {background}, WCAG SC 1.4.11",
+        )
+        tc = text_on(c)
+        crt = contrast(tc, c)
+        res.add(
+            f"{name}.text_on_fill.{t}",
+            crt >= AUDIT_TEXT_CONTRAST,
+            round(crt, 2),
+            AUDIT_TEXT_CONTRAST,
+            f"текст {tc} на заливке {c}, WCAG SC 1.4.3",
+        )
+    for kind in ("grey", "protan", "deutan", "tritan"):
+        worst, pair = math.inf, ""
+        for i, (t1, c1) in enumerate(items):
+            for t2, c2 in items[i + 1 :]:
+                a, b = simulate_cvd(c1, kind), simulate_cvd(c2, kind)
+                d = abs(float(a[0] - b[0])) if kind == "grey" else delta_e2000(a, b)
+                if d < worst:
+                    worst, pair = d, f"типы {t1} и {t2}"
+        thr = AUDIT_GREY_DELTA_L if kind == "grey" else AUDIT_CVD_DELTA_E
+        unit = "ΔL*" if kind == "grey" else "ΔE2000"
+        res.add(f"{name}.{kind}", worst >= thr, round(worst, 2), thr, f"наименьшая {unit}: {pair}")
+    for t, c in items:
+        worst, who = min((delta_e2000(lab(c), lab(v)), k) for k, v in avoid.items())
+        res.add(
+            f"{name}.distinct_from_other.{t}",
+            worst >= AUDIT_OTHER_DELTA_E,
+            round(worst, 2),
+            AUDIT_OTHER_DELTA_E,
+            f"{c} против {who} ({avoid[who]}), ΔE2000",
+        )
+
+
+def palette_audit(
+    order: Sequence[int],
+    shapes: dict[int, str] | None = None,
+    background: str = PAGE_BG,
+) -> PaletteAudit:
+    """Проверка палитр типов до вёрстки (site.palette_rule.type_palette.audit).
+
+    Обе палитры: контраст цвета с фоном ≥ 3 : 1 и текста на заливке ≥ 4,5 : 1 (WCAG 2.2); попарная
+    различимость в сером (ΔL*) и при протанопии, дейтеранопии, тританопии (ΔE2000 после симуляции);
+    непохожесть на цвета частей корзины ``PALETTE`` и акцент ``FOCUS``. Порядковая — темнее с каждой
+    ступенью ``order``; номинальная — L* в порядке ``order`` **не монотонна** (светлота не подсказывает
+    непроверенный порядок). Ещё: текст страницы и акцент ≥ 4,5 : 1 с фоном; фигуры ``shapes`` из конфига
+    совпадают с ``TYPE_SHAPES`` и все разные. Ничего не бросает: вызывающий переводит ``exit_code`` 3
+    в ``QCError``.
+    """
+    order = [int(t) for t in order]
+    res = PaletteAudit()
+    avoid = {f"PALETTE.{k}": v for k, v in PALETTE.items() if k not in ("all", "other")}
+    avoid["FOCUS"] = FOCUS
+    ordered = type_palette("ordered", order)
+    nominal = type_palette("nominal", order)
+    _audit_colors(res, "ordered", ordered, background, avoid)
+    _audit_colors(res, "nominal", nominal, background, avoid)
+    lo = [lightness(ordered[t]) for t in order]
+    res.add(
+        "ordered.darker_up",
+        bool(np.all(np.diff(lo) < 0)),
+        " / ".join(fmt_num(v, 1) for v in lo),
+        "L* убывает по ступеням",
+        f"порядковая в порядке ступеней {order}",
+    )
+    ln = [lightness(nominal[t]) for t in order]
+    res.add(
+        "nominal.not_monotone",
+        not monotone(ln),
+        " / ".join(fmt_num(v, 1) for v in ln),
+        "L* не монотонна",
+        f"номинальная в порядке ступеней {order}",
+    )
+    for c in TEXT_COLORS:
+        cr = contrast(c, background)
+        res.add(
+            f"text.{c}",
+            cr >= AUDIT_TEXT_CONTRAST,
+            round(cr, 2),
+            AUDIT_TEXT_CONTRAST,
+            f"текст на {background}",
+        )
+    cr = contrast(FOCUS, background)
+    res.add(
+        "focus.contrast_bg",
+        cr >= AUDIT_TEXT_CONTRAST,
+        round(cr, 2),
+        AUDIT_TEXT_CONTRAST,
+        "акцент бывает текстом",
+    )
+    if shapes is not None:
+        sh = {int(k): str(v) for k, v in shapes.items()}
+        res.add("shapes.config", sh == TYPE_SHAPES, str(sh), str(TYPE_SHAPES), "фигуры конфига и style.py")
+    n_shapes = len(set(TYPE_SHAPES.values()))
+    res.add(
+        "shapes.distinct", n_shapes == len(TYPE_SHAPES), n_shapes, len(TYPE_SHAPES), "у каждого типа своя"
+    )
+    return res

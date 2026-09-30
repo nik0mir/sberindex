@@ -33,6 +33,8 @@ STAGES = {
 ONLY_STAGE = "eda"
 # Этап, для которого действует --blind: слепой прогон с перемешанными метками типов (отладка).
 BLIND_STAGE = "interpret"
+# Этап, для которого действуют --dev-blind и --demo: сборка лендинга не в site/, а в свой каталог с плашкой.
+SITE_STAGE = "site"
 
 EXIT_OK, EXIT_MISSING_INPUT, EXIT_NOT_IMPLEMENTED, EXIT_QC = 0, 1, 2, 3
 
@@ -77,12 +79,28 @@ def main(argv: list[str] | None = None) -> int:
         "(не общим); "
         "выходы — outputs/interpret_blind, отчёт с пометкой «СЛЕПОЙ ПРОГОН»",
     )
+    parser.add_argument(
+        "--dev-blind",
+        type=Path,
+        metavar="КАТАЛОГ",
+        help="для этапа site: разработка на слепом прогоне interpret (каталог interpret_blind); пишет только "
+        "в site.build.dev_blind_out, страница помечена «СЛЕПОЙ ПРОГОН»",
+    )
+    parser.add_argument(
+        "--demo",
+        type=Path,
+        metavar="КАТАЛОГ",
+        help='для этапа site: синтетический facts.json ("synthetic": true); пишет в site.demo.out с плашкой',
+    )
     parser.add_argument("stages", nargs="+", choices=[*STAGES, "all"], metavar="этап")
     args = parser.parse_args(argv)
     names = list(STAGES) if "all" in args.stages else args.stages
     only = _parse_only(parser, args.only, names)
     if args.blind is not None and BLIND_STAGE not in names:
         parser.error(f"--blind действует только вместе с этапом {BLIND_STAGE}")
+    site_opts = {"dev_blind": args.dev_blind, "demo": args.demo}
+    if any(v is not None for v in site_opts.values()) and SITE_STAGE not in names:
+        parser.error(f"--dev-blind и --demo действуют только вместе с этапом {SITE_STAGE}")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = load_config(args.config)
@@ -95,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
                 module.run_sections(cfg, only)
             elif name == BLIND_STAGE and args.blind is not None:
                 module.run(cfg, blind=args.blind)
+            elif name == SITE_STAGE and any(v is not None for v in site_opts.values()):
+                module.run(cfg, **site_opts)
             else:
                 module.run(cfg)
         except NotImplementedError as e:

@@ -1617,6 +1617,18 @@ site:
     covers: [verdicts, headlines, forbidden_words, roles, palette_rule, similarity_layout, always, n_similar_shown,
              similar_caption, decisions]
     sha256: 3b4a08b0620bb592c5825405b46b33c27c1fd172b56f458293ed96b85665df76   # последний шаг перед коммитом блока; пересчёт — после любой правки covers
+  build:                    # НЕ ПРЕДРЕГИСТРАЦИЯ: технические параметры сборки (docs/landing_spec.md, §5); от вердиктов
+                            # не зависят, в freeze.covers не входят и меняются без нового хеша
+    out: site               # каталог страницы для GitHub Pages (относительно корня репозитория)
+    dev_blind_out: outputs/site_dev_blind   # site --dev-blind <каталог interpret_blind>: только сюда, с плашкой
+                            # «СЛЕПОЙ ПРОГОН» из facts.label; в site/ слепые выходы не попадают никогда (иначе код 3)
+    inline_all: true        # все JSON, кроме geo.json, ещё и внутри index.html (<script type="application/json">),
+                            # чтобы страница работала по file://
+    hex: {cell_km: 60, spare: 0.15}   # карта ячеек: сторона ячейки, км, и доля запасных ячеек (TODO: подобрать
+                            # на прототипе раскладки — следующая порция)
+    simplify_km: 4          # допуск coverage_simplify полигонов среза 2024 года для geo.json, км
+    inset_simplify_km: 0.3  # то же для врезок Москвы и Петербурга, км
+    pdf: {dpi: 200, size: [13.333, 7.5]}   # PDF-версия 16 : 9, дюймы; dpi — как у рисунков отчёта
 
 # ---------------------------------------------------------------------------------------------
 # Этап 1. Панель «МО × месяц × категория», справочник территорий и годовой контекст (python -m munnet panel).
