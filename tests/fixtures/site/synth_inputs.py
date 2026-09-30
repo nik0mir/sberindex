@@ -59,6 +59,8 @@ def make_site_inputs(root: Path) -> None:
             "region_name": [REGION_NAME[REGION[i]] for i in ids],
             "mo_type": [kind[i] for i in ids],
             "is_inner_city": [i in INNER for i in ids],
+            "series_status": ["only_2023" if i == UNTYPED else "full" for i in ids],
+            "center_name": ["г Город" if i == 1 else f"с Село {i}" for i in ids],
         }
     )
     terr.to_parquet(proc / "territories.parquet")

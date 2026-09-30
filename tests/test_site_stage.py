@@ -529,3 +529,159 @@ def test_palette_audit_script(monkeypatch, capsys):
     assert "nominal.not_monotone" in capsys.readouterr().out
     monkeypatch.setattr(mod.style, "TYPE_PALETTE_NOMINAL", mod.style.type_palette("ordered", [2, 1, 3, 4]))
     assert mod.main(["--config", "configs/default.yaml"]) == 3
+
+
+# --- порция 3: экран 0 без JS, поля карточки, линт шаблона, T3 по R1 ----------------------------------------
+
+
+def _html_text(html: str) -> str:
+    """Видимый текст страницы без JS: без <script>, <style> и тегов; неразрывный пробел -> пробел."""
+    h = re.sub(r"<(script|style)\b.*?</\1>", " ", html, flags=re.S)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", h).replace(" ", " "))
+
+
+def _squash(s: str) -> str:
+    return re.sub(r"\s+", " ", s.replace(" ", " "))
+
+
+def test_screen0_readable_without_js(tmp_path):
+    """§5 и §7: заголовок, подзаголовок, вводная, три пункта (короткие заголовки и все тексты пункта
+    дословно под «Как проверяли»), оговорка, охват, ключ карты и подпись о смещении — в HTML при сборке."""
+    cfg, facts = _setup(tmp_path)
+    facts.pop("synthetic")
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    story = landing.run(cfg)
+    html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    text = _html_text(html)
+    s0 = story["screen0"]
+    assert '<h1 id="answer-title">' in html
+    assert _squash(s0["title"]) in text and _squash(s0["lead"]) in text
+    assert s0["intro"] and _squash(s0["intro"]) in text
+    assert html.count('<li class="pt') == 3 and html.count('<details class="how">') >= 3
+    for point in s0["points"]:  # все тексты пункта, не только первый
+        for t in point:
+            assert _squash(t) in text, t[:40]
+    for hs in s0["point_heads"]:
+        assert hs and all(_squash(h) in text for h in hs)
+    for k in ("question", "coverage", "scope"):
+        assert _squash(s0[k]) in text, k
+    assert "Данные. Данные" not in text and 'id="map-shift"> (медианное смещение' in html
+    assert 'class="map-key"' in html and "нет типа" in text
+    # заголовок и подзаголовок — по site.headlines.screen0 (T1, затем T3), порядок не меняется
+    body = html[html.index("<body>") :]
+    assert (
+        body.index('id="answer-title"')
+        < body.index('id="answer-lead"')
+        < body.index('<div class="findings">')
+    )
+    # поиск стоит в DOM раньше выводов и карты — на 375 px он на первом экране
+    assert (
+        body.index('id="search-input"')
+        < body.index('<div class="findings">')
+        < body.index('<svg id="hexmap"')
+    )
+
+
+def test_banner_in_html_and_title(tmp_path):
+    """Плашка режима — в HTML и в <title> без JS."""
+    cfg, facts = _setup(tmp_path, blind=20260930, label="СЛЕПОЙ ПРОГОН")
+    facts.pop("synthetic")
+    d = write_interpret(tmp_path / "blind", facts, name="interpret_blind")
+    landing.run(cfg, dev_blind=d)
+    html = (tmp_path / "outputs" / "site_dev_blind" / "index.html").read_text(encoding="utf-8")
+    assert '<div class="banner" id="banner" role="status">СЛЕПОЙ ПРОГОН</div>' in html
+    assert re.search(r"<title>СЛЕПОЙ ПРОГОН\.", html)
+
+
+def test_meta_without_build_date(tmp_path):
+    """Страница не меняется от дня сборки: в meta нет даты, есть seed и sha256 выводов."""
+    cfg, facts = _setup(tmp_path)
+    facts.pop("synthetic")
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    landing.run(cfg)
+    html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    meta = json.loads(re.search(r'<script type="application/json" id="meta">(.*?)</script>', html, re.S)[1])
+    assert "date" not in meta and meta["seed"] == CFG["seed"] and meta["facts_sha256"]
+
+
+def test_js_reads_only_mo_fields(tmp_path):
+    """Поля МО, которые читает карточка (r.…, nd.…), есть в mo.json — иначе блок молча пропадает."""
+    cfg, facts = _setup(tmp_path)
+    facts.pop("synthetic")
+    bound_interpret(tmp_path, tmp_path / "outputs", facts)
+    landing.run(cfg)
+    mo = json.loads((tmp_path / "site" / "data" / "mo.json").read_text(encoding="utf-8"))
+    js = (Path(landing.__file__).parent / "templates" / "landing.js").read_text(encoding="utf-8")
+    card = js[js.index("function statusLine") : js.index('cardBody.addEventListener("click"')]
+    used = set(re.findall(r"\b(?:r|nd)\.([a-z][a-z0-9_]*)\b", card))
+    missing = sorted(used - set(mo) - {"length"})
+    assert not missing, missing
+    assert {"wp", "ser", "simb"} <= set(mo)
+
+
+def test_untyped_cells_are_clickable_in_js():
+    """169 ячеек МО без типа попадают в CELLS (карточка объясняет причину), районы столиц — нет."""
+    js = (Path(landing.__file__).parent / "templates" / "landing.js").read_text(encoding="utf-8")
+    line = next(x for x in js.splitlines() if "CELLS.set(" in x)
+    assert 'r.role !== "inner"' in line and "r.id === r.node" not in line
+
+
+def test_verdict_fields_per_test():
+    """Одно имя поля у разных тестов бывает о разном ({best_partition} у T1 и T5): заголовок берёт поле из
+    текста своего теста; в общие тексты поле с разными значениями не идёт."""
+    combo = next(all_combos(CFG.data)) | {
+        "T1_ladder_external": "partial_overall",
+        "T5_trivial": "not_repeats",
+    }
+    facts = make_facts(CFG.data, combo)
+    it = CFG["interpret"]["tests"]
+    t5 = landing.extract_fields(
+        it["T5_trivial"]["outcomes"]["not_repeats"]["text"], facts["texts"]["T5_trivial"]
+    )
+    t1 = landing.extract_fields(
+        it["T1_ladder_external"]["outcomes"]["partial_overall"]["text"], facts["texts"]["T1_ladder_external"]
+    )
+    if not (t1 and t5 and "best_partition" in t1 and "best_partition" in t5):
+        pytest.skip("в шаблонах нет общего поля best_partition")
+    other = "«другое деление»"
+    facts["texts"]["T1_ladder_external"] = facts["texts"]["T1_ladder_external"].replace(
+        t1["best_partition"], other, 1
+    )
+    facts["thesis"]["point_1"] = [facts["texts"]["T1_ladder_external"], facts["texts"]["T5_trivial"]]
+    vd = landing.read_verdicts(CFG, facts)
+    assert "best_partition" not in vd.fields
+    assert vd.of("T5_trivial")["best_partition"] == t5["best_partition"]
+    story = landing.build_story(CFG, facts, NUMBERS, DEMO)
+    assert t5["best_partition"] in story["chapters"]["types"]["title"]
+    assert landing.lint_story(CFG, story, facts) == []
+
+
+def test_template_lint_catches_words(monkeypatch):
+    """Линт шаблона: строки JS и текст HTML проверяются на page_always и by_verdict (иначе код 3)."""
+    texts = landing.template_strings(
+        '<p>Прогноз оборота</p><!-- прогноз в комментарии --><b aria-label="ступени лестницы">x</b>',
+        'const a = "надёжный переход";\n// предсказание в комментарии\nconst b = `к городской корзине`;',
+    )
+    assert "Прогноз оборота" in texts and "ступени лестницы" in texts
+    assert "надёжный переход" in texts and "к городской корзине" in texts
+    assert not any("комментари" in t for t in texts)
+    verdicts = {t: "not" for t in ("T1_ladder_external", "T2_direction", "T3_reliable_placebo")}
+    verdicts |= {"T5_trivial": "not_repeats", "T6_bank_coverage": "not", "T7_utility": "not"}
+    verdicts |= {"T7_type_gain": "neutral", "one_in_ten": False, "caveat": False}
+    monkeypatch.setattr(landing, "template_strings", lambda *a: texts)
+    bad = " ".join(landing.lint_templates(CFG, {"verdicts": verdicts}, ""))
+    assert "прогноз" in bad and "надёжн" in bad and "ступен" in bad
+
+
+def test_real_templates_pass_lint_all_verdicts():
+    """Настоящие landing.html и landing.js проходят линт при всех сочетаниях вердиктов."""
+    keys = ("T1_ladder_external", "T2_direction", "T3_reliable_placebo", "T7_type_gain")
+    for combo in all_combos(CFG.data, keys):
+        story = {"verdicts": combo | {"one_in_ten": False, "caveat": False}}
+        assert landing.lint_templates(CFG, story, "") == [], combo
+
+
+def test_nbsp_display_only():
+    nb = " "
+    assert landing.nbsp("Траты в регионе и в МО — это а") == f"Траты в{nb}регионе и{nb}в{nb}МО{nb}— это а"
+    assert landing.nbsp("Минск-а б") == "Минск-а б"

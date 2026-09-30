@@ -52,16 +52,16 @@ button { font: inherit; color: inherit; }
 }
 .nav a:hover { color: var(--ink); text-decoration: underline; }
 
-/* экран 0: ответ. Порядок в DOM — как на телефоне (вопрос, заголовок, выводы, оговорка, поиск, карта);
-   на широком экране поиск поднимается под заголовок, а выводы встают строкой под картой — всё без прокрутки */
+/* экран 0: ответ. Порядок в DOM — как на телефоне (вводная, заголовок, поиск, выводы, оговорка, карта):
+   поиск на телефоне — на первом экране; на широком выводы встают строкой под картой */
 .answer {
   max-width: 1440px; margin: 0 auto; padding: 18px 24px 8px;
   display: grid; gap: 0 40px; align-items: start;
   grid-template-columns: minmax(400px, 540px) minmax(0, 1fr);
-  grid-template-areas: "q map" "h map" "lead map" "find map" "fnd fnd";
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-areas: "head map" "find map" "fnd fnd";
+  grid-template-rows: auto 1fr auto;
 }
-.kicker { grid-area: q; } #answer-title { grid-area: h; } .lead { grid-area: lead; }
+.answer-head { grid-area: head; }
 .finder { grid-area: find; align-self: start; }
 .answer-map { grid-area: map; }
 .findings {
@@ -69,8 +69,9 @@ button { font: inherit; color: inherit; }
   border-top: 2px solid var(--ink); padding-top: 8px;
 }
 .points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 24px; }
-.kicker { margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--ink-2); }
-.kicker::before { content: "Вопрос. "; font-weight: 700; color: var(--ink); }
+.intro { margin: 0 0 10px; font-size: 15px; line-height: 1.45; color: var(--ink-2); max-width: 36em; }
+.gloss { margin: -6px 0 10px; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.how .gloss, .caveat .gloss { margin: 6px 0 0; font-size: 12.5px; }
 h1 {
   margin: 0 0 6px; font: 700 clamp(26px, 2.2vw, 32px)/1.15 var(--serif); letter-spacing: -.005em;
   text-wrap: balance;
@@ -86,6 +87,14 @@ h1 {
   font: 700 17px/1.2 var(--serif); color: var(--ink);
 }
 .points details { margin-top: 2px; }
+.pt-head { margin: 0; font-weight: 600; }
+.pt-h { display: inline; }
+.how p { margin: 4px 0 0; font-size: 13.5px; line-height: 1.42; color: var(--ink); font-weight: 400; }
+.how .q { color: var(--ink-2); }
+.caveat details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; list-style: none; }
+.caveat details summary::-webkit-details-marker { display: none; }
+.caveat details summary::before { content: "+ "; font-weight: 700; }
+.caveat details[open] summary::before { content: "− "; }
 .points summary, .more > summary {
   cursor: pointer; color: var(--ink-2); font-size: 14px; list-style: none;
   display: inline-flex; align-items: center; min-height: 28px;
@@ -99,9 +108,10 @@ h1 {
 .notes { font-size: 13px; line-height: 1.42; color: var(--ink-2); }
 .caveat { margin: 0 0 6px; }
 .caveat p { margin: 0 0 4px; }
-.caveat p::before { content: "Оговорка. "; font-weight: 700; color: var(--ink); }
-.caveat p.coverage::before { content: "Данные. "; }
+.caveat b { color: var(--ink); }
+.coverage { margin: 0 0 4px; }
 .scope { margin: 0; }
+.ego-note { margin: 6px 0 0; font-size: 13px; line-height: 1.4; color: var(--ink); }
 
 /* поиск: ARIA combobox */
 .finder { margin: 10px 0 0; padding: 12px 14px 10px; background: #f3f1ec; border-left: 3px solid var(--ink); }
@@ -129,6 +139,7 @@ h1 {
 .examples { display: flex; flex-wrap: wrap; gap: 6px; }
 .examples::before { content: "Например:"; font-size: 13px; color: var(--ink-2); align-self: center; margin-right: 2px; }
 .ex {
+  color: inherit; text-decoration: none;
   min-height: 44px; padding: 6px 10px; border: 1px solid var(--rule); background: #fff; border-radius: 2px;
   cursor: pointer; font-size: 14px; line-height: 1.2; text-align: left; display: inline-flex; gap: 6px;
   align-items: center;
@@ -312,13 +323,15 @@ h1 {
   h1 { font-size: 25px; }
   .lead { font-size: 18px; }
   .points > li { font-size: 15px; }
-  .points > li.points-more { display: block; }
-  .points > li.extra { display: none; }
-  .points.show-extra > li.extra { display: block; }
+  .js .points > li.points-more { display: block; }
+  .js .points > li.extra { display: none; }
+  .js .points.show-extra > li.extra { display: block; }
+  .intro { font-size: 14px; margin-bottom: 8px; }
+  .finder { margin-top: 4px; margin-bottom: 12px; }
   .finder { padding: 10px 12px; margin: 0 -4px; }
   .combo-input { font-size: 16px; }
-  .js .hexmap .callout { display: none; }
-  .js .map-key { display: flex; }
+  .hexmap .callout { display: none; }
+  .map-key { display: flex; }
   .card {
     left: 0; right: 0; top: auto; width: auto; height: 90vh; height: 90dvh; border-right: 0; border-top: 1px solid var(--ink);
     box-shadow: 0 -6px 20px rgba(0,0,0,.15); border-radius: 10px 10px 0 0;

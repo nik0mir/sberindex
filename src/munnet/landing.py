@@ -226,7 +226,29 @@ def site_numbers(cfg: Config) -> dict[str, str]:
             f"site: свой ритм надёжен у {n_rhythm} из {len(rhythm)} узлов ≠ syn.reliable_share_nodes "
             f"{share['text']}"
         )
-    return {
+    # «почему регионов меньше 77»: регионы с тратами без единого узла сети (у всех МО ряд неполный) —
+    # из файлов; регионы без трат — из разведки (e1.absent_regions); число сверяется с e1
+    fn = pd.read_parquet(need["features_nodes"], columns=["region_code", "region_name", "is_node"])
+    node_regs = set(fn.loc[fn["is_node"], "region_code"])
+    inc = sorted(
+        {str(r) for c, r in zip(fn["region_code"], fn["region_name"], strict=True) if c not in node_regs}
+    )
+    n_inc_eda = (ef.get("e1.n_all_incomplete_regions") or {}).get("value")
+    if n_inc_eda is not None and int(n_inc_eda) != len(inc):
+        raise QCError(f"site: регионов без узлов {len(inc)} ≠ e1.n_all_incomplete_regions {n_inc_eda}")
+    absent = ef.get("e1.n_absent_regions") or {}
+    n_abs = int(absent.get("value") or 0)
+    regions = (
+        {
+            "n_incomplete": f"{len(inc)} {plural_ru(len(inc), 'регионе', 'регионах', 'регионах')}",
+            "incomplete": ", ".join(inc),
+            "n_absent": f"{n_abs} {plural_ru(n_abs, 'региона', 'регионов', 'регионов')}",
+            "absent": str((ef.get("e1.absent_regions") or {}).get("text") or ""),
+        }
+        if inc and absent.get("value")
+        else {}
+    )
+    return regions | {
         "share_cross": style.fmt_pct(1 - float(main["same_region"].mean())),
         "share_cross_random": style.fmt_pct(1 - float((n_r * (n_r - 1)).sum()) / (big_n * (big_n - 1))),
         "n_rhythm": style.fmt_num(n_rhythm),
@@ -264,6 +286,30 @@ def cap(s: str) -> str:
     return s[:1].upper() + s[1:] if s else s
 
 
+def plural_ru(n: int, one: str, few: str, many: str) -> str:
+    """Форма слова после числа по правилу русского числительного."""
+    a, b = abs(int(n)) % 100, abs(int(n)) % 10
+    if 10 < a < 20:
+        return many
+    return one if b == 1 else few if 1 < b < 5 else many
+
+
+_NBSP_WORD = re.compile(r"(?<![\w\u00ad-])([вксоуиаяВКСОУИАЯ]) ")
+
+
+def nbsp(s: str) -> str:
+    """Типографика ru-text для показа: неразрывный пробел после однобуквенных слов и перед тире.
+    Только для отображения: в story.json тексты этапа 5 остаются побуквенно как в facts.json."""
+    if not s:
+        return s
+    s = _NBSP_WORD.sub(NBSP_REPL, str(s))
+    return s.replace(" — ", NBSP + "— ")
+
+
+NBSP = chr(0xA0)
+NBSP_REPL = "\\1" + NBSP
+
+
 def extract_fields(template: str, text: str) -> dict[str, str] | None:
     """Поля, которые этап 5 подставил в ``template``, чтобы получить ``text``; None — не тот шаблон."""
     m = template_regex(_lower_first(template)).match(_lower_first(text))
@@ -275,7 +321,12 @@ class Verdicts:
     """Ключи исходов для словаря заголовков и флаги сочетания (как в переборе ``site_headlines``)."""
 
     keys: dict[str, Any]  # тест -> ключ заголовка; плюс T7_type_gain, one_in_ten, caveat
-    fields: dict[str, str] = field(default_factory=dict)  # поле -> значение из текстов этапа 5
+    fields: dict[str, str] = field(default_factory=dict)  # поле -> значение, одинаковое во всех текстах
+    by_test: dict[str, dict[str, str]] = field(default_factory=dict)  # тест -> поля его текста
+
+    def of(self, test: str) -> dict[str, str]:
+        """Поля заголовка теста: из текста его исхода (правило headlines.check.slots: subset_of_text)."""
+        return self.fields | self.by_test.get(test, {})
 
     def __getitem__(self, k: str) -> Any:
         return self.keys[k]
@@ -292,6 +343,8 @@ def read_verdicts(cfg: Config, facts: Mapping) -> Verdicts:
     texts = facts["texts"]
     keys: dict[str, Any] = {}
     fields: dict[str, str] = {}
+    by_test: dict[str, dict[str, str]] = {}
+    clash: set[str] = set()
     for test in TESTS:
         v = vf.get("T1_text", vf[test]) if test == "T1_ladder_external" else vf[test]
         cands = ["partial_capped", "partial"] if (test == "T2_direction" and v == "partial") else [v]
@@ -299,17 +352,20 @@ def read_verdicts(cfg: Config, facts: Mapping) -> Verdicts:
             got = extract_fields(it[test]["outcomes"][key]["text"], texts[test])
             if got is not None:
                 keys[test] = key
+                by_test[test] = dict(got)
                 for name, val in got.items():
+                    # одно имя поля у разных тестов бывает о разном ({best_partition} у T1 — соперник по ρ,
+                    # у T5 — по ε²): такое поле — только в заголовке своего теста, в общие тексты не идёт
                     if name in fields and fields[name] != val:
-                        raise QCError(
-                            f"site: поле {{{name}}} в текстах этапа 5 разное: {fields[name]!r} и {val!r}"
-                        )
-                    fields[name] = val
+                        clash.add(name)
+                    fields.setdefault(name, val)
                 break
         else:
             raise QCError(
                 f"site: текст {test} не совпал с шаблоном исхода {cands} (вердикт {v}): {texts[test]!r}"
             )
+    for name in clash:
+        fields.pop(name, None)
     t7 = facts["t7"]
     keys["T7_type_gain"] = t7["type_gain"]
     set_name = SET_NAMES[t7["product"]]
@@ -325,7 +381,7 @@ def read_verdicts(cfg: Config, facts: Mapping) -> Verdicts:
             f"site: оговорка T6 (ε² {facts['t6']['coverage_eps2']}) и текст T6 этапа 5 не согласованы"
         )
     keys["caveat"] = caveat
-    return Verdicts(keys, fields)
+    return Verdicts(keys, fields, by_test)
 
 
 def _caveat_regex(tpl: str) -> str:
@@ -344,8 +400,10 @@ def fill(template: str, values: Mapping[str, str]) -> str:
 # --- story.json ---------------------------------------------------------------------------------------------
 
 
-def _headline(H: Mapping, test: str, key: str, fields: Mapping[str, str]) -> str:
-    return cap(fill(H[test][key], fields))
+def _headline(H: Mapping, test: str, key: str, vd: Verdicts) -> str:
+    """Короткий заголовок исхода; поля — из текста исхода того же теста (``Verdicts.of``)."""
+    base = "T7_utility" if test == "T7_type_gain" else test
+    return cap(fill(H[test][key], vd.of(base)))
 
 
 def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: Mode) -> dict:
@@ -366,8 +424,8 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         k: (style.fmt_num(scope[k]) if scope.get(k) is not None else "") for k in _slots(A["scope_reader"])
     }
     screen0 = {
-        "title": _headline(H, s0["title"], v[s0["title"]], f),
-        "lead": _headline(H, s0["lead"], v[s0["lead"]], f),
+        "title": _headline(H, s0["title"], v[s0["title"]], vd),
+        "lead": _headline(H, s0["lead"], v[s0["lead"]], vd),
         "question": th["question"],
         "points": [list(th["point_1"]), list(th["point_2"]), list(th["point_3"])],
         "caveat": list(th["caveat"]),
@@ -376,15 +434,51 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "coverage": H["descriptive"]["coverage"],
     }
     dyn_lead = (
-        _headline(H, "T2_direction", t2, f)
+        _headline(H, "T2_direction", t2, vd)
         if ok_if(ch["dynamics"]["lead_if"])
         else H["descriptive"]["dynamics_neutral"]
     )
     limits_title = (
-        _headline(H, "T6_bank_coverage", t6, f)
+        _headline(H, "T6_bank_coverage", t6, vd)
         if ok_if(ch["limits"]["title_if"])
         else H["descriptive"]["limits_neutral"]
     )
+    # после вскрытия (site.build.texts, §4.4): короткие заголовки пунктов — те же заголовки site.headlines,
+    # что у глав (по тем же правилам показа); полные тексты пунктов — дословно под «Как проверяли»
+    heads_by_test = {
+        "T1_ladder_external": _headline(H, "T1_ladder_external", t1, vd),
+        "T3_reliable_placebo": _headline(H, "T3_reliable_placebo", t3, vd),
+        "T5_trivial": _headline(H, "T5_trivial", t5, vd),
+        "T2_direction": dyn_lead,
+        "T7_utility": _headline(H, "T7_utility", t7, vd),
+        "T6_bank_coverage": limits_title,
+    }
+    on_top = {s0["title"], s0["lead"]}  # уже стоят заголовком и подзаголовком экрана 0
+    ta = it["thesis_assembly"]
+    heads = []
+    for k in ("point_1", "point_2", "point_3"):
+        hs = [heads_by_test[t] for t in ta[k] if t not in on_top] or [heads_by_test[ta[k][0]]]
+        if "T7_utility" in ta[k]:
+            hs.append(_headline(H, "T7_type_gain", v["T7_type_gain"], vd))
+        heads.append(hs)
+    TX = site["build"].get("texts") or {}
+    n_types = len(facts["ladder"]["order"])
+    screen0 |= {
+        "intro": fill(
+            TX["intro"],
+            {
+                "n_nodes": style.fmt_num(scope["n_nodes"]),
+                "n_types": f"{n_types} {plural_ru(n_types, 'тип', 'типа', 'типов')}",
+            },
+        )
+        if TX.get("intro") and scope.get("n_nodes") is not None
+        else None,
+        "point_heads": heads,
+        "caveat_head": H["T6_caveat"]["caveat"] if v["caveat"] else limits_title,
+        "labels": {k: TX.get(k) for k in ("question_label", "how_checked", "caveat_label") if TX.get(k)},
+        "gloss": dict(TX.get("gloss") or {}),
+        "regions_note": regions_note(TX.get("regions_note"), numbers),
+    }
     flows = P["t3_flows"][t3]
     n_set = int(it["tests"]["T7_utility"]["k"])
     chapters = {
@@ -397,25 +491,25 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "layout_caption": None,  # TODO: {preserved} — из раскладки (site_layout, следующая порция)
         },
         "types": {
-            "title": _headline(H, "T5_trivial", t5, f),
+            "title": _headline(H, "T5_trivial", t5, vd),
             "note": H["T4_basket_vs_place"]["describe"],
             "text": texts["T5_trivial"],
             "note_text": texts["T4_basket_vs_place"],
         },
         "order": {
-            "title": _headline(H, "T1_ladder_external", t1, f),
+            "title": _headline(H, "T1_ladder_external", t1, vd),
             "text": texts["T1_ladder_external"] + facts.get("t1_notes", {}).get("T1_ladder_external", ""),
             "proxies": texts.get("T1_proxies", ""),
         },
         "dynamics": {
-            "title": _headline(H, "T3_reliable_placebo", t3, f),
+            "title": _headline(H, "T3_reliable_placebo", t3, vd),
             "lead": dyn_lead,
             "texts": [texts["T3_reliable_placebo"], texts["T2_direction"]],
             "layer_name": flows["layer_name"],
         },
         "comparable": {
-            "title": _headline(H, "T7_utility", t7, f),
-            "lead": _headline(H, "T7_type_gain", v["T7_type_gain"], f),
+            "title": _headline(H, "T7_utility", t7, vd),
+            "lead": _headline(H, "T7_type_gain", v["T7_type_gain"], vd),
             "text": texts["T7_utility"],
             "same_period": A["honesty"]["t7_same_period"],
             "similar_caption": fill(
@@ -460,8 +554,23 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         },
         "reliability_key": P["reliability_grammar"]["key"],
         "stability_label": A["mo_stability"]["label"],
+        "card": {  # строки карточки из site.build.texts (линтуются как текст сайта)
+            "no_comparable": TX.get("no_comparable"),
+            "shifted": TX.get("shifted"),
+            "lines": A["honesty"]["lines"],
+            # варианты R1 в node_r1 / node_seed (kind = variant): у узлов-городов нет nodes_separate
+            "variants": {"3": ", ".join(R1_WORDS.values()), "2": ", ".join(list(R1_WORDS.values())[:2])},
+        },
         "view": view,
     }
+
+
+def regions_note(tpl: str | None, numbers: Mapping[str, str]) -> str | None:
+    """Строка «почему регионов меньше»: числа — из ``site_numbers`` (нет чисел — строки нет)."""
+    keys = ("n_incomplete", "incomplete", "n_absent", "absent")
+    if not tpl or not all(numbers.get(k) for k in keys):
+        return None
+    return fill(tpl, {k: numbers[k] for k in keys})
 
 
 def _slots(s: str) -> list[str]:
@@ -589,7 +698,11 @@ def lint_story(cfg: Config, story: Mapping, facts: Mapping) -> list[str]:
     bad: list[str] = []
     authored: list[tuple[str, str]] = []
     for path, s in _strings(
-        {k: story[k] for k in ("screen0", "chapters", "roles", "names", "reliability_key")}
+        {
+            k: story[k]
+            for k in ("screen0", "chapters", "roles", "names", "reliability_key", "card")
+            if k in story
+        }
     ):
         if SLOT.search(s):
             bad.append(f"пустое поле {SLOT.findall(s)} в {path}: «{s}»")
@@ -600,9 +713,13 @@ def lint_story(cfg: Config, story: Mapping, facts: Mapping) -> list[str]:
             bad.append(f"пустое поле {SLOT.findall(s)} в {path}")
     for kind, word, text in hc.text_violations([s for _, s in authored], v):
         bad.append(f"{kind}: «{word}» в «{text}»")
-    headlines = [story["screen0"]["title"], story["screen0"]["lead"]] + [
+    s0h = story["screen0"]
+    headlines = [s0h["title"], s0h["lead"]] + [
         c[k] for c in story["chapters"].values() for k in ("title", "lead") if isinstance(c.get(k), str)
     ]
+    headlines += [h for hs in s0h.get("point_heads") or [] for h in hs] + (
+        [s0h["caveat_head"]] if s0h.get("caveat_head") else []
+    )
     banned_h = list(fw["headlines_always"]) + list(cfg["interpret"]["naming"]["banned"])
     for h in headlines:
         bad += [f"запрет в заголовке: «{w}» в «{h}»" for w in banned_h if norm(w) in norm(h)]
@@ -637,6 +754,49 @@ def lint_story(cfg: Config, story: Mapping, facts: Mapping) -> list[str]:
         if nominal_monotone([int(x) for x in facts["ladder"]["order"]]):
             bad.append("номинальная палитра монотонна по светлоте в порядке ladder.order")
     return bad
+
+
+_CYR = re.compile(r"[А-Яа-яЁё]")
+_JS_LIT = re.compile(r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|`(?:[^`\\]|\\.)*`')
+
+
+def template_strings(html: str, js: str, svg: str = "") -> list[str]:
+    """Тексты интерфейса, которые пишет сам шаблон: текст и подписи (aria-label, placeholder, title, alt)
+    в ``landing.html`` без комментариев и подстановок, строковые литералы ``landing.js`` с кириллицей
+    (без комментариев), текст статичной SVG."""
+    h = re.sub(r"<!--.*?-->", " ", html, flags=re.S)
+    h = re.sub(r"<(style|script)\b.*?</\1>", " ", h, flags=re.S)
+    out = [m.strip() for m in re.findall(r">([^<>]+)<", h) if _CYR.search(m)]
+    out += [
+        v for v in re.findall(r'(?:aria-label|placeholder|title|alt)="([^"]*)"', h + svg) if _CYR.search(v)
+    ]
+    code = re.sub(r"(?m)^\s*//.*$", " ", js)
+    code = re.sub(r"(?<=[;{}),\s])//[^\n\"'`]*$", " ", code, flags=re.M)
+    out += [m[1:-1] for m in _JS_LIT.findall(code) if _CYR.search(m)]
+    out += [m.strip() for m in re.findall(r">([^<>]+)<", svg) if _CYR.search(m)]
+    return out
+
+
+def lint_templates(cfg: Config, story: Mapping, svg: str) -> list[str]:
+    """Линт шаблона (§4.1, forbidden_words): интерфейс, aria-label, подписи и SVG — те же запреты
+    ``page_always`` и ``by_verdict``, что у текста сайта, при текущих вердиктах. Нарушение — код 3."""
+    tdir = Path(__file__).parent / "templates"
+    read = lambda n: (tdir / n).read_text(encoding="utf-8") if (tdir / n).exists() else ""  # noqa: E731
+    hc = HeadlineChecker(cfg.data)
+    texts = template_strings(read("landing.html"), read("landing.js"), svg)
+    return [
+        f"{kind}: «{w}» в «{t[:80]}»" for kind, w, t in hc.text_violations(texts, dict(story["verdicts"]))
+    ]
+
+
+def screen_examples(types: list[dict], story: Mapping, n: int = 3) -> list[int]:
+    """Кнопки-примеры экрана 0: первый типичный пример каждого типа (``examples.csv``) в порядке легенды."""
+    out = []
+    for r in types:
+        ex = (r.get("examples") or {}).get("typical") or []
+        if ex:
+            out.append(int(ex[0]))
+    return out[:n]
 
 
 # --- бюджет и запись ----------------------------------------------------------------------------------------
@@ -675,6 +835,12 @@ OKRUG_RU = {
     "far_eastern": "Дальневосточный",
 }
 STATUS_CODE = {"no_change": "n", "reliable": "r", "within_noise": "w"}
+# варианты R1 (interpret.robustness) словами для карточки; у узлов-городов — первые два (без третьего)
+R1_WORDS = {
+    "variant:graph_basket_cos": "другое правило рёбер",
+    "variant:no_level": "без признака уровня трат",
+    "variant:nodes_separate": "районы Москвы и Петербурга отдельно",
+}
 N_WINDOWS = 13
 ICVI_BETTER = {
     "sw": "max",
@@ -911,15 +1077,25 @@ def city_labels(d: SiteData, hm: HexMap) -> list[dict]:
     top = pop.reindex(cand.index).dropna().sort_values(ascending=False).head(n)
     cells = hm.cells.set_index("territory_id")
     x, y = hm.grid.center(cells.loc[top.index, "hq"], cells.loc[top.index, "hr"])
+    centers = d.terr.set_index("territory_id")["center_name"].to_dict() if "center_name" in d.terr else {}
     return [
         {
             "id": int(i),
-            "name": str(nodes.loc[i, "name_short"]),
+            "name": city_name(nodes.loc[i], centers.get(int(i))),
             "x": round(float(a), 1),
             "y": round(float(b), 1),
         }
         for i, a, b in zip(top.index, x, y, strict=True)
     ]
+
+
+def city_name(node: pd.Series, center: Any) -> str:
+    """Подпись города: у городского округа — его центр без «г» («г Челябинск» -> «Челябинск»), иначе
+    короткое имя. «Челябинский» (прилагательное из названия округа) на карте не читается как город."""
+    c = str(center or "")
+    if str(node.get("mo_type")) == "go" and c.startswith("г "):
+        return c[2:].strip()
+    return str(node["name_short"])
 
 
 def node_pop(d: SiteData) -> pd.Series:
@@ -1174,6 +1350,9 @@ def build_mo_frame(d: SiteData, hm: HexMap, nxy: pd.DataFrame, values: pd.DataFr
     mo["pop"] = mo["id"].map(pop).round()
     ca = d.processed("context_annual", columns=["territory_id", "year", "workplace_based"])
     mo["wp"] = mo["id"].map(ca.sort_values("year").groupby("territory_id")["workplace_based"].last())
+    if "series_status" in terr.columns:
+        ser = terr["series_status"].astype(str)
+        mo["ser"] = mo["id"].map(ser.where(ser != "full"))  # только неполный ряд (пометка в карточке)
     fw = d.processed("features_windows", columns=["territory_id", "window", *[f"clr_rel_{p}" for p in PARTS]])
     for year in ("2023", "2024"):
         w = fw[fw["window"] == year].set_index("territory_id")[[f"clr_rel_{p}" for p in PARTS]]
@@ -1245,10 +1424,11 @@ def node_tables(d: SiteData) -> dict[str, pd.Series]:
     comp = d.opt("node_comparable.csv")
     if comp is not None:
         c = comp[comp["product"].astype(bool) & (comp["rank"] <= k)].sort_values(["territory_id", "rank"])
-        out["sim"] = c.groupby("territory_id").apply(
-            lambda g: [[int(i), int(round(km))] for i, km in zip(g["other_id"], g["km"], strict=True)],
-            include_groups=False,
-        )
+        pairs = lambda g: [[int(i), int(round(km))] for i, km in zip(g["other_id"], g["km"], strict=True)]  # noqa: E731
+        out["sim"] = c.groupby("territory_id").apply(pairs, include_groups=False)
+        b = comp[(comp["set"] == "B") & (comp["rank"] <= k)].sort_values(["territory_id", "rank"])
+        if len(b):
+            out["simb"] = b.groupby("territory_id").apply(pairs, include_groups=False)
     seed = d.opt("node_seed.csv")
     if seed is not None:
         for kind, col in (("variant", "rob_rule"), ("seed", "rob_seed")):
@@ -1279,7 +1459,8 @@ def mo_json(mo: pd.DataFrame) -> dict:
     """Колонки ``mo.json`` (массивы одинаковой длины)."""
     cols = [
         "id", "n", "ns", "r", "k", "role", "node", "why_null", "t", "t23", "t24", "win", "st", "rel",
-        "hq", "hr", "nx", "ny", "pop", "wp", "b23", "b24", "why", "rh", "nb", "sim", "rob_rule", "rob_seed",
+        "hq", "hr", "nx", "ny", "pop", "wp", "ser", "b23", "b24", "why", "rh", "nb", "sim", "simb",
+        "rob_rule", "rob_seed",
         "second", "var", "rival",
     ]  # fmt: skip
     ints = {"id", "node", "t", "t23", "t24", "hq", "hr", "nx", "ny", "pop", "second", "rival"}
@@ -1472,18 +1653,7 @@ def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> 
             for r in ctr.to_dict("records")
         ]
     )
-    pl = d.opt("t3_placebo.csv")
-    t3 = (f.get("t3") or {}).get("main") or {}
-    out["t3"] = None
-    if pl is not None and t3:
-        main = pl[(pl["run"] == "main") & (pl["scheme"] == "main")]
-        out["t3"] = {
-            "placebo": [int(x) for x in main["n_reliable"]],
-            "p95": _num(t3.get("p95"), 2),
-            "median": _num(t3.get("median"), 2),
-            "observed": _num(t3.get("n_reliable"), 0),
-            "passed": t3.get("passed"),
-        }
+    out["t3"] = t3_checks(d)
     ami = d.opt("t5_ami.csv")
     out["t5"] = (
         None
@@ -1522,6 +1692,45 @@ def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> 
     out["layout"] = dict(layout)
     out["hex"] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in hm.stats.items()}
     return out
+
+
+def t3_checks(d: SiteData) -> dict | None:
+    """T3 для главы 5 по ``robustness.main_run_verdict: check_section``: итоговый вердикт — по R1 (прогон,
+    давший наименьший вердикт, ``facts.r1.source_run``; его числа — те, что этап 5 сказал в тексте T3),
+    рядом — основной расчёт (``facts.t3.main``) с пометкой ``unstable_label``, если он выше итогового.
+    Облака плацебо обоих прогонов — из ``t3_placebo.csv`` (scheme = main); ничего не пересчитывается."""
+    f = d.facts
+    pl = d.opt("t3_placebo.csv")
+    main = (f.get("t3") or {}).get("main") or {}
+    if pl is None or not main:
+        return None
+    test = "T3_reliable_placebo"
+    r1 = f.get("r1") or {}
+    src = (r1.get("source_run") or {}).get(test, "main")
+    v_final = (f.get("verdicts_final") or {}).get(test)
+    v_main = (f.get("verdicts_main") or {}).get(test, f.get("t3_verdict"))
+    cloud = lambda run: [int(x) for x in pl[(pl["run"] == run) & (pl["scheme"] == "main")]["n_reliable"]]  # noqa: E731
+    said = read_verdicts(d.cfg, f).by_test.get(test, {})
+    unstable = v_main != v_final
+    return {
+        "verdict_final": v_final,
+        "verdict_main": v_main,
+        "unstable": unstable,
+        "unstable_label": r1.get("unstable_label") if unstable else None,
+        "final": {
+            "run": src,
+            "placebo": cloud(src),
+            "text_fields": said,  # числа, которые этап 5 подставил в текст T3 (дословно)
+        },
+        "main": {
+            "run": "main",
+            "placebo": cloud("main"),
+            "p95": _num(main.get("p95"), 2),
+            "median": _num(main.get("median"), 2),
+            "observed": _num(main.get("n_reliable"), 0),
+            "passed": main.get("passed"),
+        },
+    }
 
 
 def flows_matrix(d: SiteData, mo: pd.DataFrame) -> dict:
@@ -1651,6 +1860,8 @@ def download_csvs(mo: pd.DataFrame, types: list[dict], checks: Mapping, story: M
             for a, b in [k.split("-")]
         ]
     )
+    for col in ("node_id", "type", "type_2023", "type_2024", "pop_avg"):
+        m[col] = pd.array(m[col].round() if col == "pop_avg" else m[col], dtype="Int64")
     enc = lambda df: df.to_csv(index=False).encode("utf-8-sig")  # noqa: E731
     readme = (
         "Выгрузки лендинга munnet. Данные: СберИндекс (CC BY-SA 4.0), Росстат и ФНС в обработке "
@@ -1682,25 +1893,157 @@ $data_inline
 """
 
 
+def _t(s: Any) -> str:
+    """Текст для HTML: экранирование и типографика ru-text (только показ)."""
+    return nbsp(_esc(s)) if s else ""
+
+
+def _dot(s: str) -> str:
+    return s if s.rstrip().endswith((".", "!", "?", "…")) else s + "."
+
+
+def _glosses(gloss: Mapping[str, str], texts: Iterable[str]) -> list[str]:
+    """Пояснения терминов, которые встречаются в текстах (подстрока без регистра, ё = е)."""
+    hay = norm(" ".join(texts))
+    return [g for k, g in gloss.items() if norm(k) in hay]
+
+
+def fig_html(t: int | None, shapes: Mapping[str, str]) -> str:
+    if t is None:
+        return '<i class="fig fig-t0" aria-hidden="true"></i>'
+    return f'<i class="fig fig-t{int(t)}" aria-hidden="true">{_esc(shapes.get(str(int(t)), ""))}</i>'
+
+
+def screen0_html(
+    story: Mapping, meta: Mapping, hexgrid: Mapping | None, mo: pd.DataFrame | None
+) -> dict[str, str]:
+    """Экран 0 — вписан в HTML при сборке (§5, §7: без JS читаются вопрос, заголовок, пункты, оговорка, охват,
+    ключ карты, примеры и подпись о смещении ячеек); JS только добавляет поведение. Тексты этапа 5 —
+    дословно (типографика ru-text — только при показе), короткие заголовки — site.headlines."""
+    s0 = story["screen0"]
+    lab = s0.get("labels") or {}
+    gloss = s0.get("gloss") or {}
+    how = lab.get("how_checked", "Как проверяли")
+    shapes = story["view"]["shapes"]
+    names = story["names"]["final"]
+    out: dict[str, str] = {}
+    banner = meta.get("banner")
+    out["banner_html"] = (
+        f'<div class="banner" id="banner" role="status">{_t(banner)}</div>'
+        if banner
+        else '<div class="banner" id="banner" role="status" hidden></div>'
+    )
+    head = []
+    if s0.get("intro"):
+        head.append(f'<p class="intro" id="answer-intro">{_t(_dot(s0["intro"]))}</p>')
+    head.append(f'<h1 id="answer-title">{_t(s0["title"])}</h1>')
+    head.append(f'<p class="lead" id="answer-lead">{_t(s0["lead"])}</p>')
+    head += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, [s0["title"], s0["lead"]])]
+    out["answer_head"] = "\n".join(head)
+
+    items = []
+    for i, (hs, texts) in enumerate(zip(s0.get("point_heads") or [], s0["points"], strict=False)):
+        body = []
+        if i == 0 and s0.get("question"):
+            q = lab.get("question_label", "Вопрос")
+            body.append(f'<p class="q"><b>{_t(q)}.</b> {_t(s0["question"])}</p>')
+        body += [f"<p>{_t(x)}</p>" for x in texts]
+        body += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, texts)]
+        heads = "".join(f'<span class="pt-h">{_t(_dot(h))}</span> ' for h in hs).strip()
+        items.append(
+            f'<li class="pt{" extra" if i else ""}"><p class="pt-head">{heads}</p>'
+            f'<details class="how"><summary>{_t(how)}</summary>{"".join(body)}</details></li>'
+        )
+    notes = []
+    cav = list(s0.get("caveat") or [])
+    if s0.get("caveat_head") or cav:
+        body = "".join(f"<p>{_t(x)}</p>" for x in cav) + "".join(
+            f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, cav)
+        )
+        notes.append(
+            f'<div class="caveat"><p><b>{_t(lab.get("caveat_label", "Оговорка"))}.</b> '
+            f"{_t(_dot(s0.get('caveat_head') or ''))}</p>"
+            + (f'<details class="how"><summary>{_t(how)}</summary>{body}</details>' if body else "")
+            + "</div>"
+        )
+    if s0.get("coverage"):
+        notes.append(f'<p class="coverage">{_t(_dot(s0["coverage"]))}</p>')
+    scope = " ".join(_dot(x) for x in (s0.get("scope"), s0.get("regions_note")) if x)
+    notes.append(f'<p class="scope" id="answer-scope">{_t(scope)}</p>')
+    out["answer_findings"] = (
+        '<div class="findings">'
+        f'<ol class="points" id="answer-points" aria-label="Три вывода">{"".join(items)}</ol>'
+        f'<div class="notes">{"".join(notes)}</div></div>'
+    )
+    sh = (hexgrid or {}).get("shift_km") or {}
+    out["map_shift"] = (
+        f" (медианное смещение ячейки — {style.fmt_num(sh['median'])} км, "
+        f"наибольшее — {style.fmt_num(sh['max'])} км)"
+        if sh
+        else ""
+    )
+    key, ex = [], []
+    if mo is not None:
+        nodes = mo[mo["role"].isin(["territorial", "city"])]
+        counts = nodes["t"].value_counts()
+        for t in story["view"]["legend_order"]:
+            nm = names.get(str(t), f"Тип {t}")
+            key.append(
+                f"<li>{fig_html(int(t), shapes)}<span>{_t(nm)} · "
+                f"{style.fmt_num(int(counts.get(int(t), 0)))}</span></li>"
+            )
+        n0 = int((mo["role"] == "untyped").sum())
+        key.append(f"<li>{fig_html(None, shapes)}<span>нет типа · {style.fmt_num(n0)}</span></li>")
+        rows = mo.set_index("id")
+        for i in s0.get("examples") or []:
+            if i in rows.index:
+                r = rows.loc[i]
+                nm = cap(str(r["ns"] if isinstance(r["ns"], str) else r["n"]))
+                ex.append(
+                    f'<a class="ex" href="#mo={int(i)}" data-go="{int(i)}">'
+                    f"{fig_html(r['t'] if pd.notna(r['t']) else None, shapes)}"
+                    f"<span>{_t(nm)}<br><small>{_t(r['r'])}</small></span></a>"
+                )
+    out["map_key"] = "".join(key)
+    out["examples_html"] = "".join(ex)
+    bits = [f"seed {meta['seed']}"] if meta.get("seed") is not None else []
+    if meta.get("sha"):
+        bits.append(f"код — коммит {meta['sha']}")
+    if meta.get("facts_sha256"):
+        bits.append(f"выводы — facts.json sha256 {str(meta['facts_sha256'])[:12]}")
+    out["meta_line"] = _t("Воспроизводимость: " + " · ".join(bits)) if bits else ""
+    return out
+
+
 def _json_script(obj: Any) -> str:
     """JSON для ``<script type="application/json">``: «</» экранируется, чтобы не закрыть тег."""
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 
 
 def git_sha() -> str | None:
+    """Коммит кода страницы; если код или конфиг изменены после коммита — с пометкой «+изменения»
+    (страница собрана не из того, что лежит в коммите)."""
     import subprocess
 
     try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--short=12", "HEAD"], capture_output=True, text=True, timeout=10, check=True
-        )
-        return out.stdout.strip() or None
+        run = lambda *a: subprocess.run(  # noqa: E731
+            ["git", *a], capture_output=True, text=True, timeout=10, check=True
+        ).stdout.strip()
+        sha = run("rev-parse", "--short=12", "HEAD") or None
+        dirty = run("status", "--porcelain", "--untracked-files=no", "--", "src", "configs")
+        return f"{sha}+изменения" if (sha and dirty) else sha
     except (OSError, subprocess.SubprocessError):
         return None
 
 
 def render_html(
-    story: Mapping, names: Mapping, meta: Mapping, svg: str, data: Mapping[str, Any], inline: bool
+    story: Mapping,
+    names: Mapping,
+    meta: Mapping,
+    svg: str,
+    data: Mapping[str, Any],
+    inline: bool,
+    parts: Mapping[str, str] | None = None,
 ) -> tuple[bytes, int]:
     """``index.html`` из ``src/munnet/templates/landing.html`` (``string.Template``) со встроенными CSS и JS.
     Возвращает байты страницы и размер встроенных данных (для бюджета первого экрана)."""
@@ -1709,6 +2052,7 @@ def render_html(
     tdir = Path(__file__).parent / "templates"
     html_p = tdir / "landing.html"
     tpl = html_p.read_text(encoding="utf-8") if html_p.exists() else FALLBACK_TEMPLATE
+    tpl = nbsp(tpl)  # ru-text и для статичного текста шаблона (подстановки $… и теги не затрагиваются)
     css = (tdir / "landing.css").read_text(encoding="utf-8") if (tdir / "landing.css").exists() else ""
     js = (tdir / "landing.js").read_text(encoding="utf-8") if (tdir / "landing.js").exists() else ""
     blocks = (
@@ -1721,7 +2065,21 @@ def render_html(
         else ""
     )
     title = f"{story['screen0']['title']} — munnet"
+    if meta.get("banner"):
+        title = f"{meta['banner']}. {title}"
+    parts = dict(parts or {})
+    for k in (
+        "banner_html",
+        "answer_head",
+        "answer_findings",
+        "map_shift",
+        "map_key",
+        "examples_html",
+        "meta_line",
+    ):
+        parts.setdefault(k, "")
     page = Template(tpl).substitute(
+        **parts,
         title=_esc(title),
         lang="ru",
         css=css,
@@ -1809,7 +2167,6 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     meta = {
         "seed": cfg["seed"],
         "sha": git_sha(),
-        "date": pd.Timestamp.now(tz="Europe/Moscow").strftime("%Y-%m-%d"),
         "mode": mode.name,
         "banner": mode.banner,
         "licenses": LICENSES,
@@ -1823,9 +2180,14 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         "methods": methods,
         "hexgrid": hexgrid,
     }
+    story["screen0"]["examples"] = screen_examples(types, story)
     svg = first_screen_svg(d, hm, hexgrid, mo, story)
+    bad = lint_templates(cfg, story, svg)
+    if bad:
+        raise QCError("site: линт шаблона: " + "; ".join(bad[:10]))
     inline = bool(cfg["site"]["build"].get("inline_all", True))
-    html, inline_bytes = render_html(story, names_index(mo), meta, svg, data, inline)
+    parts = screen0_html(story, meta, hexgrid, mo)
+    html, inline_bytes = render_html(story, names_index(mo), meta, svg, data, inline, parts)
     payloads: dict[str, bytes] = {"index.html": html, "data/story.json": dumps(story)}
     for k, v in data.items():
         if v is not None:

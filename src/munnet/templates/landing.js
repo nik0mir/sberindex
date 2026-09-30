@@ -34,6 +34,9 @@ function rowsOf(x) {
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+// ru-text: неразрывный пробел после однобуквенных слов и перед тире (как landing.nbsp; только показ)
+const NB = "\u00a0";
+const nbsp = (s) => String(s ?? "").replace(/(^|[\s>(«])([вксоуиаяВКСОУИАЯ]) /g, "$1$2" + NB).replace(/ — /g, NB + "— ");
 function plural(n, one, few, many) {
   const a = Math.abs(n) % 100, b = a % 10;
   if (a > 10 && a < 20) return many;
@@ -71,53 +74,25 @@ const typeHTML = (t) => `${fig(t)}<span>${esc(typeName(t))}</span>`;
 
 // --- плашка режима и подвал -------------------------------------------------------------------------------
 {
-  const banner = meta.banner || (story.meta || {}).banner;
-  if (banner) {
-    const b = $("#banner");
-    b.textContent = banner;
-    b.hidden = false;
-    doc.documentElement.style.setProperty("--banner-h", b.offsetHeight + "px");
-  }
-  const bits = [];
-  if (meta.seed != null) bits.push(`seed ${meta.seed}`);
-  if (meta.sha) bits.push(`коммит ${meta.sha}`);
-  if (meta.date) bits.push(`собрано ${meta.date}`);
-  if (bits.length) $("#meta-line").textContent = "Воспроизводимость: " + bits.join(" · ");
+  const b = $("#banner"); // текст плашки вписан при сборке; здесь только её высота для липкой шапки
+  if (b && !b.hidden) doc.documentElement.style.setProperty("--banner-h", b.offsetHeight + "px");
 }
 
-// --- экран 0: тексты слотов (landing.py может вписать их заранее — тогда не трогаем) --------------------------
-function fillSlot(sel, text) { const el = $(sel); if (el && !el.textContent.trim() && text) el.textContent = text; }
-fillSlot("#answer-question", S0.question);
-fillSlot("#answer-title", S0.title);
-fillSlot("#answer-lead", S0.lead);
-fillSlot("#answer-scope", S0.scope);
+// --- экран 0: тексты вписаны при сборке (landing.screen0_html); на телефоне пункты 2–3 — по кнопке --------------
 {
   const ol = $("#answer-points");
-  if (ol && !ol.children.length && Array.isArray(S0.points)) {
-    S0.points.forEach((pt, i) => {
-      const parts = Array.isArray(pt) ? pt : [pt];
-      const li = doc.createElement("li");
-      if (i > 0) li.className = "extra";
-      li.innerHTML = `<span>${esc(parts[0])}</span>` + (parts.length > 1
-        ? `<details><summary>Подробнее</summary>${parts.slice(1).map((p) => `<p>${esc(p)}</p>`).join("")}</details>` : "");
-      ol.appendChild(li);
-      if (i === 0 && S0.points.length > 1) {
-        const tl = doc.createElement("li");
-        tl.className = "points-more";
-        tl.innerHTML = `<button type="button" class="tool tool-text" aria-expanded="false">Ещё ${S0.points.length - 1 === 2 ? "два вывода" : "выводы"}</button>`;
-        tl.querySelector("button").addEventListener("click", (e) => {
-          const on = ol.classList.toggle("show-extra");
-          e.currentTarget.setAttribute("aria-expanded", String(on));
-          e.currentTarget.textContent = on ? "Свернуть" : "Ещё два вывода";
-        });
-        ol.appendChild(tl);
-      }
+  const extra = ol ? ol.querySelectorAll("li.extra").length : 0;
+  if (ol && extra) {
+    const tl = doc.createElement("li");
+    tl.className = "points-more";
+    const label = `Ещё ${extra === 2 ? "два вывода" : "выводы"}`;
+    tl.innerHTML = `<button type="button" class="tool tool-text" aria-expanded="false">${label}</button>`;
+    tl.querySelector("button").addEventListener("click", (e) => {
+      const on = ol.classList.toggle("show-extra");
+      e.currentTarget.setAttribute("aria-expanded", String(on));
+      e.currentTarget.textContent = on ? "Свернуть" : label;
     });
-  }
-  const cv = $("#answer-caveat");
-  if (cv && !cv.children.length) {
-    const items = [...(S0.caveat || []), ...(S0.t6_caveat ? [S0.t6_caveat] : [])];
-    cv.innerHTML = items.map((p) => `<p>${esc(p)}</p>`).join("") + (S0.coverage ? `<p class="coverage">${esc(S0.coverage)}.</p>` : "");
+    ol.children[0].after(tl);
   }
 }
 
@@ -186,7 +161,7 @@ const MAX_OPTS = 12;
     const q = norm(input.value);
     if (!q) { close(); status.textContent = ""; return; }
     list.innerHTML = items.length
-      ? items.map((r, i) => `<li role="option" id="opt-${i}" data-id="${r.id}" aria-selected="false" aria-label="${esc(optLabel(r))}">${fig(r.t)}<span class="opt-name">${esc(r.n)}</span><span class="opt-meta">${esc(r.r)} — ${esc(typeName(r.t))}</span></li>`).join("")
+      ? nbsp(items.map((r, i) => `<li role="option" id="opt-${i}" data-id="${r.id}" aria-selected="false" aria-label="${esc(optLabel(r))}">${fig(r.t)}<span class="opt-name">${esc(r.n)}</span><span class="opt-meta">${esc(r.r)} — ${esc(typeName(r.t))}</span></li>`).join(""))
       : '<li class="empty" role="option" aria-disabled="true">Ничего не нашлось. Попробуйте начало названия без «район» или «округ»</li>';
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
@@ -298,7 +273,7 @@ function simList(pairs, numbered) {
   if (!pairs || !pairs.length) return "";
   return `<ol class="sim ${numbered ? "numbered" : "plain"}">` + pairs.map(([id, km]) => {
     const o = MO.get(id) || { n: "№ " + id, r: "", t: null };
-    return `<li><button type="button" data-go="${id}">${fig(o.t)}<span><span class="nm">${esc(o.n)}</span><span class="rg">${esc(o.r)} — ${esc(typeName(o.t))}</span></span><span class="km">${nf.format(km)} км</span></button></li>`;
+    return `<li><button type="button" data-go="${id}">${fig(o.t)}<span><span class="nm">${esc(cap1(o.ns || o.n))}</span><span class="rg">${esc(o.r)} — ${esc(typeName(o.t))}</span></span><span class="km">${nf.format(km)} км</span></button></li>`;
   }).join("") + "</ol>";
 }
 function squares(k, n) {
@@ -362,86 +337,100 @@ function rhythmChart(rh) {
   return `<div class="rh"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Свой годовой ритм трат по месяцам относительно общего календарного ритма">${g}</svg><span class="rh-zero">общий ритм</span></div>
     <div class="axis-words">${MONTHS.map((m) => `<span>${m}</span>`).join("")}</div>`;
 }
-// Итоговый тип считается по 24 месяцам сразу, типы 2023 и 2024 — по годовым окнам: они могут не совпадать.
-const FINAL_NOTE = "Итоговый тип считается по всем 24 месяцам сразу, поэтому может отличаться от типа отдельного года";
+// 2023 → 2024: типы годовых окон и итоговый тип (по всем 24 месяцам) говорятся одной строкой, без путаницы
 function statusLine(r) {
   if (r.t23 == null || r.t24 == null) return "";
-  const note = r.t != null && (r.t !== r.t23 || r.t !== r.t24) ? `<p class="status">${FINAL_NOTE}</p>` : "";
-  if (r.t23 === r.t24) return `<p class="status">Тип в обоих годах один и тот же</p>` + note;
-  if (T3 === "not" || !r.rel) return `<p class="status noise">${esc(CARD.status_noise || "Смена типа в пределах шума")}</p>` + note;
-  return `<p class="status solid">${esc(CARD.status_reliable || "Смена типа: обе половины года согласны")}</p>` + note;
+  const T = (t) => `тип ${t}`;
+  if (r.t23 === r.t24) {
+    if (r.t == null || r.t === r.t23) return `<p class="status">В 2023 и 2024 годах тип не менялся.</p>`;
+    return `<p class="status">В 2023 и 2024 годах по отдельности — ${T(r.t23)}. Итоговый ${T(r.t)} посчитан по всем 24 месяцам сразу, поэтому может отличаться от типа отдельного года.</p>`;
+  }
+  const noise = T3 === "not" || !r.rel;
+  let h = noise
+    ? `<p class="status noise">${esc(CARD.status_noise || "Смена типа в пределах шума")}.</p>`
+    : `<p class="status solid">${esc(CARD.status_reliable || "Смена типа: обе половины года согласны")}.</p>`;
+  if (r.t != null && r.t !== r.t24) h += `<p class="status">Итоговый ${T(r.t)} посчитан по всем 24 месяцам сразу, поэтому может отличаться от типа отдельного года.</p>`;
+  return h;
+}
+function stabilityRows(nd) {
+  const rr = (s) => (s ? s.split("/").map(Number) : null);
+  const a = rr(nd.rob_rule), b = rr(nd.rob_seed);
+  const vars = (CARD.variants || {})[a ? String(a[1]) : ""] || "";
+  let h = "";
+  if (a) h += `<p class="kv">${squares(a[0], a[1])}Тот же тип в ${a[0]} из ${a[1]} ${plural(a[1], "варианта", "вариантов", "вариантов")} расчёта${vars ? ` (${esc(vars)})` : ""}</p>`;
+  if (b) h += `<p class="kv">${squares(b[0], b[1])}Тот же тип в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим начальным числом (seed)</p>`;
+  if (!a && !b) return "";
+  return h + `<span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span>`;
 }
 
 function renderCard(r) {
   const nd = nodeOf(r) || r;
   const ty = nd.t != null ? TYPES.get(nd.t) : null;
-  // у районов Москвы и Петербурга официальное название длинное — в заголовке короткое, полное — в подзаголовке
-  $("#card-title").textContent = r.role === "inner" && r.ns ? r.ns : r.n;
-  $("#card-sub").textContent = [r.r, r.role === "inner" ? r.n : r.k].filter(Boolean).join(" · ");
+  // заголовок — короткое имя с прописной, полное официальное название — в подзаголовке рядом с регионом
+  $("#card-title").textContent = cap1(r.ns || r.n);
+  $("#card-sub").textContent = [r.r, r.n !== (r.ns || r.n) ? r.n : r.k].filter(Boolean).join(" · ");
   let h = "";
 
-  // 1. Тип и почему
+  // 1. Тип
   h += `<section class="row" aria-labelledby="c-type"><h3 id="c-type">Тип</h3>`;
-  if (r.role === "inner") {
-    h += `<p class="kv">Район входит в узел-город ${esc(nd.n)}; тип — у города целиком.</p>`;
-  }
+  if (r.role === "inner") h += `<p class="kv">Район входит в узел-город ${esc(nd.n)}; тип — у города целиком.</p>`;
   if (nd.t == null) {
     const nodata = (CH.explore || {}).nodata || "Нет типа: ряд трат неполный (меньше 24 месяцев или с пропусками)";
-    const extra = r.why_null && !norm(nodata).includes(norm(r.why_null)) ? ` ${cap1(r.why_null)}.` : "";
-    h += `<div class="type-line">${fig(null)}<span>Нет типа</span></div><p class="cap">${esc(nodata)}.${esc(extra)}</p>`;
+    const why = r.why_null ? `Нет типа: ${r.why_null}` : nodata; // причина этого МО точнее общей строки
+    h += `<div class="type-line">${fig(null)}<span>Нет типа</span></div><p class="cap">${esc(why)}.</p>`;
   } else {
     h += `<div class="type-line">${typeHTML(nd.t)}</div><p class="cap">${esc(names.caption || "Относительно своего региона")}</p>`;
-    if (ty && ty.rule_text) h += `<p class="rule"><b>Правило словами:</b> ${esc(ty.rule_text)}</p>`;
-    if (ty && ty.why && nd.why) {
-      h += `<p class="cap" style="margin-top:8px"><b>Почему этот тип</b> — описание типа, не причина</p><div class="why">`;
-      ty.why.forEach((w, i) => {
-        h += `<div class="why-row"><span class="lab">${esc(w.label)}${w.kind === "place" ? "<small>признак места; в типах участвует слабо</small>" : "<small>часть корзины</small>"}</span>${strip(w, nd.why[i])}</div>`;
-      });
-      h += `</div><div class="axis-words" style="padding-left:calc(7.5em + 8px)"><span>← ниже</span><span>выше →</span></div>`;
-    }
     if (r.role === "inner") h += `<p><button type="button" class="tool tool-text" data-go="${nd.id}">Карточка города</button></p>`;
   }
   h += `</section>`;
 
-  // 2. Путь 2023 → 2024
+  // 2. Сопоставимые территории (набор продукта T7) или объяснение, почему их нет
   if (nd.t != null) {
-    h += `<section class="row" aria-labelledby="c-path"><h3 id="c-path">2023 → 2024</h3><dl class="path-line">`;
-    h += `<dt>2023</dt><dd>${typeHTML(nd.t23)}</dd><dt>2024</dt><dd>${typeHTML(nd.t24)}</dd></dl>`;
-    h += statusLine(nd) + `</section>`;
-  }
-
-  // 3. Сопоставимые территории (набор продукта T7)
-  if (nd.sim && nd.sim.length) {
     h += `<section class="row" aria-labelledby="c-sim"><h3 id="c-sim">${esc(cap1(view.set_name || "сопоставимые территории"))}</h3>`;
-    h += simList(nd.sim, true);
-    const cc = (CH.comparable || {}).similar_caption;
-    const ln = (CH.similarity || {}).lines || "Сходство трат, не поездки и не потоки";
-    h += `<p class="cap">${esc(ln)}. Номера — на карте${cc ? ". " + esc(cc) : ""}.</p></section>`;
+    if (nd.sim && nd.sim.length) {
+      h += simList(nd.sim, true);
+      const cc = (CH.comparable || {}).similar_caption;
+      h += `<p class="cap">${esc(CARD.lines || "Сходство трат, не поездки и не потоки")}. ${esc(CARD.shifted || "")}.${cc ? " " + esc(cc) + "." : ""}</p>`;
+    } else if (CARD.no_comparable) {
+      h += `<p class="kv">${esc(CARD.no_comparable)}.</p>`;
+    }
+    h += `</section>`;
   }
 
-  // Подробнее: 4–8
+  // 3. Устойчивость типа — сразу, раздельно (§3.9)
+  if (nd.t != null) {
+    const st = stabilityRows(nd);
+    if (st) h += `<section class="row" aria-labelledby="c-rob"><h3 id="c-rob">Устойчивость типа</h3>${st}</section>`;
+  }
+
+  // Подробнее: 2023 → 2024, корзина, окна, «почему», соседи по региону, ритм, пометки
   const moreAt = h.length;
   h += `<details class="more"><summary>Подробнее</summary>`;
   const moreHead = h.length;
-  if (nd.t != null) {
-    h += `<section class="row" aria-labelledby="c-rob"><h3 id="c-rob">Устойчивость типа</h3>`;
-    const rr = (s) => (s ? s.split("/").map(Number) : null);
-    const a = rr(nd.rob_rule), b = rr(nd.rob_seed);
-    if (a) h += `<p class="kv">${squares(a[0], a[1])}Тот же тип в ${a[0]} из ${a[1]} ${plural(a[1], "варианта", "вариантов", "вариантов")} правила рёбер и состава узлов</p>`;
-    if (b) h += `<p class="kv">${squares(b[0], b[1])}Тот же тип в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим seed</p>`;
-    if (!a && !b) h += `<p class="kv">Нет данных об устойчивости</p>`;
-    h += `<span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span>`;
-    h += `<p class="kv" style="margin-top:10px">${nd.second != null ? `На границе с типом ${typeHTML(nd.second)}` : "Не на границе типов"}</p></section>`;
-  }
-  if (nd.simb && nd.simb.length) {
-    h += `<section class="row" aria-labelledby="c-simb"><h3 id="c-simb">Соседи по своему региону</h3>${simList(nd.simb, false)}<p class="cap">Ближайшие по расстоянию в своём регионе — для сравнения с набором выше</p></section>`;
+  if (nd.t != null && nd.t23 != null) {
+    h += `<section class="row" aria-labelledby="c-path"><h3 id="c-path">Тип по годам</h3><dl class="path-line">`;
+    h += `<dt>2023</dt><dd>${typeHTML(nd.t23)}</dd><dt>2024</dt><dd>${typeHTML(nd.t24)}</dd></dl>`;
+    h += statusLine(nd) + `</section>`;
   }
   const bk = nd.b24 || nd.b23;
   if (bk) {
     h += `<section class="row basket" aria-labelledby="c-bk"><h3 id="c-bk">Корзина ${nd.b24 ? "2024" : "2023"} года относительно своего региона</h3>${basketChart(bk, nd.t)}<p class="cap">Серые полосы — муниципалитет, чёрная засечка — медиана типа.</p></section>`;
   }
   if (nd.win) {
-    h += `<section class="row path" aria-labelledby="c-win"><h3 id="c-win">Тип по окнам</h3>${pathChart(nd.win, nd.st)}${statusLine(nd)}</section>`;
+    h += `<section class="row path" aria-labelledby="c-win"><h3 id="c-win">Тип по окнам</h3>${pathChart(nd.win, nd.st)}</section>`;
+  }
+  if (ty && ty.why && nd.why) {
+    h += `<section class="row" aria-labelledby="c-why"><h3 id="c-why">Чем отличается тип</h3><p class="cap">Описание типа, не причина</p><div class="why">`;
+    ty.why.forEach((w, i) => {
+      h += `<div class="why-row"><span class="lab">${esc(w.label)}<small>${w.kind === "place" ? "признак места" : "часть корзины"}</small></span>${strip(w, nd.why[i])}</div>`;
+    });
+    h += `</div><div class="axis-words" style="padding-left:calc(7.5em + 8px)"><span>← ниже</span><span>выше →</span></div></section>`;
+  }
+  if (nd.t != null && nd.second != null) {
+    h += `<p class="kv">Ближе к центру типа ${typeHTML(nd.second)}, чем к центру своего</p>`;
+  }
+  if (nd.simb && nd.simb.length) {
+    h += `<section class="row" aria-labelledby="c-simb"><h3 id="c-simb">Соседи по своему региону</h3>${simList(nd.simb, false)}<p class="cap">Ближайшие по расстоянию в своём регионе — для сравнения с набором выше.</p></section>`;
   }
   if (nd.t != null) {
     h += `<section class="row rhythm" aria-labelledby="c-rh"><h3 id="c-rh">Свой годовой ритм</h3>`;
@@ -450,12 +439,12 @@ function renderCard(r) {
   }
   const flags = [];
   if (r.role === "city") flags.push(`Узел-город: ${nf.format(CITY_N.get(r.id) || 0)} районов считаются одним муниципалитетом`);
-  if (r.wb) flags.push("Зарплаты и НДФЛ — по месту работы, а не по месту жительства");
-  if (r.ser && r.ser !== "full") flags.push("Ряд трат неполный");
+  if (r.wp) flags.push("Зарплаты и НДФЛ — по месту работы, а не по месту жительства");
+  if (r.ser && r.ser !== "full" && nd.t != null) flags.push("Ряд трат неполный");
   if (flags.length) h += `<section class="row" aria-labelledby="c-fl"><h3 id="c-fl">Пометки</h3><ul class="flags">${flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></section>`;
   h = h.length === moreHead ? h.slice(0, moreAt) : h + "</details>";
   h += `<p class="src">${SRC}</p>`;
-  cardBody.innerHTML = h;
+  cardBody.innerHTML = nbsp(h);
 }
 cardBody.addEventListener("click", (e) => {
   const b = e.target.closest("[data-go]");
@@ -492,12 +481,12 @@ const pxPerUnit = () => { const m = svg.getScreenCTM(); return m && m.a ? m.a : 
 // подписи и номера на карте — в экранных пикселях при любом масштабе: --u = единиц viewBox на пиксель
 function scaleLabels() { svg.style.setProperty("--u", (1 / pxPerUnit()).toFixed(3)); }
 function cellLabel(c) {
-  if (c.role === "city") return `${c.n} — город целиком, ${nf.format(CITY_N.get(c.id) || 0)} районов — ${typeName(c.t)}`;
-  return `${c.n} — ${c.r} — ${typeName(c.t)}`;
+  if (c.role === "city") return `${cap1(c.ns || c.n)} — город целиком, ${nf.format(CITY_N.get(c.id) || 0)} районов — ${typeName(c.t)}`;
+  return `${cap1(c.ns || c.n)} — ${c.r} — ${typeName(c.t)}`;
 }
 function showTip(c, ev) {
   const fr = frame.getBoundingClientRect();
-  tip.innerHTML = `${fig(c.t)} <b>${esc(c.n)}</b><br><span class="tip-meta">${esc(c.role === "city" ? "город целиком, " + nf.format(CITY_N.get(c.id) || 0) + " районов" : c.r)} — ${esc(typeName(c.t))}</span>`;
+  tip.innerHTML = nbsp(`${fig(c.t)} <b>${esc(cap1(c.ns || c.n))}</b><br><span class="tip-meta">${esc(c.role === "city" ? "город целиком, " + nf.format(CITY_N.get(c.id) || 0) + " районов" : c.r)} — ${esc(typeName(c.t))}</span>`);
   tip.hidden = false;
   const x = ev.clientX - fr.left, y = ev.clientY - fr.top;
   const w = tip.offsetWidth, h = tip.offsetHeight;
@@ -549,9 +538,6 @@ function initMap(hexgrid) {
     cancelAnimationFrame(rz);
     rz = requestAnimationFrame(() => { scaleLabels(); if (current != null) drawEgo(MO.get(current)); });
   }).observe(svg);
-  if (hexgrid && hexgrid.shift_km) {
-    $("#map-shift").textContent = ` (медианное смещение ячейки — ${nf.format(hexgrid.shift_km.median)} км, наибольшее — ${nf.format(hexgrid.shift_km.max)} км)`;
-  }
   const summary = [S0.scope, "Цвет и фигура — тип"].filter(Boolean).join(". ");
   svg.setAttribute("aria-label", summary);
   svg.removeAttribute("aria-labelledby");
@@ -613,6 +599,8 @@ function clearEgo() {
   const g = svg && svg.querySelector(".ego");
   if (g) g.remove();
   if (svg) svg.classList.remove("has-ego");
+  const note = $("#ego-note");
+  if (note) note.hidden = true;
 }
 // эго-сеть выбранного МО: акцентная обводка, прямые линии к сопоставимым территориям и их номера
 function drawEgo(r) {
@@ -643,11 +631,17 @@ function drawEgo(r) {
   const labels = svg.querySelector(".labels");
   svg.insertBefore(g, labels || null);
   svg.classList.add("has-ego"); // выноски примеров прячутся, пока на карте эго-сеть
+  const note = $("#ego-note");
+  if (note && sim.length) {
+    note.innerHTML = nbsp(`<b>${esc(cap1(nd.ns || nd.n))}</b>, номера 1–${sim.length} — ${esc(view.set_name || "")}. Линии — ${esc((CARD.lines || "").replace(/^С/, "с"))}. ${esc(CARD.shifted || "")}.`);
+    note.hidden = false;
+  }
 }
 
 // ключ типов под картой (на телефоне выноски на карте нечитаемы и скрыты)
 function renderKey() {
   const ul = $("#map-key");
+  if (ul.children.length) return; // вписан при сборке
   const order = view.legend_order || [...TYPES.keys()];
   const nd = (CH.explore || {}).nodata ? "нет типа" : "нет типа";
   ul.innerHTML = order.map((t) => {
@@ -659,6 +653,7 @@ function renderKey() {
 // кнопки-примеры: story.screen0.examples (правило examples в landing.py) или первый типичный пример типа
 function renderExamples() {
   const box = $("#examples");
+  if (box.children.length) { box.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) { e.preventDefault(); go(Number(b.dataset.go)); } }); return; }
   let ids = Array.isArray(S0.examples) ? S0.examples : [];
   if (!ids.length) {
     for (const t of view.legend_order || [...TYPES.keys()]) {
@@ -682,7 +677,8 @@ function renderExamples() {
     if (r.role === "inner") CITY_N.set(r.node, (CITY_N.get(r.node) || 0) + 1);
   }
   initMap(hexgrid);
-  if (HEX) for (const r of MO.values()) if (r.hq != null && r.role !== "inner" && (r.id === r.node || r.role === "city")) CELLS.set(r.hq + "," + r.hr, r);
+  // ячейка — у каждого узла сети и у каждого МО без типа (штриховка тоже открывает карточку с причиной)
+  if (HEX) for (const r of MO.values()) if (r.hq != null && r.role !== "inner") CELLS.set(r.hq + "," + r.hr, r);
   renderKey();
   renderExamples();
   if (!MO.size) {
