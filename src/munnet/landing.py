@@ -562,6 +562,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "lead": [H["descriptive"]["coverage"]] + ([H["T6_caveat"]["caveat"]] if v["caveat"] else []),
             "text": texts["T6_bank_coverage"],
             "items": limits_items(TX.get("limits") or {}, numbers, scope, screen0.get("regions_note")),
+            "key": limits_key(TX.get("limits_key"), texts["T6_bank_coverage"], facts["names_final"]),
         },
         "explore": {"title": H["descriptive"]["explore"], "nodata": A["honesty"]["nodata"]},
         "method": {
@@ -697,6 +698,43 @@ def limits_items(
         if not t or not all(vals.get(s) for s in _slots(t)):
             continue
         out[k] = fill(t, vals)
+    return out
+
+
+_TYPE_REF = re.compile(r"\bтип(?:а|е|у|ом)?\s+(\d+)\b")
+
+
+def limits_key(tpl: Mapping | None, text: str, names: Mapping[str, str]) -> str | None:
+    """«Как читать» рядом с текстом исхода T6 (порция 6e): номера типов, которые называет текст исхода, —
+    названиями ``names.final``; «МО» и «ε²» — только если они есть в тексте. Текст исхода не меняется."""
+    if not tpl or not text:
+        return None
+    nums = sorted({int(n) for n in _TYPE_REF.findall(text) if str(int(n)) in names})
+    bits = [fill(str(tpl["type"]), {"n": str(n), "name": str(names[str(n)])}) for n in nums]
+    if re.search(r"\bМО\b", text) and tpl.get("mo"):
+        bits.append(str(tpl["mo"]))
+    if "ε²" in text and tpl.get("eps"):
+        bits.append(str(tpl["eps"]))
+    return f"{tpl.get('label', 'Как читать')}: " + "; ".join(bits) if bits else None
+
+
+def robust_texts(tpl: Mapping | None, r1: Mapping, variants: Sequence[Mapping] | None) -> dict[str, str]:
+    """Понятные формулировки пометок R1 на сайте (порция 6e): ``unstable_label`` — как есть из конфига,
+    ``circularity`` — с числами ARI из ``facts.r1.circularity``, если каждое совпадает с ARI одного
+    из вариантов ``checks.r1.variants`` (до двух знаков); иначе — прежний текст этапа 5. Блок interpret
+    не меняется."""
+    out: dict[str, str] = {}
+    if not tpl:
+        return out
+    if tpl.get("unstable_label") and r1.get("unstable_label"):
+        out["unstable_label"] = str(tpl["unstable_label"])
+    circ = str(r1.get("circularity") or "")
+    m = re.search(r"\(([0-9]+,[0-9]+(?: и [0-9]+,[0-9]+)*)\)", circ)
+    if tpl.get("circularity") and m:
+        got = [float(x.replace(",", ".")) for x in m.group(1).split(" и ")]
+        have = {round(float(v["ari"]), 2) for v in variants or [] if v.get("ari") is not None}
+        if got and all(round(x, 2) in have for x in got):
+            out["circularity"] = fill(str(tpl["circularity"]), {"aris": m.group(1)})
     return out
 
 
@@ -1534,7 +1572,8 @@ def build_mo_frame(d: SiteData, hm: HexMap, nxy: pd.DataFrame, values: pd.DataFr
         [[_num(v, 3) for v in row] for row in prof.to_numpy()], index=prof.index, dtype=object
     )
     mo["rh"] = by_node(rh_list)
-    mo["nb"] = by_node(main_neighbors(d))
+    # порция 6e: у районов столиц соседей по сети нет в данных страницы — карточка берёт их у узла-города
+    mo["nb"] = by_node(main_neighbors(d)).where(mo["role"] != "inner", None)
     extra = node_tables(d)
     for col, s in extra.items():
         mo[col] = by_node(s)
@@ -1548,20 +1587,24 @@ def _role_key(s: pd.Series) -> pd.Series:
 
 
 def main_neighbors(d: SiteData) -> pd.Series:
-    """До 10 соседей узла в основной сети корзин (``basket_dist``, ``is_main``) по убыванию веса."""
-    k = int(d.cfg["site"]["similarity_layout"]["n_net_neighbors"])
+    """До ``site.build.n_net_shown`` соседей узла в основной сети корзин (``basket_dist``, ``is_main``)
+    по убыванию веса — пары ``[номер, км по прямой]`` (``dist_km`` рёбер этапа network). Порция 6e:
+    переключатель «Соседи по сети корзин» в карточке и дуги к ним на карте."""
+    site = d.cfg["site"]
+    k = int(site["build"].get("n_net_shown") or site["similarity_layout"]["n_net_neighbors"])
     e = d.processed(
         "network_edges",
-        columns=["rule", "source", "target", "weight", "is_main"],
+        columns=["rule", "source", "target", "weight", "is_main", "dist_km"],
         filters=[("rule", "==", "basket_dist"), ("is_main", "==", True)],
     )
-    both = pd.concat(
-        [
-            e[["source", "target", "weight"]],
-            e.rename(columns={"source": "target", "target": "source"})[["source", "target", "weight"]],
-        ]
-    ).sort_values(["source", "weight", "target"], ascending=[True, False, True])
-    return both.groupby("source")["target"].apply(lambda s: [int(x) for x in s.head(k)])
+    cols = ["source", "target", "weight", "dist_km"]
+    both = pd.concat([e[cols], e.rename(columns={"source": "target", "target": "source"})[cols]]).sort_values(
+        ["source", "weight", "target"], ascending=[True, False, True]
+    )
+    pairs = lambda g: [  # noqa: E731
+        [int(t), int(round(km))] for t, km in zip(g["target"].head(k), g["dist_km"].head(k), strict=True)
+    ]
+    return both.groupby("source")[["target", "dist_km"]].apply(pairs)
 
 
 def node_tables(d: SiteData) -> dict[str, pd.Series]:
@@ -1671,7 +1714,11 @@ def check_r1_shares(r1: Mapping, uf: Mapping) -> list[str]:
 
 
 def useful_texts(
-    cfg: Config, tx: Mapping, useful_in: Mapping | None, mo_rows: Mapping[int, Mapping]
+    cfg: Config,
+    tx: Mapping,
+    useful_in: Mapping | None,
+    mo_rows: Mapping[int, Mapping],
+    t7_example: Mapping | None = None,
 ) -> dict | None:
     """Строки 6b из выходов usefulness (``site_useful``): доля случаев, оговорка о наборе R, пример, флаг."""
     if useful_in is None or not tx.get("useful"):
@@ -1682,7 +1729,7 @@ def useful_texts(
     words = cfg["usefulness"]["rule_share"]["words"]
     return {
         "use": site_useful.use_texts(ux, uf, words),
-        "example": site_useful.example_texts(ux, uf, mo_rows),
+        "example": site_useful.example_texts(ux, uf, mo_rows, t7_example=t7_example),
         "flag": site_useful.flag_summary(border.get("flag", ""), border.get("flag_most") or {}, uf)
         if border.get("flag")
         else None,
@@ -1938,12 +1985,14 @@ def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> 
     out["t1_order"] = [int(x) for x in (f.get("ladder") or {}).get("order") or []]  # порядок med_a в t1
     out["t3"] = t3_checks(d)
     ami = d.opt("t5_ami.csv")
+    # порция 6e: подписи делений для читателя (site.build.texts.partition_words), например «статус МО»
+    pw = dict(((d.cfg["site"]["build"].get("texts") or {}).get("partition_words")) or {})
     out["t5"] = (
         None
         if ami is None
         else {
             "ami": [
-                {"partition": p, "label": lab, "ami": _num(a, 4)}
+                {"partition": p, "label": pw.get(p, lab), "ami": _num(a, 4)}
                 for p, lab, a in sorted(
                     zip(ami["partition"], ami["label"], ami["ami"], strict=True), key=lambda x: -x[2]
                 )
@@ -2403,21 +2452,33 @@ def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[
     s0 = story["screen0"]
     hx = s0.get("hero") or {}
     out = {k: _t(hx.get(k, "")) for k in HERO_KEYS}
+    # порция 6e: «зачем» — сразу под заголовком; пояснение карты — два варианта: объёмная (высота столбика)
+    # и плоская (без WebGL, по file:// или по кнопке «Плоская карта»: высот нет); CSS показывает один
+    # (html.may-3d / .has-3d / .h0-flat); «почему верить» — после пояснения
+    lede_flat = hx.get("lede_flat")
     out["hero_head"] = (
         f'<p class="h0-kicker" id="hero-kicker">{_t(hx.get("kicker", ""))}</p>'
         f'<h1 id="hero-title">{_t(hx.get("title") or s0["title"])}</h1>'
-        f'<p class="h0-lede" id="hero-lede">{_t(hx.get("lede", ""))}</p>'
         + (f'<p class="h0-why" id="hero-why">{_t(_dot(hx["why"]))}</p>' if hx.get("why") else "")
+        + f'<p class="h0-lede{" lede-3d" if lede_flat else ""}" id="hero-lede">{_t(hx.get("lede", ""))}</p>'
+        + (f'<p class="h0-lede lede-flat" id="hero-lede-flat">{_t(lede_flat)}</p>' if lede_flat else "")
+        + (
+            f'<p class="h0-trust" id="hero-trust">{_t(_dot(hx["why_trust"]))}</p>'
+            if hx.get("why_trust")
+            else ""
+        )
     )
     colors = story["view"]["type_colors"]
     names = story["names"]["final"]
+    shapes = story["view"]["shapes"]
     leg = []
     if mo is not None:
         counts = mo[mo["role"].isin(["territorial", "city"])]["t"].value_counts()
         for t in story["view"]["legend_order"]:
+            # порция 6e: цвет ячейки и фигура типа (та же, что в главах, карточке и таблице)
             leg.append(
                 f'<li><i class="hx" style="--c:{_esc(colors.get(str(t), ""))}" aria-hidden="true"></i>'
-                f"<span>{_t(names.get(str(t), f'Тип {t}'))}</span>"
+                f"<span>{fig_html(int(t), shapes)}{_t(names.get(str(t), f'Тип {t}'))}</span>"
                 f"<b>{style.fmt_num(int(counts.get(int(t), 0)))}</b></li>"
             )
         n0 = int((mo["role"] == "untyped").sum())
@@ -2433,6 +2494,11 @@ def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[
         f'<ul class="h0-types">{"".join(leg)}</ul>'
         f'<div class="h0-hkey"><div class="h0-bars" aria-hidden="true">{bars}</div>'
         f"<p>{_t(_dot(hx.get('height_key', '')))}</p></div>"
+        + (
+            f'<a class="h0-tlink" href="#all-mo">{_t(hx["to_table"])} <span aria-hidden="true">↓</span></a>'
+            if hx.get("to_table")
+            else ""
+        )
     )
     note = _dot(hx.get("cells_note", "") + (map_shift or ""))
     out["hero_note"] = " ".join(x for x in (_t(note), _t(_dot(s0.get("coverage") or ""))) if x)
@@ -2747,6 +2813,19 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     story["card"]["var_words"] = var_words(d)
     types = build_types(d, mo, story, values)
     checks = build_checks(d, mo, layout, hm)
+    # порция 6e: понятные формулировки пометок R1 на сайте (site.build.texts.robust); facts.json не меняется
+    robust = robust_texts(
+        (cfg["site"]["build"].get("texts") or {}).get("robust"),
+        facts.get("r1") or {},
+        (checks.get("r1") or {}).get("variants"),
+    )
+    if robust.get("unstable_label"):
+        story["view"]["unstable_label"] = robust["unstable_label"]
+        checks["r1"]["unstable_label"] = robust["unstable_label"]
+        if (checks.get("t3") or {}).get("unstable_label"):
+            checks["t3"]["unstable_label"] = robust["unstable_label"]
+    if robust.get("circularity"):
+        checks["r1"]["circularity"] = robust["circularity"]
     if useful_in is not None:  # те же доли «тот же тип», что у usefulness.type_flag.per_variant (иначе код 3)
         bad = check_r1_shares(checks.get("r1") or {}, useful_in["facts"])
         if bad:
@@ -2783,7 +2862,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     mo_rows = {int(r["id"]): r for r in rows_of(data["mo"])}
     # порция 5b: блок «Что устояло», строки карточки о сверке, паспорта типов (тексты — site.build.texts)
     tx = cfg["site"]["build"].get("texts") or {}
-    useful = useful_texts(cfg, tx, useful_in, mo_rows)
+    useful = useful_texts(cfg, tx, useful_in, mo_rows, ((checks.get("t7") or {}).get("example")))
     ft = site_findings.findings_texts(tx.get("findings") or {}, story, facts, checks, useful)
     if useful_in is not None and ft is None:
         log.warning("site: блок «Что устояло» не собран — доля случаев и пример пользы не показаны")
@@ -2792,7 +2871,19 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
             "site: блок «Что устояло» не показан — вердикты или числовые условия не те, "
             "под которые он написан"
         )
-    story["card"].update(site_findings.card_texts(tx.get("card"), checks))
+    story["card"].update(
+        site_findings.card_texts(
+            tx.get("card"),
+            checks,
+            k_net=int(
+                cfg["site"]["build"].get("n_net_shown") or cfg["site"]["similarity_layout"]["n_net_neighbors"]
+            ),
+            sim_fields={
+                "n_shown": str(cfg["site"]["n_similar_shown"]),
+                "n_set": str(int(cfg["interpret"]["tests"]["T7_utility"]["k"])),
+            },
+        )
+    )
     ptx = tx.get("passports")
     bad = lint_texts(
         cfg,
@@ -2803,7 +2894,8 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         + site_findings.passport_strings(types, ptx)
         + site_useful.strings(
             (useful or {}).get("use"), (useful or {}).get("example"), (useful or {}).get("flag")
-        ),
+        )
+        + list(robust.values()),
     )
     banned_h = list(cfg["site"]["forbidden_words"]["headlines_always"]) + list(
         cfg["interpret"]["naming"]["banned"]

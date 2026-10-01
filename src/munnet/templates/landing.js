@@ -247,7 +247,10 @@ const cardBody = $("#card-body");
 // объёмная карта первого экрана (landing3d.js) слушает выбор и сама открывает карточку через window.munnet.go
 // simb — соседи по своему региону (набор B T7), sim — похожие по тратам в других регионах (набор продукта T7):
 // объёмная карта рисует к соседям главные дуги, к похожим — второстепенные (порция 5b)
-function announce(id, sim = [], simb = []) { doc.dispatchEvent(new CustomEvent("munnet:select", { detail: { id, sim, simb } })); }
+// порция 6e: net — соседи по основной сети корзин (mo.json, поле nb); при включённом переключателе «Соседи по сети
+// корзин» карта рисует дуги только к ним (net: true), иначе — к соседям по региону и похожим по тратам
+function announce(id, sim = [], simb = [], net = null) { doc.dispatchEvent(new CustomEvent("munnet:select", { detail: { id, sim, simb, net } })); }
+let netOn = false; // переключатель карточки; сбрасывается при выборе другого муниципалитета
 window.munnet = { go: (id) => go(id), ready: () => MO.size > 0, openParam: () => openParam() };
 // адрес ?mo=<номер или название> (порция 6c): номер — сразу карточка; название — как в поиске (начало названия
 // без «район», «округ»; «Кириши» -> «Киришский»): одно совпадение (или одно точное) — карточка, несколько —
@@ -299,6 +302,7 @@ function route() {
   if (!MO.size) return; // данные ещё грузятся: route() вызовется после загрузки
   const r = MO.get(id);
   if (!r) { $("#card-status").textContent = "Муниципалитет не найден"; return; }
+  if (current !== id) netOn = false;
   current = id;
   renderCard(r);
   card.hidden = false;
@@ -308,8 +312,13 @@ function route() {
   $("#card-title").focus({ preventScroll: true });
   $("#card-status").textContent = `Карточка: ${r.n}, ${r.r}`;
   drawEgo(r);
+  announceCard(r);
+}
+function announceCard(r) {
   const nd = nodeOf(r) || r; // район столицы — ячейка города
-  announce(nd.hq != null ? nd.id : null, (nd.sim || []).map((p) => p[0]), (nd.simb || []).map((p) => p[0]));
+  const ids = (xs) => (xs || []).map((p) => p[0]);
+  if (netOn && nd.nb && nd.nb.length) announce(nd.hq != null ? nd.id : null, [], [], ids(nd.nb));
+  else announce(nd.hq != null ? nd.id : null, ids(nd.sim), ids(nd.simb));
 }
 
 // --- карточка ------------------------------------------------------------------------------------------------
@@ -449,14 +458,22 @@ function renderCard(r) {
   }
   if (nd.t != null) {
     h += `<section class="row sim-p" aria-labelledby="c-sim"><h3 id="c-sim">${esc(CARD.sim_title || cap1(view.set_name || "сопоставимые территории"))}</h3>`;
+    if (nd.sim && nd.sim.length && CARD.sim_from) h += `<p class="sim-from">${esc(CARD.sim_from)}.</p>`;
     if (nd.sim && nd.sim.length) {
       h += simList(nd.sim, true);
-      const cc = (CH.comparable || {}).similar_caption;
+      const cc = CARD.sim_caption || (CH.comparable || {}).similar_caption;
       h += `<p class="cap">${CARD.sim_note ? esc(CARD.sim_note) + ". " : ""}${esc(CARD.lines || "Сходство трат, не поездки и не потоки")}. ${esc(CARD.shifted || "")}.${cc ? " " + esc(cc) + "." : ""}</p>`;
     } else if (CARD.no_comparable) {
       h += `<p class="kv">${esc(CARD.no_comparable)}.</p>`;
     }
     h += `</section>`;
+  }
+  // порция 6e: соседи по основной сети корзин (та сеть, на которой построены типы) — переключатель: список
+  // и дуги на карте вместо соседей по региону и похожих по тратам
+  if (nd.t != null && nd.nb && nd.nb.length && CARD.net_title) {
+    h += `<section class="row net" aria-labelledby="c-net"><div class="net-head"><h3 id="c-net">${esc(CARD.net_title)}</h3>`;
+    h += `<button type="button" class="net-toggle" id="net-toggle" role="switch" aria-checked="${netOn}" aria-controls="net-body">${esc(CARD.net_toggle || "Показать списком и на карте")}</button></div>`;
+    h += `<div id="net-body"${netOn ? "" : " hidden"}>${CARD.net_note ? `<p class="sim-note">${esc(CARD.net_note)}.</p>` : ""}${simList(nd.nb, false)}</div></section>`;
   }
 
   // Подробнее: 2023 → 2024, корзина, окна, «почему», соседи по региону, ритм, пометки
@@ -508,6 +525,16 @@ function renderCard(r) {
   cardBody.innerHTML = nbsp(h);
 }
 cardBody.addEventListener("click", (e) => {
+  const sw = e.target.closest("#net-toggle");
+  if (sw) {
+    netOn = !netOn;
+    sw.setAttribute("aria-checked", String(netOn));
+    const body = $("#net-body");
+    if (body) body.hidden = !netOn;
+    const r = MO.get(current);
+    if (r) { drawEgo(r); announceCard(r); }
+    return;
+  }
   const b = e.target.closest("[data-go]");
   if (b) go(Number(b.dataset.go), true);
 });
@@ -675,8 +702,10 @@ function drawEgo(r) {
   const [sx, sy] = hexCenter(nd.hq, nd.hr);
   const k = pxPerUnit() || 0.1;
   let s = "";
-  const sim = (nd.sim || []).map(([id]) => MO.get(id)).filter((o) => o && o.hq != null);
-  const simb = (nd.simb || []).map(([id]) => MO.get(id)).filter((o) => o && o.hq != null);
+  const net = netOn && nd.nb && nd.nb.length;
+  const sim = net ? [] : (nd.sim || []).map(([id]) => MO.get(id)).filter((o) => o && o.hq != null);
+  // порция 6e: при переключателе «Соседи по сети корзин» — сплошные линии к соседям по сети, без номеров
+  const simb = ((net ? nd.nb : nd.simb) || []).map(([id]) => MO.get(id)).filter((o) => o && o.hq != null);
   // похожие по тратам в других регионах — тонкий пунктир; соседи по своему региону — сплошные (порция 5b);
   // белая подложка под линией: без неё тёмная линия теряется на тёмных ячейках
   for (const o of sim) {
@@ -699,7 +728,10 @@ function drawEgo(r) {
   svg.insertBefore(g, labels || null);
   svg.classList.add("has-ego"); // выноски примеров прячутся, пока на карте эго-сеть
   const note = $("#ego-note");
-  if (note && sim.length) {
+  if (note && net && simb.length) {
+    note.innerHTML = nbsp(`<b>${esc(cap1(nd.ns || nd.n))}</b>: линии — ${esc((CARD.net_title || "").toLowerCase())}. ${esc(CARD.shifted || "")}.`);
+    note.hidden = false;
+  } else if (note && sim.length) {
     note.innerHTML = nbsp(`<b>${esc(cap1(nd.ns || nd.n))}</b>: сплошные линии — соседи по своему региону, пунктир с номерами 1–${sim.length} — ${esc((CARD.sim_title || view.set_name || "").toLowerCase())}. Линии — ${esc((CARD.lines || "").replace(/^С/, "с"))}. ${esc(CARD.shifted || "")}.`);
     note.hidden = false;
   }

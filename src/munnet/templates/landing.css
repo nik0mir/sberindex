@@ -950,3 +950,113 @@ svg.vp { display: none; }
 @media (max-width: 700px) {
   .fd-ex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "text" "fig" "rev"; gap: 10px; }
 }
+
+/* === порция 6e: первый экран для журналиста, запасной режим, подписи ≥ 12 px, кадр выбранного МО ===============
+   «Зачем» — сразу под заголовком; пояснение карты — два варианта (объёмная: высота столбика; плоская: высот нет),
+   виден один: html.may-3d ставит <head> (WebGL есть, страница не по file://), landing3d.js снимает его, если
+   объёмная карта не собралась; кнопка «Плоская карта» (.h0-flat) показывает текст для плоской. */
+.h0-why { margin: 0 0 12px; font-size: 16px; line-height: 1.45; max-width: 31em; color: var(--ink); }
+.h0-trust { margin: -6px 0 14px; font-size: 14px; line-height: 1.45; max-width: 33em; color: var(--ink-2); }
+.lede-3d { display: none; }
+html.may-3d .lede-3d, html.has-3d .lede-3d { display: block; }
+html.may-3d .lede-flat, html.has-3d .lede-flat { display: none; }
+html.has-3d.h0-flat .lede-3d { display: none; }
+html.has-3d.h0-flat .lede-flat { display: block; }
+.h0-types .fig { margin-right: 4px; }
+.h0-tlink {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; color: var(--ink);
+  text-decoration: underline; text-underline-offset: 3px; flex-basis: 100%;
+}
+.h0-tlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.has-3d .h0-legend { row-gap: 2px; }
+.has-3d .h0-legend .h0-tlink { min-height: 32px; }
+/* подписи не меньше 12 px (судья критерия 6): ключ высоты, таблица методов, мелкие подписи карточки */
+.h0-bars em { font-size: 12px; }
+.mtable td small, .mtable th[aria-sort] .sort::after { font-size: 12px; }
+.axis-words, .bar-lab small, .rh-zero, .card .src { font-size: 12px; }
+/* строка источника под объёмной картой — на своей полосе, не поверх ячеек */
+@media (min-width: 901px) {
+  .has-3d .hero-stage { bottom: 56px; }
+  .has-3d .h0-note {
+    left: 0; right: 0; bottom: 0; padding: 7px 32px 8px; min-height: 56px; box-sizing: border-box;
+    background: #e9ecf0; border-top: 1px solid var(--rule);
+  }
+  .has-3d .h0-legend { bottom: 70px; }
+  .h0-more { bottom: 210px; }
+}
+/* телефон: заголовок → «зачем» → карта → компактная легенда → кнопки → пояснение → «почему верить» → поиск */
+@media (max-width: 599px) {
+  .has-3d #hero-kicker { order: 1; margin: 10px 16px 4px; font-size: 13.5px; }
+  .has-3d #hero-title { order: 2; margin: 0 16px 6px; font-size: 24px; }
+  .has-3d #hero-why { order: 3; margin: 0 16px 8px; font-size: 14.5px; line-height: 1.4; }
+  .has-3d .hero-stage { order: 4; height: 42vh; height: 42svh; min-height: 280px; }
+  .has-3d .h0-legend { order: 5; margin: 8px 16px 0; padding: 0; gap: 6px; background: none; }
+  .has-3d .h0-actions { order: 6; margin: 10px 16px 0; }
+  .has-3d #hero-lede, .has-3d #hero-lede-flat { order: 7; margin: 10px 16px 6px; font-size: 14.5px; line-height: 1.45; }
+  .has-3d #hero-trust { order: 8; margin: 0 16px 10px; font-size: 13.5px; }
+  .has-3d .hero .finder { order: 9; margin: 0 16px 12px; }
+  .has-3d .h0-note { order: 10; }
+  .has-3d .h0-types { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; font-size: 13px; line-height: 1.25; }
+  .has-3d .h0-types li { align-items: flex-start; gap: 5px; }
+  .has-3d .h0-types li .hx { margin-top: 2px; }
+  .has-3d .h0-types b { display: none; }   /* числа типов — в главе «Типы» и в легенде на широком экране */
+  .has-3d .h0-hkey { max-width: none; font-size: 12px; }
+  .has-3d .h0-legend .h0-tlink { min-height: 40px; font-size: 13.5px; }
+}
+/* ключ дуг выбранного МО (порция 6e) и переключатель «Соседи по сети корзин» в карточке */
+.h0-arcs {
+  position: absolute; right: 84px; top: 84px; margin: 0; max-width: 300px; font-size: 12.5px; line-height: 1.4; pointer-events: none;
+  color: var(--ink); background: rgba(255,255,255,.92); border-radius: 10px; padding: 6px 10px; text-align: right;
+}
+.h0-arcs[hidden] { display: none; }
+@media (max-width: 699px) { .h0-arcs { display: none; } }
+.sim-from { margin: -2px 0 6px; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.row.net .net-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.row.net h3 { margin: 0; }
+.net-toggle {
+  min-height: 44px; padding: 0 14px 0 46px; position: relative; border: 1px solid var(--ink); border-radius: 999px;
+  background: var(--paper); color: var(--ink); font: 600 13.5px/1.2 var(--sans); cursor: pointer; text-align: left;
+}
+.net-toggle::before {
+  content: ""; position: absolute; left: 10px; top: 50%; width: 26px; height: 14px; margin-top: -7px; border-radius: 7px;
+  background: #7b838d; transition: background .15s ease;   /* выкл.: контраст с фоном ≥ 3 : 1 */
+}
+.net-toggle::after {
+  content: ""; position: absolute; left: 12px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%;
+  background: #fff; transition: transform .15s ease;
+}
+.net-toggle[aria-checked="true"]::before { background: var(--ink); }
+.net-toggle[aria-checked="true"]::after { transform: translateX(12px); }
+.net-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#net-body { margin-top: 8px; }
+#net-body[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .net-toggle::before, .net-toggle::after { transition: none; } }
+@media (max-width: 900px) { .h0-tlink { flex-basis: auto; } }
+/* порция 6e, широкий экран: легенда — сетка «типы | ключ высоты», ссылка на таблицу — под ними; левая колонка
+   компактнее, чтобы «зачем» и «почему верить» поместились над поиском без наложения на легенду */
+@media (min-width: 901px) {
+  .has-3d .h0-legend { display: grid; grid-template-columns: auto auto; align-items: end; column-gap: 22px; }
+  .has-3d .h0-legend .h0-tlink { grid-column: 1 / -1; justify-self: start; }
+  .has-3d .h0-hkey { max-width: 230px; }
+  .has-3d .hero-text { width: 500px; }
+  .has-3d .hero h1 { font-size: clamp(28px, 2.25vw, 33px); margin-bottom: 10px; }
+  .has-3d .h0-kicker { margin-bottom: 8px; }
+  .has-3d .h0-lede { font-size: 16px; margin-bottom: 12px; }
+  .has-3d .h0-trust { font-size: 13.5px; }
+}
+@media (min-width: 901px) and (max-width: 1366px) {
+  .has-3d .h0-types { grid-template-columns: auto; }
+}
+@media (min-width: 901px) and (max-height: 860px) {
+  .has-3d .hero .hint { display: none; }   /* регион виден в каждой строке списка поиска */
+  .has-3d .h0-lede { font-size: 15px; line-height: 1.45; }
+  .has-3d .h0-why { font-size: 15px; }
+  .has-3d .h0-trust { font-size: 13px; }
+}
+.h0-picked .h0-more { display: none; }   /* карточка открыта: ссылка вниз не нужна и закрывала бы концы дуг */
+@media (max-width: 599px) {   /* поиск — не ниже ~1,3 экрана: «почему верить» — после поиска */
+  .has-3d .hero .finder { order: 8; }
+  .has-3d #hero-trust { order: 9; margin-top: 0; }
+  .has-3d .h0-legend { gap: 4px; }
+  .has-3d .h0-legend .h0-tlink { min-height: 36px; }
+}

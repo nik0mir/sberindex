@@ -364,7 +364,9 @@ def test_normal_mode_builds_site(tmp_path):
     assert rows[1]["win"] == "222222" + "1" * 7  # номера окон — после переноса (1 -> 2, 2 -> 1)
     assert (rows[1]["t23"], rows[1]["t24"]) == (2, 1)
     assert rows[1]["st"].count("r") == 7 and rows[1]["rel"] is True
-    assert rows[1]["nb"] == [2] and rows[2]["nb"] == [1, 3]
+    # порция 6e: соседи по сети — пары [номер, км по прямой] (dist_km рёбер), у районов столиц — нет
+    assert rows[1]["nb"] == [[2, 60]] and rows[2]["nb"] == [[1, 60], [3, 840]]
+    assert all(rows[i]["nb"] is None for i in INNER)
     assert rows[1]["rh"] is not None and rows[2]["rh"] is None  # свой ритм — только надёжный
     html = (site / "index.html").read_text(encoding="utf-8")
     assert (

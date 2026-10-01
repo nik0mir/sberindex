@@ -24,8 +24,11 @@ const nf = new Intl.NumberFormat("ru-RU");
 
 // выбор, пришедший до готовности сцены (карточка открыта по адресу #mo=…), применяется после загрузки
 let pending = null;
-let onSelect = (id, sim, simb) => { pending = [id, sim, simb]; };
-doc.addEventListener("munnet:select", (e) => onSelect(e.detail ? e.detail.id : null, (e.detail && e.detail.sim) || [], (e.detail && e.detail.simb) || []));
+let onSelect = (id, sim, simb, net) => { pending = [id, sim, simb, net]; };
+doc.addEventListener("munnet:select", (e) => {
+  const d = e.detail || {};
+  onSelect(d.id ?? null, d.sim || [], d.simb || [], d.net || null);
+});
 
 async function loadScene() {
   const inl = readJSON("data-scene");
@@ -395,15 +398,63 @@ async function main() {
     for (const j of simIdx) arc(a, cells[j], 0.6, farMat);
     for (const j of simbIdx) arc(a, cells[j], 1.3, egoMat);
   }
-  function select(i, simIds = [], simbIds = []) {
+  // порция 6e: ключ дуг поверх карты (какие связи нарисованы) — слова из story.card
+  const CARDTX = story.card || {};
+  const arcsKey = $("#h0-arcs");
+  // кадр выбранного МО (порция 6e): выбранная ячейка и те, к кому идут дуги, — в свободной части холста:
+  // правее карточки, ниже подсказки и флажка, выше легенды и строки источника. Положение и расстояние камеры
+  // подбираются по проекции точек (несколько шагов), а не по формуле «нижняя треть кадра»
+  const tmpV = new THREE.Vector3();
+  function freeRect() {
+    const w = stage.clientWidth, h = stage.clientHeight, sr = stage.getBoundingClientRect();
+    if (w < 700) return [16, 64, w - 16, h - 56];
+    const card = doc.getElementById("card"), leg = doc.querySelector(".h0-legend");
+    let x0 = 32, y1 = h - 24;
+    if (!narrow && card && !card.hidden) x0 = Math.max(x0, card.getBoundingClientRect().right - sr.left + 32);
+    if (leg && leg.offsetParent) {
+      const lr = leg.getBoundingClientRect();
+      if (lr.top > sr.top && lr.top < sr.bottom) y1 = Math.min(y1, lr.top - sr.top - 20);
+    }
+    return [Math.min(x0, w * 0.6), 110, w - 100, Math.max(y1, 240)];
+  }
+  function frameFor(pts, dir, minD) {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    const R = freeRect();
+    const cam = camera.clone();
+    const tanV = Math.tan((camera.fov * Math.PI) / 360), tanH = tanV * camera.aspect, sinF = dir.y;
+    const tgt = new THREE.Vector3(pts.reduce((a, p) => a + p.x, 0) / pts.length, 0, pts.reduce((a, p) => a + p.z, 0) / pts.length);
+    let dist = 1600;
+    for (let it = 0; it < 8; it++) {
+      cam.position.copy(tgt).addScaledVector(dir, dist);
+      cam.lookAt(tgt);
+      cam.updateMatrixWorld(true);
+      let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+      for (const p of pts) {
+        for (const y of [0, p.h]) {
+          tmpV.set(p.x, y, p.z).project(cam);
+          const X = (tmpV.x * 0.5 + 0.5) * w, Y = (-tmpV.y * 0.5 + 0.5) * h;
+          a = Math.min(a, X); b = Math.min(b, Y); c = Math.max(c, X); d = Math.max(d, Y);
+        }
+      }
+      const k = Math.max((c - a) / (0.86 * (R[2] - R[0])), (d - b) / (0.86 * (R[3] - R[1])));
+      tgt.x += (((a + c) / 2 - (R[0] + R[2]) / 2) / (w / 2)) * dist * tanH;
+      tgt.z += (((b + d) / 2 - (R[1] + R[3]) / 2) / (h / 2)) * ((dist * tanV) / sinF);
+      dist = Math.min(4200, Math.max(minD, dist * Math.max(0.5, Math.min(2, k))));
+    }
+    return [tgt, tgt.clone().addScaledVector(dir, dist)];
+  }
+  function select(i, simIds = [], simbIds = [], netIds = null) {
     if (mode === "islands") toMap(false, false);
     selected = i;
     hover = -1;
     const c = cells[i];
     ring.visible = true;
     doc.documentElement.classList.add("h0-picked"); // карточка открыта слева: текст экрана под ней прячется
-    const simIdx = simIds.map((id) => byId.get(id)).filter((j) => j !== undefined);
-    const simbIdx = simbIds.map((id) => byId.get(id)).filter((j) => j !== undefined);
+    const idx = (xs) => xs.map((id) => byId.get(id)).filter((j) => j !== undefined);
+    // порция 6e: соседи по сети корзин — вместо соседей по региону и похожих (переключатель карточки)
+    const netIdx = netIds && netIds.length ? idx(netIds) : null;
+    const simIdx = netIdx ? [] : idx(simIds);
+    const simbIdx = netIdx || idx(simbIds);
     const keep = new Set([i, ...simIdx, ...simbIdx]);
     spotlight(c.region, keep);
     startTween(heights(keep), { dur: 700, ease: easeOut });
@@ -411,23 +462,18 @@ async function main() {
     flag.innerHTML = `<b>${esc(cap1(c.name))}</b><span>${esc(c.region)}</span>`;
     flag.hidden = false;
     pickedNote.hidden = false;
-    // кадр (порция 6a): камера выше и дальше, выбранная ячейка — в нижней трети кадра, соседи по своему региону
-    // (с ними сверять) — в кадре; на телефоне — почти сверху. e — наибольшее удаление соседа от выбранной ячейки.
-    // Видимая глубина земли у цели ≈ 2·dist·tanV / sin φ; выбранная — на −0,3 высоты кадра (нижняя треть, над
-    // легендой), соседи помещаются, если половина глубины ≥ e / 0,6; по ширине — с учётом карточки слева.
-    const near = (simbIdx.length ? simbIdx : simIdx).map((j) => cells[j]);
-    const e = Math.max(60, ...near.map((p) => Math.max(Math.abs(p.x - c.x), Math.abs(p.z - c.z)))) + 30;
+    if (arcsKey) {
+      arcsKey.textContent = nbsp((netIdx ? CARDTX.arcs_net : CARDTX.arcs_default) || "");
+      arcsKey.hidden = !arcsKey.textContent || !(simIdx.length || simbIdx.length);
+    }
+    // кадр (порция 6e): выбранная ячейка и соседи, к которым идут главные дуги (по своему региону или по сети),
+    // — в свободной части холста; похожие из других регионов в кадр не тянутся (они далеко, дуги к ним видны
+    // и уходят за край). На телефоне — почти сверху.
+    const near = [c, ...simbIdx.map((j) => cells[j])];
     const phone = stage.clientWidth < 700;
-    const dir = phone ? new THREE.Vector3(0, 0.985, 0.17) : new THREE.Vector3(0, 0.92, 0.39);
-    dir.normalize();
-    const sinF = dir.y;
-    const card = doc.getElementById("card");
-    const cardFrac = !narrow && card && !card.hidden ? Math.min(0.45, card.offsetWidth / Math.max(1, stage.clientWidth)) : 0;
-    const tanV = Math.tan((camera.fov * Math.PI) / 360), tanH = tanV * camera.aspect;
-    const dist = Math.min(3600, Math.max(phone ? 900 : 950, (e * sinF) / (0.6 * tanV), (e * 1.15) / (tanH * (1 - cardFrac))));
-    const hd = (dist * tanV) / sinF;
-    const tgt = new THREE.Vector3(c.x - cardFrac * dist * tanH, 0, c.z - 0.3 * hd);
-    flyTo(tgt, tgt.clone().add(dir.multiplyScalar(dist)), 1300);
+    const dir = (phone ? new THREE.Vector3(0, 0.985, 0.17) : new THREE.Vector3(0, 0.92, 0.39)).normalize();
+    const [tgt, pos] = frameFor(near.map((p) => ({ x: p.x, z: p.z, h: p.h })), dir, phone ? 900 : 950);
+    flyTo(tgt, pos, 1300);
   }
   function clearSelection() {
     if (selected < 0) return;
@@ -435,14 +481,15 @@ async function main() {
     ring.visible = false;
     flag.hidden = true;
     pickedNote.hidden = true;
+    if (arcsKey) arcsKey.hidden = true;
     clearEgo();
     doc.documentElement.classList.remove("h0-picked");
     spotlight(null);
     if (mode === "map") startTween(heights(), { dur: 700, ease: easeOut });
   }
-  onSelect = (id, sim = [], simb = []) => {
+  onSelect = (id, sim = [], simb = [], net = null) => {
     const i = id == null ? undefined : byId.get(id);
-    if (i === undefined) clearSelection(); else select(i, sim, simb);
+    if (i === undefined) clearSelection(); else select(i, sim, simb, net);
   };
 
   // ------------------------------------------------------------------ кадр
@@ -540,10 +587,14 @@ async function main() {
   if (pending != null && reduce) onSelect(...pending);
 }
 
-main().catch((e) => {
+// порция 6e: карта не собралась (нет WebGL, данных сцены или three.js) — снимается и класс «вероятно объёмная»
+// из <head>: пояснение первого экрана переключается на текст для плоской карты
+main().then(() => {
+  if (!doc.documentElement.classList.contains("has-3d")) doc.documentElement.classList.remove("may-3d");
+}).catch((e) => {
   // объёмная карта не собралась: остаётся статичная (landing.js), страница работает
   console.warn("Корзина и регион: объёмная карта недоступна —", e && e.message ? e.message : e);
-  doc.documentElement.classList.remove("has-3d");
+  doc.documentElement.classList.remove("has-3d", "may-3d");
   const c = $("#scene"); if (c) c.hidden = true;
   for (const id of ["h0-ui", "h0-actions"]) { const el = doc.getElementById(id); if (el) el.hidden = true; }
 });

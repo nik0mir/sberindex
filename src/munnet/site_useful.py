@@ -17,6 +17,7 @@ import html
 import json
 import logging
 import math
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -198,8 +199,13 @@ def display_name(r: Mapping, fallback: str = "") -> str:
     return name if not suffix or name.endswith(suffix.strip()) else name + suffix
 
 
-def example_texts(tx: Mapping, uf: Mapping, mo: Mapping[int, Mapping], k: int = 10) -> dict[str, Any] | None:
-    """Пример по правилу (``example``) и обратный пример этапа 5 (``example.stage5_example``)."""
+def example_texts(
+    tx: Mapping, uf: Mapping, mo: Mapping[int, Mapping], k: int = 10, t7_example: Mapping | None = None
+) -> dict[str, Any] | None:
+    """Пример по правилу (``example``) и обратный пример этапа 5 (``example.stage5_example``). Порция 6e:
+    ``t7_example`` — пример главы 6 (``checks.t7.example``: ошибки наборов из ``t7_errors.csv``); если это
+    тот же муниципалитет, поле ``{err_d_rel}`` обратного примера — ошибка набора D с поправкой на регион,
+    как в таблице главы 6; иначе скобка с этим полем не показывается."""
     ex = uf.get("example") or {}
     if not ex or ex.get("own_change") is None:
         return None
@@ -239,9 +245,16 @@ def example_texts(tx: Mapping, uf: Mapping, mo: Mapping[int, Mapping], k: int = 
     # обратный случай — только если у примера этапа 5 соседи по региону и правда ошибаются больше
     if s5 and s5.get("err_B") is not None and float(s5["err_B"]) > float(s5["err_D"]):
         r5 = mo.get(int(s5["territory_id"])) or {}
+        rel = None
+        if t7_example and int(t7_example.get("territory_id") or -1) == int(s5["territory_id"]):
+            rel = (t7_example.get("errors") or {}).get("D")
+        tpl = str(tx["ex_reverse"])
+        if rel is None:  # нет числа главы 6 — без скобки с ним
+            tpl = re.sub(r"\s*\([^()]*\{err_d_rel\}[^()]*\)", "", tpl)
         out["reverse"] = _fill(
-            tx["ex_reverse"],
+            tpl,
             {
+                "err_d_rel": style.fmt_num(rel, 3) if rel is not None else "",
                 "name": display_name(r5, str(s5.get("name") or "")),
                 "region": str(r5.get("r") or s5.get("region") or ""),
                 "err_b": style.fmt_num(s5["err_B"], 3),

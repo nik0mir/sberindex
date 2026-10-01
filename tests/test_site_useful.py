@@ -114,8 +114,8 @@ def test_share_and_r_line_from_facts():
     """Доля, интервал, ориентир 50% и слова — из facts.json; оговорка о наборе R — по медианам ошибок."""
     u = site_useful.use_texts(TX["useful"], _uf(), WORDS)
     assert u["share"] == (
-        "Соседи по своему региону ближе чаще, чем нет: в 57,2% случаев из 1542 "
-        "(95% интервал 54,7–59,7%; при равной точности было бы 50%)"
+        "Соседи по своему региону точнее похожих по тратам чаще, чем нет: в 57,2% случаев из 1542 их ошибка "
+        "меньше (95% интервал 54,7–59,7%; при равной точности было бы 50%)"
     )
     assert "не больше соседей (0,035 против 0,036)" in u["r_line"] and "свой регион" in u["r_line"]
     u = site_useful.use_texts(TX["useful"], _uf(r_err=0.04), WORDS)
@@ -129,7 +129,7 @@ def test_edits_by_words_executed_literally():
     и «реже» — текст меняется; доля B против R не «чаще, чем нет» — совет «со своим регионом»."""
     ft = _ft(_uf())
     assert "ориентир лучше" in ft["use"]["text"] and ft["use"]["title"] == TX["findings"]["use"]["title"]
-    assert ft["use"]["share"].startswith("Соседи по своему региону ближе чаще, чем нет")
+    assert ft["use"]["share"].startswith("Соседи по своему региону точнее похожих по тратам чаще, чем нет")
     ft = _ft(_uf(d_words=WORDS["about_half"]))
     assert "ориентир лучше" not in ft["use"]["text"] and "примерно в половине случаев" in ft["use"]["text"]
     ft = _ft(_uf(d_words=WORDS["less_often"]))
@@ -398,9 +398,15 @@ def test_search_none_types_explain_comp_link_from_numbers():
 def test_hero_why_and_stood_title():
     """Строка «зачем» на первом экране; заголовок «Что устояло» — без «оси», ρ расшифрована один раз."""
     st, _ = _story({})
-    # порция 6d (check-facts): предрегистрация — только о проверках, совет сверки — «после проверки»
-    why = st["screen0"]["hero"]["why"]
-    assert why.startswith("Проверки смысла типов записаны до расчётов") and "после проверки" in why
+    # порция 6e (check-ux): «зачем» — первой строкой под заголовком; «почему верить» — отдельно:
+    # предрегистрация — только о проверках, совет сверки найден в результатах (порция 6d, check-facts)
+    hero = st["screen0"]["hero"]
+    assert hero["why"].startswith("Зачем:") and "с кем его сравнивать" in hero["why"]
+    trust = hero["why_trust"]
+    assert (
+        trust.startswith("Проверки смысла типов записаны до расчётов") and "найден уже в результатах" in trust
+    )
+    assert "Высота" not in hero["lede_flat"] and "на этой карте нет" in hero["lede_flat"]
     f = TX["findings"]
     assert f["stood"]["title"] == "Тот же порядок виден в обороте Росстата"
     assert f["stood"]["text"].count("ранговая корреляция Спирмена") == 1 and "вскрыт" not in f["use"]["note"]

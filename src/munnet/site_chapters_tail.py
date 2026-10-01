@@ -151,7 +151,7 @@ UI: dict[str, str] = {
     "m_s3_h": "Сеть сходства трат",
     "m_s3": (
         "Муниципалитеты связаны, если их корзины одинаково отличаются от своих регионов: {n_edges} связей "
-        "между {n_nodes} узлами. Правила связей сравнивались между собой."
+        "между {n_nodes} муниципалитетами. Правила связей сравнивались между собой."
     ),
     "m_s4_h": "Типы",
     "m_s4": (
@@ -204,8 +204,9 @@ UI: dict[str, str] = {
     ),
     "all_note": (
         "Устойчивость: «тип устойчив» — тот же тип во всех вариантах расчёта и повторах с другим начальным "
-        "числом. 2023 и 2024 — тип по каждому году отдельно. У районов Москвы и Петербурга тип и годы — "
-        "города целиком."
+        "числом; «тип устойчив» — про варианты расчёта, а не про годы. Тип, итог 2023–2024 — по всем 24 "
+        "месяцам сразу; 2023 и 2024 — тип по каждому году отдельно. У районов Москвы и Петербурга тип "
+        "и годы — города целиком."
     ),
     "all_nojs": "Таблица строится в браузере. Без JavaScript её можно скачать одним файлом:",
     "all_nojs_tail": "UTF-8, открывается в Excel.",
@@ -219,7 +220,7 @@ UI: dict[str, str] = {
     "all_no_type": "Нет типа",
     "all_c_name": "Название",
     "all_c_region": "Регион",
-    "all_c_type": "Тип",
+    "all_c_type": "Тип, итог 2023–2024",
     "all_c_flag": "Устойчивость типа",
     "all_c_23": "2023",
     "all_c_24": "2024",
@@ -228,7 +229,7 @@ UI: dict[str, str] = {
 }
 
 METHOD_WORDS = {
-    "hybrid": "гибрид: вложение сети и признаки места",
+    "hybrid": "гибрид: место в сети сходства трат и признаки места",
     "spectral": "спектральная кластеризация сети",
     "leiden": "Лейден",
     "louvain": "Лувен",
@@ -801,6 +802,11 @@ def r1_maps(r1: Mapping, geo: Mapping | None, esc: Esc) -> tuple[str, list[list[
     return "".join(out), rows
 
 
+def _dot_end(s: str) -> str:
+    s = str(s).rstrip()
+    return s if not s or s[-1] in ".!?…" else s + "."
+
+
 def _mo_n(n: int) -> str:
     """«1542 муниципалитета» — число и слово по правилу числительного (порция 6b)."""
     from munnet.site_findings import _plural
@@ -816,6 +822,8 @@ def _pct0(x: float) -> str:
 def chapter_limits(story: Mapping, checks: Mapping, geo: Mapping | None, esc: Esc) -> str:
     ch = story["chapters"]["limits"]
     text = f'<p class="outcome">{esc(ch["text"])}</p>' if ch.get("text") else ""
+    if ch.get("key"):  # порция 6e: «как читать» — типы названиями, МО, ε² (текст исхода выше — дословно)
+        text += f'<p class="explain">{esc(_dot_end(ch["key"]))}</p>'
     for x in ch.get("lead") or []:
         text += f'<p class="sub">{esc(x)}.</p>'
     items = [(UI[f"lim_{k}"], v) for k, v in (ch.get("items") or {}).items() if v and f"lim_{k}" in UI]
@@ -842,7 +850,11 @@ def chapter_limits(story: Mapping, checks: Mapping, geo: Mapping | None, esc: Es
         + (f'<p class="note">{esc(UI["r1_unstable"].format(label=lab))}</p>' if lab else "")
         + f'<figcaption class="source">{esc(SC_UI["src_sber"])}</figcaption>'
         + _table([UI["r1_col_var"], UI["r1_col_same"], UI["r1_col_ari"]], rows, esc, UI["alt_r1"])
-        + (f'<p class="note alt-note">{esc(r1["circularity"])}</p>' if r1.get("circularity") else "")
+        + (
+            f'<p class="note alt-note">{esc(_dot_end(r1["circularity"]))}</p>'
+            if r1.get("circularity")
+            else ""
+        )
         + "</figure>"
     )
     return _section("limits", ch["title"], text, fig, esc, kicker=UI["limits_kicker"])

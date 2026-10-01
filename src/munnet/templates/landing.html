@@ -6,6 +6,11 @@
 <title>$title</title>
 <meta name="description" content="Типы муниципалитетов по корзине безналичных трат жителей относительно своего региона: карта, поиск и карточка муниципалитета. Данные СберИндекса (CC BY-SA 4.0), Росстата и ФНС в обработке «Если быть точным» (CC BY 4.0).">
 <meta name="color-scheme" content="light">
+<script>
+  // порция 6e: объёмная карта вероятна (есть WebGL, страница не по file://) — пояснение первого экрана про высоты
+  // показывается сразу, без мигания; landing3d.js снимает класс, если карта не собралась
+  if (location.protocol !== "file:" && "WebGLRenderingContext" in window) document.documentElement.classList.add("may-3d");
+</script>
 <script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
 <style>$css</style>
 </head>
@@ -89,6 +94,7 @@ $hero_head
         <div class="h0-flag" id="h0-flag" aria-hidden="true" hidden></div>
         <div class="h0-cities" id="h0-cities" aria-hidden="true"></div>
         <p class="h0-picked-note" id="h0-picked-note" hidden>$picked_note</p>
+        <p class="h0-arcs" id="h0-arcs" hidden></p>
       </div>
       <figure class="answer-map h0-fallback" id="map-fig">
         <div class="map-tools" id="map-tools" hidden>

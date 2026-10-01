@@ -90,7 +90,8 @@ def test_numbers_come_from_facts_and_checks():
     assert "10 ориентиров" in ft["use"]["chart"]
     b = ft["border"]["text"]
     assert "46,9% муниципалитетов с типом" in b and "другое правило связей между муниципалитетами" in b
-    assert b.rstrip(".").endswith("плацебо")
+    # порция 6e: после заголовка T3 о плацебо — одна фраза, что такое плацебо (findings.border.placebo)
+    assert "от плацебо. Плацебо — те же расчёты" in b and b.rstrip(".").endswith("даёт случайность")
     # другие числа — другой текст (подставляет код)
     c = _checks()
     c["t7"]["median_error_abs"]["B"] = 0.0301

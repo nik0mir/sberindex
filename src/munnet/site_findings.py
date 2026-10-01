@@ -199,7 +199,13 @@ def findings_texts(
         },
         "border": {
             **{k: tx["border"][k] for k in ("label", "title", "chart")},
-            "text": _fill(tx["border"]["text"], {"variants": variants, "t3_head": t3_head}),
+            "text": _fill(tx["border"]["text"], {"variants": variants, "t3_head": t3_head})
+            # порция 6e (check-ux): что такое плацебо — одной фразой после заголовка T3, если он о плацебо
+            + (
+                " " + _dot(str(tx["border"]["placebo"]))
+                if tx["border"].get("placebo") and "плацебо" in t3_head.lower()
+                else ""
+            ),
             **(
                 {"flag": border_flag, "flag_label": (useful or {}).get("flag_label", "")}
                 if border_flag
@@ -396,12 +402,22 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
     )
 
 
-def card_texts(tx: Mapping | None, checks: Mapping) -> dict[str, str]:
-    """Строки карточки о сверке: с числами ``t7`` (если условие ``t7_numbers`` выполнено) или без них."""
+def card_texts(
+    tx: Mapping | None, checks: Mapping, k_net: int | None = None, sim_fields: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """Строки карточки о сверке: с числами ``t7`` (если условие ``t7_numbers`` выполнено) или без них.
+    Порция 6e: откуда список похожих, подпись списка (``sim_caption`` — поля ``n_shown``, ``n_set``),
+    переключатель «Соседи по сети корзин» (``k_net`` — ``site.build.n_net_shown``) и ключ дуг."""
     if not tx:
         return {}
     t7 = t7_numbers(checks)
-    out = {k: str(tx[k]) for k in ("simb_title", "sim_title", "stability") if tx.get(k)}
+    keys = ("simb_title", "sim_title", "stability", "sim_from", "net_title", "net_toggle", "arcs_default",
+            "arcs_net")  # fmt: skip
+    out = {k: str(tx[k]) for k in keys if tx.get(k)}
+    if tx.get("net_note") and k_net:
+        out["net_note"] = _fill(tx["net_note"], {"k": _f(k_net)})
+    if tx.get("sim_caption") and sim_fields and all(sim_fields.get(k) for k in ("n_shown", "n_set")):
+        out["sim_caption"] = _fill(tx["sim_caption"], sim_fields)
     if t7 is not None:
         out["simb_note"] = _fill(tx["simb_note"], {"err_b": t7["err_b"], "err_p": t7["err_p"]})
         out["sim_note"] = str(tx["sim_note"])
