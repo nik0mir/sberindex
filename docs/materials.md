@@ -301,4 +301,4 @@ https://rosstat.gov.ru/dbscripts/munst/. Её интерфейс отдаёт д
 - PyPI открыт только через прокси агента: прямой путь из `NO_PROXY` пока отвечает «Host not in allowlist».
   Ставить так: `NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 pip install --user <пакет>`.
 - www.sberindex.ru закрыт, sberindex.ru открыт — использовать адреса без `www`.
-- sberindex.ru — React-приложение: текст страниц виден только в браузере (Playwright + `certs/`).
+- sberindex.ru — React-приложение: текст страниц виден только в браузере (Playwright + сертификаты из `configs/ca/`).

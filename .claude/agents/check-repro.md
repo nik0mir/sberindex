@@ -53,7 +53,7 @@ hooks:
 | R6 | детерминизм | второй прогон в другую папку; sha256 табличных выходов (или pandas с допуском 1e-9; рисунки не сравнивать); расхождения — поимённо и с причиной (seed не передан, Leiden или HDBSCAN без seed, параллельность, порядок множеств); повторный `eda` не меняет `docs/eda.md` (сравни с исходным файлом) |
 | R7 | seed из конфига во всех случайных шагах | `grep -rnE "random_state\|default_rng\|seed\|shuffle" src` с разбором |
 | R8 | гиперпараметры в YAML, без абсолютных путей | `grep -rnE "random_state=[0-9]\|n_clusters=[0-9]\|n_neighbors=[0-9]" src`; `grep -rnE "[A-Za-z]:\\\\\|/Users/\|/home/" src configs tests` |
-| R9 | нет зависимости от `certs/` | `grep -rn certs src configs README.md`; этапы после `data` с `download.ca_files: []` во временном конфиге |
+| R9 | нет зависимости от `certs/` (удалена 02.10; сертификаты — `configs/ca/`) | `grep -rn certs src configs README.md`; этапы после `data` с `download.ca_files: []` во временном конфиге |
 | R10 | README буквально | каждая команда «Быстрого старта» как написано; в Windows без make — эквиваленты `uv run` и пометка; обещание про WSL — правда ли |
 | R11 | числа в текстах | числа из `docs/eda.md`, `report/report.md`, `README.md`, `site/` найдены в выходах с учётом округления (подробно это делает `check-facts`) |
 | R12 | ссылки в Markdown | относительные ссылки ведут на существующие файлы |

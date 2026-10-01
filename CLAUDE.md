@@ -29,7 +29,7 @@
   `www.sberbank.com`, `www.sberbank.ru`, `storage.yandexcloud.net`, `tochno.st`, `rosstat.gov.ru`,
   `pypi.org`, `files.pythonhosted.org`. В облаке PyPI открыт только через прокси агента:
   `NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 uv sync --frozen`.
-- Сайтам Сбера нужны сертификаты из `certs/` (временная папка, загрузчик берёт их через `download.ca_files`).
+- Сайтам Сбера нужны сертификаты УЦ из `configs/ca/` (загрузчик берёт их через `download.ca_files`; временная `certs/` удалена 02.10).
 
 ## Договорённости
 
@@ -157,4 +157,4 @@
 2. Пересчёт interpret (≈ 2 ч, отдельным процессом, когда никто не читает outputs/interpret) → usefulness → site;
    сверить facts.json побайтно, кроме времени. PDF — по желанию (лендинг его заменяет, п. 1.8).
 3. 04.10 — check-repro и совет судей (`docs/agents.md`); этап 7 — сократить отчёт (~45 → 15–20 минут чтения),
-   README, убрать `certs/`, собрать сайт в `site/`; 8.10 — подача (каждый участник заполняет форму).
+   README (сделан 02.10), `certs/` убрана 02.10, собрать сайт в `site/`; 8.10 — подача (каждый участник заполняет форму).

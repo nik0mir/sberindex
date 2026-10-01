@@ -14,10 +14,10 @@ download:
   timeout: 300
   # sber.ru и sberindex.ru отклоняют User-Agent python-requests.
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
-  # Сертификаты УЦ Минцифры (www.sberbank.com) и LiteSSL (sberindex.ru): их нет в стандартных хранилищах.
+  # Сертификаты УЦ Минцифры (www.sberbank.com) и LiteSSL (sberindex.ru), см. configs/ca/README.md.
   ca_files:
-    - certs/russian_trusted_ca.pem
-    - certs/litessl_rsa_ca_2025.pem
+    - configs/ca/russian_trusted_ca.pem
+    - configs/ca/litessl_rsa_ca_2025.pem
 
 # Исходные данные: каждый источник сохраняется в data/raw/<имя источника>/.
 # Файл скачивается с первого доступного зеркала и проверяется по sha256; zip и rar распаковываются.
