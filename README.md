@@ -97,11 +97,11 @@ uv run --frozen python -m munnet --help                   # список эта�
 | `evaluate` | Индексы качества SW, CH, S_Dbw, AVI, AVU, MQ для всех кандидатов со случайным базисом | [docs/icvi.md](docs/icvi.md), `outputs/evaluate/icvi_long.csv` | 104 с |
 | `dynamics` | Типы в 13 окнах по 12 месяцев, переходы МО между типами против шума | [docs/dynamics.md](docs/dynamics.md), `outputs/dynamics/transitions.csv` | 33 с |
 | `interpret` | Проверки смысла типов, названия, профили, примеры, прогоны устойчивости | [docs/interpretation.md](docs/interpretation.md), `outputs/interpret/facts.json` | около 2 ч |
-| `usefulness` | Разведка после вскрытия: польза сверки со своим регионом, флаг устойчивости типа МО | `outputs/usefulness/facts.json`, `mo_flags.csv` | около 10 с |
+| `usefulness` | Разведка после вскрытия: польза сверки со своим регионом, флаг устойчивости типа МО; проверка «польза и тип МО» и разведка по размеру | `outputs/usefulness/facts.json`, `mo_flags.csv`, `by_type.json`, `size_check.json` | около 40 с |
 | `site` | Лендинг: данные, тексты по вердиктам проверок, страница | `site/index.html` | 15 с |
 
 Откуда время: `panel`, `features`, `network`, `evaluate` — замеры 28.09.2026, `eda` — 26.09.2026, `usefulness` —
-01.10.2026 ([отчёт, раздел 10](report/report.md)); `cluster` — `outputs/cluster/timing.csv` (`total_before_report`,
+02.10.2026 ([отчёт, раздел 10](report/report.md)); `cluster` — `outputs/cluster/timing.csv` (`total_before_report`,
 4170 с); `dynamics` и `interpret` — ключ `seconds` в `outputs/dynamics/facts.json` и `outputs/interpret/facts.json`
 (7241 с); `site` — замер 02.10.2026.
 
@@ -129,6 +129,7 @@ uv run --frozen python -m munnet --help                   # список эта�
   | Код этапа `interpret`, отлаженный вслепую на перемешанных типах, и тексты лендинга (блок `site`) | `abc6107`, 30.09.2026 |
   | Правила разведки после вскрытия (блок `usefulness`); код и тесты до первого расчёта | `82636b3`, `cf9cd49`, 01.10.2026 |
   | Зависит ли польза сверки со своим регионом от типа МО; код и тесты до прогона | `f744563`, `183d683`, 01.10.2026 |
+  | Разведка после вскрытия: разница — про размер МО (записано после исхода) | `8f73a3a`, 02.10.2026 |
 
   Слепой прогон для отладки: `uv run --frozen python -m munnet interpret --blind <seed>` перемешивает типы
   по узлам и пишет в `outputs/interpret_blind/` с пометкой «СЛЕПОЙ ПРОГОН». Замороженные ключи блока `site`
