@@ -14,9 +14,10 @@
    по региону) и D (похожие по тратам МО других регионов, ``node_comparable.csv``) не меньше ``min_set``
    членов с известной целью. Ошибка — |y − медиана y членов набора|; рядом — набор R (случайные МО своей
    группы региона, как ``usefulness.region_random_errors``).
-2. **Статистика.** «B ближе D» — err_B < err_D. Δ_t — доля в группе типов {3,4} минус доля в {1,2}
-   (общая доля по всем МО группы); решает Δ — среднее Δ_t по трём целям. Уточнения: Δ внутри статуса МО
-   (страты «городской округ» / «остальные», гармонические веса) и деление «городской округ / остальные».
+2. **Статистика.** «B ближе D» — err_B < err_D (с допуском ``usefulness.rule_share.tie_tol``, 02.10). Δ_t —
+   доля в группе типов {3,4} минус доля в {1,2} (общая доля по всем МО группы); решает Δ — среднее Δ_t по трём
+   целям. Уточнения: Δ внутри статуса МО (страты «городской округ» / «остальные», гармонические веса) и
+   деление «городской округ / остальные».
 3. **Вывод.** Один общий бутстрап по группам региона (группы целиком, с возвращением; одна выборка групп
    на все цели и все статистики; выборка с пустой группой {3,4} или {1,2} у какой-либо цели
    отбрасывается) и одна общая перестановка меток типов внутри групп региона (одни и те же метки на все
@@ -43,7 +44,10 @@ import pandas as pd
 from munnet.config import Config
 from munnet.contracts import MissingInputError, QCError
 from munnet.style import fmt_p, fmt_pct, fmt_pp, fmt_range
-from munnet.usefulness import region_random_errors  # usefulness импортирует этот модуль внутри run()
+from munnet.usefulness import (  # usefulness импортирует этот модуль внутри run()
+    compare_errors,
+    region_random_errors,
+)
 
 log = logging.getLogger(__name__)
 
@@ -444,6 +448,7 @@ def evaluate_run(
     группы {3,4}/{1,2}, страты статуса, ``is_go``, бутстрап (``gidx``, ``counts``), матрица перестановок
     ``perm``, уровни интервала и alpha, пороги шума, типы для описания."""
     hi_set, lo_set = design["high"], design["low"]
+    tol = float(design["tie_tol"])  # usefulness.rule_share.tie_tol — сравнение ошибок, как в rule_share
     hi, lo = np.isin(labels, hi_set), np.isin(labels, lo_set)
     strata, is_go = design["strata"], design["is_go"]
     level, alpha = float(design["level"]), float(design["alpha"])
@@ -522,17 +527,21 @@ def evaluate_run(
         groups: dict[str, dict] = {}
         for gname, gm in grp.items():
             eb, ed, er = d["err_B"][gm], d["err_D"][gm], d["err_R"][gm]
+            b_d, tie_bd = compare_errors(eb, ed, tol)
+            b_r, tie_br = compare_errors(eb, er, tol)
+            r_d, _ = compare_errors(er, ed, tol)
             groups[gname] = {
                 "n": int(gm.sum()),
                 "works": int((gm & d["works"]).sum()),
-                "share": float(np.mean(eb < ed)) if gm.any() else float("nan"),
-                "share_B_closer_than_R": float(np.mean(eb < er)) if gm.any() else float("nan"),
-                "share_R_closer_than_D": float(np.mean(er < ed)) if gm.any() else float("nan"),
+                "share": float(np.mean(b_d)) if gm.any() else float("nan"),
+                "share_B_closer_than_R": float(np.mean(b_r)) if gm.any() else float("nan"),
+                "share_R_closer_than_D": float(np.mean(r_d)) if gm.any() else float("nan"),
                 "median_d": _med(eb - ed),
                 "mad_change": _mad(d["y"][gm]),
                 "median_err_B": _med(eb),
                 "median_err_D": _med(ed),
-                "ties_B_eq_D": int((eb == ed).sum()),
+                "ties_B_eq_D": int(tie_bd.sum()),
+                "ties_B_eq_R": int(tie_br.sum()),  # добавлено 02.10 вместе с допуском tie_tol
                 "median_size_B": _med(d["size_B"][gm].astype(float)),
                 "median_size_D": _med(d["size_D"][gm].astype(float)),
             }
@@ -794,6 +803,7 @@ def compute(cfg: Config, inp: Mapping[str, Any], rule_by_type: Sequence[Mapping[
     is_go = mo_type == "go"  # statistic.rival.name = mo_type == "go"
 
     min_set = int(uni["min_set"])
+    tie_tol = float(cfg["usefulness"]["rule_share"]["tie_tol"])  # одно сравнение ошибок на весь этап
     r_cfg = uni["R"]
     data: dict[str, dict[str, np.ndarray]] = {}
     tables = []
@@ -808,7 +818,7 @@ def compute(cfg: Config, inp: Mapping[str, Any], rule_by_type: Sequence[Mapping[
             )
         tab["err_R"] = err_r
         eb, ed = tab["err_B"].to_numpy(), tab["err_D"].to_numpy()
-        works = m & (np.nan_to_num(eb, nan=np.inf) < np.nan_to_num(ed, nan=np.inf))
+        works = m & compare_errors(np.nan_to_num(eb, nan=np.inf), np.nan_to_num(ed, nan=np.inf), tie_tol)[0]
         tab["works"] = works
         tab.insert(1, "target", t)
         tables.append(tab)
@@ -840,6 +850,7 @@ def compute(cfg: Config, inp: Mapping[str, Any], rule_by_type: Sequence[Mapping[
         "noise_lo": float(st["noise_flag_lo"]),
         "noise_hi": float(st["noise_flag_hi"]),
         "types": sorted(allowed),
+        "tie_tol": tie_tol,
     }
     runs = {name: evaluate_run(data, labels[name], design) for name, _ in order}
 

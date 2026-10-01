@@ -9,7 +9,8 @@
 1. **Сверка с соседями по своему региону.** У каждого МО общего набора T7 (``t7_errors.csv``, ``common``) —
    ошибка сверки изменения розничного оборота 2023 → 2024 с медианой соседей по своему региону (набор B)
    и с медианой похожих по тратам МО других регионов (D, набор продукта T7), цель без поправки на регион
-   (``err_abs_*``). Доля случаев, где B ошибается строго меньше D, разбор с допуском δ, медиана разности
+   (``err_abs_*``). Доля случаев, где B ошибается строго меньше D (сравнение — ``compare_errors``: разность
+   не больше ``rule_share.tie_tol`` — равенство, исправление 02.10), разбор с допуском δ, медиана разности
    ошибок, бутстрап по группам региона, слова по интервалу и доли по типам; рядом — то же против C (случайные
    МО того же размера из других регионов) и против нового набора R (случайные МО своего региона). Ошибки B и D
    пересчитываются заново из ``context_annual`` и составов наборов (``node_comparable.csv``) и сверяются
@@ -51,6 +52,7 @@ EXPECTED: dict[tuple[str, ...], Any] = {
     ("rule_share", "also_against"): ["C", "R"],
     ("rule_share", "groups"): "region_group",
     ("rule_share", "works"): "strict_less",
+    ("rule_share", "tie_tol"): 1.0e-12,  # добавлено 02.10: исправление сравнения ошибок (см. compare_errors)
     ("rule_share", "share"): "works_over_n",
     ("rule_share", "gain"): "median_paired",
     ("rule_share", "per_mo"): "not_shown",
@@ -113,6 +115,21 @@ def recompute_errors(y: pd.Series, comparable: pd.DataFrame, ids: np.ndarray, se
     """Ошибка МО = |y − медиана y набора| (interpret.tests.T7_utility.error = abs_median)."""
     med = set_medians(y, comparable, set_name).reindex(ids).to_numpy()
     return np.abs(y.reindex(ids).to_numpy() - med)
+
+
+def compare_errors(a: np.ndarray, b: np.ndarray, tol: float) -> tuple[np.ndarray, np.ndarray]:
+    """Сравнение ошибок двух наборов у каждого МО — одно на весь этап (B против D, C и R, R против D).
+
+    Возвращает ``(closer, tie)``: «a ближе» — ``a < b − tol``, ничья — ``|a − b| ≤ tol``; NaN — ни то ни
+    другое. Исправление 02.10.2026 (замечание судьи критерия 5): точное ``a < b`` засчитывало победу,
+    когда одна и та же ошибка пришла разными путями (у B — из ``t7_errors.csv``, который
+    ``pandas.read_csv`` читает с точностью до последнего знака, у R — пересчётом в памяти) и разошлась на
+    ~1e-16. Допуск абсолютный: ошибка — |y − медиана|, и погрешность округления задаёт масштаб y (|y| ≲
+    2), а не сама ошибка — относительный допуск у малых ошибок не поймал бы и такой разницы."""
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    with np.errstate(invalid="ignore"):  # inf − inf у МО вне расчёта цели (NaN → inf) — не ничья
+        return a < b - tol, np.abs(a - b) <= tol
 
 
 def region_random_errors(
@@ -318,7 +335,9 @@ def rule_share(inp: Mapping[str, Any], block: Mapping, seed: int) -> tuple[dict,
     types = inp["types"].set_index("territory_id")["type"].reindex(ids).fillna(0).to_numpy(dtype=np.int64)
     eb, ed, ec = (e[f"err_abs_{s}"].to_numpy() for s in ("B", "D", "C"))
     d = eb - ed
-    works = {"D": eb < ed, "C": eb < ec, "R": eb < er}
+    tol = float(rs["tie_tol"])
+    cmp = {k: compare_errors(eb, x, tol) for k, x in (("D", ed), ("C", ec), ("R", er))}
+    works = {k: c[0] for k, c in cmp.items()}
     delta = float(rs["delta"])
     type_ids = [int(t) for t in sorted(set(types.tolist())) if t > 0]
     stats: dict[str, Callable[[np.ndarray], float]] = {
@@ -336,7 +355,7 @@ def rule_share(inp: Mapping[str, Any], block: Mapping, seed: int) -> tuple[dict,
         interval = ci(draws[f"share_{k}"], level)
         return {
             "works": int(works[k].sum()),
-            "ties": int((eb == {"D": ed, "C": ec, "R": er}[k]).sum()),
+            "ties": int(cmp[k][1].sum()),
             "share": float(works[k].mean()),
             "share_ci": interval,
             "words": share_words(interval, rs["words"]),
@@ -365,6 +384,7 @@ def rule_share(inp: Mapping[str, Any], block: Mapping, seed: int) -> tuple[dict,
         },
         "bootstrap": {"n": n_boot, "level": level, "by": "region_group", "seed": seed},
         "random_draws": int(rs["random_draws"]),
+        "tie_tol": tol,
         "by_type": [],
     }
     for t in type_ids:

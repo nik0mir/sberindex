@@ -298,6 +298,7 @@ def _design(groups, labels_n, strata, seed=0, n_boot=2000, n_perm=2000):
         "noise_lo": 1.5,
         "noise_hi": 1.5,
         "types": [1, 2, 3, 4],
+        "tie_tol": 1e-12,
     }
 
 

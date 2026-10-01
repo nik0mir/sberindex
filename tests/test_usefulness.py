@@ -292,3 +292,80 @@ def test_run_missing_inputs(tmp_path):
     (Path(cfg["paths"]["outputs"]) / "interpret" / "node_seed.csv").unlink()
     with pytest.raises(MissingInputError):
         U.run(cfg)
+
+
+# --- сравнение ошибок с допуском (исправление 02.10.2026) ---------------------------------------------------
+
+
+def test_compare_errors_tie_within_tolerance():
+    a = np.array([0.1, 0.1, 0.1, np.nan])
+    b = np.array([np.nextafter(0.1, 1.0), 0.1 + 1e-6, 0.1 - 1e-6, 0.2])
+    closer, tie = U.compare_errors(a, b, 1e-12)
+    assert closer.tolist() == [False, True, False, False]
+    assert tie.tolist() == [True, False, False, False]
+    # симметрия ничьей; «ближе» — строго за пределом допуска
+    assert U.compare_errors(b[:1], a[:1], 1e-12)[1].tolist() == [True]
+    assert U.compare_errors(np.array([0.0]), np.array([2e-12]), 1e-12)[0].tolist() == [True]
+
+
+def test_rule_share_same_sets_different_paths_are_ties(tmp_path):
+    """Набор R совпадает с B (в группе региона ровно столько МО с целью, сколько членов у B): ошибка B
+    прочитана из CSV, как t7_errors.csv в _read_inputs, ошибка R посчитана в памяти. По смыслу они равны — это
+    ничьи, а не победы B (старое точное «<» засчитывало победу при разнице в последнем знаке)."""
+    rng = np.random.default_rng(5)
+    n_groups, size = 20, 3
+    ids = np.arange(1, n_groups * size + 1)
+    groups = (ids - 1) // size + 1
+    r23 = rng.uniform(50, 150, len(ids))
+    r24 = r23 * np.exp(rng.normal(0.05, 0.05, len(ids)))
+    ctx = pd.DataFrame(
+        {
+            "territory_id": np.r_[ids, ids],
+            "year": np.r_[np.full(len(ids), 2023), np.full(len(ids), 2024)],
+            "retail_pc": np.r_[r23, r24],
+        }
+    )
+    rows = []
+    for i, g in zip(ids, groups, strict=True):
+        rows += [(i, "B", j) for j in ids[(groups == g) & (ids != i)]]  # B = все остальные МО группы = пул R
+        rows += [(i, "D", j) for j in ids[groups != g][(i % 5) :: 11][:3]]
+    comp = pd.DataFrame(rows, columns=["territory_id", "set", "other_id"])
+    y = U.target_change(ctx)
+    mem = pd.DataFrame(
+        {
+            "territory_id": ids,
+            "err_abs_B": U.recompute_errors(y, comp, ids, "B"),
+            "err_abs_C": np.abs(rng.normal(0, 0.05, len(ids))),
+            "err_abs_D": U.recompute_errors(y, comp, ids, "D"),
+            "common": True,
+        }
+    )
+    mem.to_csv(tmp_path / "t7_errors.csv", index=False)
+    errors = pd.read_csv(tmp_path / "t7_errors.csv")  # тот же путь, что у настоящего t7_errors.csv
+    eb_csv = errors["err_abs_B"].to_numpy()
+    # предусловие: чтение CSV меняет последний знак у части ошибок B, и часть из них стала меньше
+    assert (eb_csv < mem["err_abs_B"].to_numpy()).any()
+    inp = {
+        "errors": errors,
+        "context": ctx,
+        "comparable": comp,
+        "nodes": pd.DataFrame({"territory_id": ids, "region_group": groups}),
+        "types": pd.DataFrame({"territory_id": ids, "type": (ids % 4) + 1}),
+        "facts": {
+            "t7": {
+                "product": "D",
+                "n_common": len(ids),
+                "median_error_abs": {s: float(np.median(errors[f"err_abs_{s}"])) for s in ("B", "C", "D")},
+            }
+        },
+    }
+    block = json.loads(json.dumps(load_config()["usefulness"]))
+    block["rule_share"]["bootstrap"] = 50
+    block["rule_share"]["random_draws"] = 5
+    res, table = U.rule_share(inp, block, 0)
+    assert res["vs_R"]["ties"] == len(ids)
+    assert res["vs_R"]["works"] == 0
+    assert not table["works_vs_R"].any()
+    # против D ничьих нет: счёт тот же, что у точного «<»
+    assert res["vs_D"]["ties"] == 0
+    assert res["vs_D"]["works"] == int((eb_csv < errors["err_abs_D"].to_numpy()).sum())

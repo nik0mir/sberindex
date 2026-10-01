@@ -243,11 +243,13 @@ def _shared_case(seed=0, n=80, n_groups=8):
 def test_shared_bootstrap_equals_naive_and_resamples_members_with_regions():
     ids, groups, hi, lo, prep, raw = _shared_case()
     gidx, counts = B.bootstrap_counts(groups, 25, 42)
-    got = Z.shared_bootstrap(prep, gidx, counts, {"x": (hi, lo)}, Z.TARGETS)["x"]
+    got = Z.shared_bootstrap(prep, gidx, counts, {"x": (hi, lo)}, Z.TARGETS, tol=1e-12)["x"]
     want = [_naive_shared(raw, groups, counts[b], hi, lo) for b in range(len(counts))]
     assert got == pytest.approx(want, abs=1e-12)
     # при единичных весах — обычная Δ по исходным медианам D
-    one = Z.shared_bootstrap(prep, gidx, np.ones((1, counts.shape[1])), {"x": (hi, lo)}, Z.TARGETS)["x"][0]
+    one = Z.shared_bootstrap(
+        prep, gidx, np.ones((1, counts.shape[1])), {"x": (hi, lo)}, Z.TARGETS, tol=1e-12
+    )["x"][0]
     plain = []
     for t in Z.TARGETS:
         p = prep[t]
@@ -255,6 +257,43 @@ def test_shared_bootstrap_equals_naive_and_resamples_members_with_regions():
         w = p["mask"] & (p["err_B"] < np.abs(p["own"] - med))
         plain.append(w[p["mask"] & hi].mean() - w[p["mask"] & lo].mean())
     assert one == pytest.approx(np.mean(plain), abs=1e-12)
+
+
+def _naive_share(prep_raw, groups, counts_row, member):
+    """Эталон доли «B ближе D» группы ``member`` (среднее по целям) при весах групп ``counts_row``."""
+    ug = np.unique(groups)
+    pos = {g: i for i, g in enumerate(ug)}
+    cnt = counts_row
+    out = []
+    for t in Z.TARGETS:
+        own, eB, mask, members = prep_raw[t]
+        wv = np.zeros(len(own))
+        ok = np.zeros(len(own), bool)
+        for i in np.flatnonzero(mask & (cnt[[pos[g] for g in groups]] > 0)):
+            yv, gv = members[i]
+            r = np.array([cnt[pos[g]] if g in pos else 1 for g in gv], dtype=int)
+            if r.sum() == 0:
+                continue
+            ok[i] = True
+            wv[i] = eB[i] < abs(own[i] - np.median(np.repeat(yv, r)))
+        wt = cnt[[pos[g] for g in groups]] * ok
+        out.append((wt * wv * member).sum() / (wt * member).sum())
+    return np.mean(out)
+
+
+def test_shared_bootstrap_shares_equal_naive_and_keep_deltas():
+    # доли с общими членами D (добавлено 02.10): как эталон; разности при этом не меняются
+    ids, groups, hi, lo, prep, raw = _shared_case(seed=3)
+    gidx, counts = B.bootstrap_counts(groups, 20, 7)
+    shares = {"lower": hi, "upper": lo}
+    got = Z.shared_bootstrap(prep, gidx, counts, {"x": (hi, lo)}, Z.TARGETS, tol=1e-12, shares=shares)
+    plain = Z.shared_bootstrap(prep, gidx, counts, {"x": (hi, lo)}, Z.TARGETS, tol=1e-12)
+    assert np.array_equal(got["x"], plain["x"], equal_nan=True)
+    for k, member in shares.items():
+        want = [_naive_share(raw, groups, counts[b], member) for b in range(len(counts))]
+        assert got[k] == pytest.approx(want, abs=1e-12)
+    with pytest.raises(QCError, match="совпадают"):
+        Z.shared_bootstrap(prep, gidx, counts, {"x": (hi, lo)}, Z.TARGETS, tol=1e-12, shares={"x": hi})
 
 
 def test_shared_bootstrap_members_follow_their_region():
@@ -273,13 +312,19 @@ def test_shared_bootstrap_members_follow_their_region():
     hi = np.array([True, False, False])
     lo = ~hi
     # все группы по разу: медиана D 0,5 — у МО 0 err_B 0,15 < 0,5 — B ближе
-    a = Z.shared_bootstrap(prep, gidx, np.array([[1.0, 1.0, 1.0]]), {"x": (hi, lo)}, Z.TARGETS)["x"][0]
+    a = Z.shared_bootstrap(prep, gidx, np.array([[1.0, 1.0, 1.0]]), {"x": (hi, lo)}, Z.TARGETS, tol=1e-12)[
+        "x"
+    ][0]
     assert a == pytest.approx(1.0 - 0.0)
     # группа 2 не взята: член 0,9 выпал, медиана D 0,1 — у МО 0 B уже не ближе; МО 2 (группа 2) — вес 0
-    b = Z.shared_bootstrap(prep, gidx, np.array([[1.0, 2.0, 0.0]]), {"x": (hi, lo)}, Z.TARGETS)["x"][0]
+    b = Z.shared_bootstrap(prep, gidx, np.array([[1.0, 2.0, 0.0]]), {"x": (hi, lo)}, Z.TARGETS, tol=1e-12)[
+        "x"
+    ][0]
     assert b == pytest.approx(0.0 - 0.0)
     # пустая группа hi — Δ не определена (выборка отбрасывается)
-    c = Z.shared_bootstrap(prep, gidx, np.array([[0.0, 1.0, 2.0]]), {"x": (hi, lo)}, Z.TARGETS)["x"][0]
+    c = Z.shared_bootstrap(prep, gidx, np.array([[0.0, 1.0, 2.0]]), {"x": (hi, lo)}, Z.TARGETS, tol=1e-12)[
+        "x"
+    ][0]
     assert np.isnan(c)
 
 
@@ -307,6 +352,18 @@ def test_end_to_end_with_usefulness_run(tmp_path):
         assert 0 < p["p_less"] <= 1 and p["n_perm"] == 2000
     # доля по квинтилю = среднее долей по трём целям
     q1 = f["quintiles"][0]
+    # четыре нижних квинтиля вместе и интервалы с общими членами D (добавлено 02.10)
+    lf = f["lower_four"]
+    assert lf["quintiles"] == [1, 2, 3, 4] and lf["n"] == 48
+    assert lf["share"] == pytest.approx(np.mean([lf["per_target"][t]["share"] for t in Z.TARGETS]))
+    for row in (lf, *f["quintiles"]):
+        assert {"share_ci_shared", "sd_boot_shared", "dropped_shared", "share_ci_shared_centered"} <= set(row)
+        if row["share"] is None:  # пустая группа у цели в синтетике — доля не определена (null в JSON)
+            continue
+        shift = row["mean_boot_shared"] - row["share"]
+        assert row["shift_shared"] == pytest.approx(shift)
+        assert row["share_ci_shared_centered"] == pytest.approx([x - shift for x in row["share_ci_shared"]])
+    assert lf["share_ci_shared_centered"][0] <= lf["share"] <= lf["share_ci_shared_centered"][1]
     assert q1["share"] == pytest.approx(np.mean([q1["per_target"][t]["share"] for t in Z.TARGETS]))
     by_mo = pd.read_csv(out / "size_by_mo.csv")
     assert len(by_mo) == 60 and by_mo["in_t7_common"].all()
