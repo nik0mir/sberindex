@@ -178,12 +178,31 @@ def use_texts(tx: Mapping, uf: Mapping, cfg_words: Mapping[str, str]) -> dict[st
     )
     rk = "r_not_worse" if float(med["R"]) <= float(med["B"]) else "r_worse"
     r_line = _fill(tx[rk], {"err_r": style.fmt_num(med["R"], 3), "err_b": style.fmt_num(med["B"], 3)})
+    r_key = words_key(vr["words"], cfg_words)
+    # порция 6g: заранее записанная правка edits.vs_R_not_more_often сработала — одна фраза, откуда заголовок
+    # «со своим регионом» (доля B против R, интервал и ничьи — из facts.json)
+    r_edit = ""
+    if r_key != "more_often" and tx.get("r_edit"):
+        rlo, rhi = vr["share_ci"]
+        ties = int(vr.get("ties") or 0)
+        r_edit = _fill(
+            tx["r_edit"],
+            {
+                "words": vr["words"],
+                "share": style.fmt_pct(vr["share"], 1),
+                "lo": style.fmt_num(100 * rlo, 1),
+                "hi": style.fmt_pct(rhi, 1),
+                # ничьи (наборы совпали) — отдельной вставкой; нет ничьих — вставки нет
+                "ties": _fill(tx.get("r_edit_ties", ""), {"n": style.fmt_num(ties)}) if ties else "",
+            },
+        )
     return {
         "share": share,
         "r_line": r_line,
+        "r_edit": r_edit,
         "rules": tx["rules"],
         "d_key": words_key(vd["words"], cfg_words),
-        "r_key": words_key(vr["words"], cfg_words),
+        "r_key": r_key,
     }
 
 
@@ -292,7 +311,7 @@ def strings(ut: Mapping | None, ex: Mapping | None, flag: str | None) -> list[st
     """Все показываемые строки 6b — для линта (``landing.lint_texts``)."""
     out = [flag or ""]
     if ut:
-        out += [ut["share"], ut["r_line"], ut["rules"]]
+        out += [ut["share"], ut["r_line"], ut["rules"], ut.get("r_edit") or ""]
     if ex:
         out += [ex["label"], ex["title"], ex["text"], ex["rule"], ex["open"], ex["aria"], ex["axis"]]
         out += [r[0] for r in ex["rows"]] + [ex.get("reverse") or ""]

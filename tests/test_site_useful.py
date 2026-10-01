@@ -52,7 +52,7 @@ def _uf(d_words="чаще, чем нет", r_words="чаще, чем нет", r_
             "n": 1542,
             "reference": "при равной точности было бы 50%",
             "vs_D": {"share": 0.5719, "share_ci": [0.5471, 0.5966], "words": d_words},
-            "vs_R": {"share": 0.5253, "share_ci": [0.5007, 0.5497], "words": r_words},
+            "vs_R": {"share": 0.4838, "share_ci": [0.4588, 0.5080], "words": r_words, "ties": 75},
             "median_error_abs": {"B": 0.0362, "C": 0.0382, "D": 0.0416, "R": r_err},
             "gain_median": -0.0053,
         },
@@ -137,6 +137,13 @@ def test_edits_by_words_executed_literally():
     assert ft["use"]["title"] == TX["findings"]["use"]["title_less_often"]
     ft = _ft(_uf(r_words=WORDS["about_half"]))
     assert ft["use"]["title"] == "Сверяйте со своим регионом"
+    # порция 6g: правка vs_R_not_more_often сработала — одна фраза с долей B против R, интервалом и ничьими
+    assert ft["use"]["r_edit"] == (
+        "Почему «со своим регионом», а не «с соседями»: ближайшие соседи точнее случайных муниципалитетов "
+        "своего региона примерно в половине случаев (48,4%, 95% интервал 45,9–50,8%; ещё в 75 случаях ошибки "
+        "равны), и по правке, записанной до расчёта, совет не утверждает, что ближние соседи лучше дальних"
+    )
+    assert _ft(_uf())["use"]["r_edit"] == ""  # «чаще, чем нет» — правки нет, фразы нет
     # без usefulness — прежний текст колонки, без доли
     from test_site_findings import _checks, _facts, _story
 

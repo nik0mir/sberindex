@@ -42,6 +42,9 @@ def _sc(delta=-0.0526):
             for i, (s, c) in enumerate(zip(SHARES, CI, strict=True))
         ],
         "crosstab_types_large": {"types_hi_large": 235, "types_hi_rest": 203, "types_lo_large": 74},
+        # порция 6g: одна доля нижних четырёх групп и интервал разности при общих соседях
+        "lower_four": {"share": 0.5629, "share_ci_shared_centered": [0.5351, 0.5930]},
+        "shared_members_bootstrap": {"large_vs_rest": {"delta": -0.0563, "delta_ci": [-0.1043, 0.0010]}},
         "by_mo": {"n_large": 2},
         "qc": {"by_type_main_delta": delta},
     }
@@ -73,8 +76,14 @@ def test_size_texts_numbers_from_files():
     st = site_size.size_texts(SX, _bt(), _sc(), NAMES)
     assert st is not None
     small = st["advice_small"].replace("⁠", "")
-    assert "55–58%" in small and "до 53,5 тыс. жителей" in small
-    assert "(50,7%)" in st["advice_large"] and "от 53,5 тыс." in st["advice_large"]
+    assert "в 56,3% случаев (95% интервал 53,5–59,3%)" in small and "до 53,5 тыс. жителей" in small
+    assert "в каждой группе" not in small and "55–58" not in small
+    large = st["advice_large"].replace("⁠", "")
+    assert "(50,7%, 95% интервал 46,0–54,2%)" in large and "от 53,5 тыс." in large
+    cav = st["large_caveat"]
+    assert "после того, как увидели черновые числа" in cav and "доходит до нуля" in cav
+    assert "от −10,4 до +0,1 процентного пункта" in cav
+    assert "ничего не добавля" not in st["posthoc"] and "не видно, чтобы тип" in st["posthoc"]
     bt = st["by_type"]
     assert "во всех 3 прогонах" in bt and "51,3%" in bt and "56,6%" in bt and "5,3 процентного пункта" in bt
     assert "от 1,9 до 8,4" in bt and "76%" in bt and "«Тип три» и «Тип четыре»" in bt
@@ -82,6 +91,18 @@ def test_size_texts_numbers_from_files():
     assert [r["label"] for r in st["rows"]][0] == "до 11,7 тыс. жителей"
     assert [r["large"] for r in st["rows"]] == [False] * 4 + [True]
     assert "похожие лучше" not in " ".join(site_size.strings(st)).lower()
+
+
+def test_large_caveat_follows_interval_and_lower_four_required():
+    """Порция 6g: «доходит до нуля» — только если верхняя граница интервала разности не ниже нуля; без
+    lower_four в size_check.json советов нет (старый файл)."""
+    sc = _sc()
+    sc["shared_members_bootstrap"]["large_vs_rest"]["delta_ci"] = [-0.1043, -0.0050]
+    cav = site_size.size_texts(SX, _bt(), sc, NAMES)["large_caveat"]
+    assert "доходит до нуля" not in cav and "от −10,4 до −0,5 процентного пункта" in cav
+    sc = _sc()
+    del sc["lower_four"]
+    assert site_size.size_texts(SX, _bt(), sc, NAMES) is None
 
 
 def test_size_texts_none_unless_all_confirmed():
@@ -127,7 +148,8 @@ def test_findings_use_column_with_size():
     ft["use"]["size"] = site_size.size_texts(SX, _bt(), _sc(), NAMES)
     h = site_findings.findings_html(ft, _story(), [2, 1, 3, 4], landing._t, "Источник.")
     use = h[h.index('id="fd-use"') :]
-    assert use.count('class="fd-adv') == 2 and "size-svg" in use and 'class="fd-bytype"' in use
+    assert use.count('class="fd-adv ') == 2 and "size-svg" in use and 'class="fd-bytype"' in use
+    assert 'class="fd-note fd-adv-note"' in use
     assert use.index("size-svg") < use.index('<details class="more fd-more">') < use.index('class="fd-share"')
     assert h.count('<svg class="vw fd-svg size-svg') == 1 and h.count('<svg class="vp fd-svg size-svg') == 1
     texts = site_findings.strings(ft)

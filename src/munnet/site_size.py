@@ -163,16 +163,39 @@ def size_texts(tx: Mapping, bt: Mapping, sc: Mapping, names: Mapping[str, str]) 
             main.get("verdict"),
         )
         return None
-    small = [float(q["share"]) for q in qs[:4]]
     big = qs[4]
     bound = float(sc["quintile_bounds"][-1])
+    # порция 6g: нижние четыре группы — одной долей (lower_four) с интервалом при общих соседях в наборах
+    # (share_ci_shared_centered), верхняя — с обычным интервалом квинтиля (тот же, что на графике); диапазоны
+    # не переносятся по тире (WORD JOINER по обе стороны)
+    lf = sc.get("lower_four") or {}
+    if lf.get("share") is None or not lf.get("share_ci_shared_centered"):
+        log.warning("site: в size_check.json нет lower_four — советов по размеру нет (size_posthoc)")
+        return None
+    wj = "⁠"
+    slo, shi = (float(x) for x in lf["share_ci_shared_centered"])
+    # тот же способ, что у совета небольшим: бутстрап с общими членами D вокруг точечной доли (есть всегда
+    # вместе с lower_four); обычный интервал — только на графике
+    blo, bhi = (float(x) for x in (big.get("share_ci_shared_centered") or big["share_ci"]))
     vals = {
-        # диапазон «55–58%» не переносится по тире (WORD JOINER по обе стороны)
-        "lo": style.fmt_num(100 * min(small), 0) + "⁠",
-        "hi": "⁠" + style.fmt_num(100 * max(small), 0),
+        "small_share": style.fmt_pct(lf["share"], 1),
+        "small_lo": style.fmt_num(100 * slo, 1) + wj,
+        "small_hi": wj + style.fmt_pct(shi, 1),
         "threshold": _thousands(bound),
         "share": style.fmt_pct(big["share"], 1),
+        "large_lo": style.fmt_num(100 * blo, 1) + wj,
+        "large_hi": wj + style.fmt_pct(bhi, 1),
     }
+    # оговорка о пороге «самые крупные»: интервал разности «верхняя группа − остальные» при общих соседях
+    lv = ((sc.get("shared_members_bootstrap") or {}).get("large_vs_rest") or {}).get("delta_ci")
+    caveat = ""
+    if lv:
+        dlo, dhi = (100 * float(x) for x in lv)
+        key = "large_caveat" if dhi >= 0 else "large_caveat_below"
+        if tx.get(key):
+            caveat = _fill(
+                tx[key], {"d_lo": style.fmt_num(dlo, 1, sign=True), "d_hi": style.fmt_num(dhi, 1, sign=True)}
+            )
     labels = group_labels(sc["quintile_bounds"])
     rows = [
         {
@@ -213,6 +236,7 @@ def size_texts(tx: Mapping, bt: Mapping, sc: Mapping, names: Mapping[str, str]) 
     return {
         "advice_small": _fill(tx["advice_small"], vals),
         "advice_large": _fill(tx["advice_large"], vals),
+        "large_caveat": caveat,
         "lead_small": tx.get("lead_small", ""),
         "lead_large": tx.get("lead_large", ""),
         "chart": _fill(
@@ -239,8 +263,8 @@ def strings(st: Mapping | None, card: str = "") -> list[str]:
     """Все показываемые строки 6f — для линта (``landing.lint_texts``)."""
     out = [card]
     if st:
-        keys = ("advice_small", "advice_large", "lead_small", "lead_large", "chart", "posthoc", "by_type",
-                "more", "aria", "ref")  # fmt: skip
+        keys = ("advice_small", "advice_large", "large_caveat", "lead_small", "lead_large", "chart",
+                "posthoc", "by_type", "more", "aria", "ref")  # fmt: skip
         out += [str(st[k]) for k in keys] + [r["label"] for r in st["rows"]]
     return [s for s in out if s]
 

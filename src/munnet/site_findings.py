@@ -186,7 +186,7 @@ def findings_texts(
         "text": _fill(u[text_key], nums),
     }
     if ut:
-        use |= {"share": ut["share"], "r_line": ut["r_line"], "rules": ut["rules"]}
+        use |= {k: ut.get(k, "") for k in ("share", "r_line", "rules", "r_edit")}
     if (useful or {}).get("size"):  # порция 6f: два совета по размеру МО (site_size)
         use["size"] = useful["size"]
     border_flag = (useful or {}).get("flag")
@@ -390,6 +390,8 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
         body = f"<p>{esc(_dot(p['text']))}</p>"
         if key == "use" and p.get("share"):  # порция 6b: доля случаев и оговорка о своём регионе
             body += f'<p class="fd-share">{esc(_dot(p["share"]))}</p><p>{esc(_dot(p["r_line"]))}</p>'
+            if p.get("r_edit"):  # порция 6g: откуда заголовок «со своим регионом» (edits.vs_R_not_more_often)
+                body += f'<p class="fd-note fd-redit">{esc(_dot(p["r_edit"]))}</p>'
         if key == "use" and p.get(
             "size"
         ):  # порция 6f: два совета по размеру; розница — под «Где нашли совет»
@@ -423,6 +425,8 @@ def _use_size_html(p: Mapping, body: str, fig: str, extra: str, esc: Esc) -> str
         f'<p class="fd-adv fd-adv-{k}"><b>{esc(st["lead_" + k])}</b> {esc(_dot(st["advice_" + k]))}</p>'
         for k in ("small", "large")
     )
+    if st.get("large_caveat"):  # порция 6g: порог выбран после черновых чисел; интервал при общих соседях
+        advice += f'<p class="fd-note fd-adv-note">{esc(_dot(st["large_caveat"]))}</p>'
     chart = _pair(lambda w: site_size.size_svg(st, w))
     return (
         f'<div class="fd fd-use" id="fd-use"><p class="fd-lab">{esc(p["label"])}</p>'
