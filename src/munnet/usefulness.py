@@ -18,7 +18,7 @@
    вариантах R1 и повторах seed и везде тот же тип; тот же тип везде, где узел есть, но вариантов меньше —
    «проверен в N из 3 вариантов»; иначе — «тип зависит от варианта расчёта».
 
-Выходы — ``outputs/usefulness/``: ``facts.json``, ``rule_by_mo.csv``, ``mo_flags.csv``.
+Выходы — ``<paths.outputs>/usefulness/``: ``facts.json``, ``rule_by_mo.csv``, ``mo_flags.csv``.
 """
 
 from __future__ import annotations
@@ -506,7 +506,7 @@ def run(cfg: Config) -> dict:
         "type_flag": flags_summary(flags, inp["r1"]),
         "inputs_sha256": {k: _sha256(p) for k, p in inp["paths"].items()},
     }
-    out = Path(block["out"])
+    out = cfg.dir("outputs") / "usefulness"
     out.mkdir(parents=True, exist_ok=True)
     table.to_csv(out / "rule_by_mo.csv", index=False)
     cols = [

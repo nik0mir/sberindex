@@ -218,7 +218,6 @@ def _synthetic(tmp: Path, rng: np.random.Generator, n: int = 60, break_errors: b
     data = load_config().data
     data = json.loads(json.dumps(data, default=str))
     data["paths"] = {**data["paths"], "outputs": str(out), "processed": str(processed)}
-    data["usefulness"]["out"] = str(out / "usefulness")
     data["usefulness"]["rule_share"]["bootstrap"] = 200
     data["usefulness"]["rule_share"]["random_draws"] = 20
     path = tmp / "cfg.yaml"
@@ -229,7 +228,7 @@ def _synthetic(tmp: Path, rng: np.random.Generator, n: int = 60, break_errors: b
 def test_run_end_to_end(tmp_path):
     cfg, y, eb, ed = _synthetic(tmp_path, np.random.default_rng(1))
     facts = U.run(cfg)
-    out = Path(cfg["usefulness"]["out"])
+    out = Path(cfg["paths"]["outputs"]) / "usefulness"
     assert {p.name for p in out.iterdir()} == {"facts.json", "rule_by_mo.csv", "mo_flags.csv"}
     r = facts["rule"]
     v = r["vs_D"]

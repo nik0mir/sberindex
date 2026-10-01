@@ -10,6 +10,7 @@
   `outputs/network/report_facts.json`; `cl.` — `outputs/cluster/report_facts.json`; `icvi.` —
   `outputs/evaluate/report_facts.json`; `dyn.` — `outputs/dynamics/report_facts.json`;
 - `int.<ключ>` — значение ключа в `outputs/interpret/facts.json` (этап `interpret`). Числа §1 и §8 сверены 30.09.2026 по выходам полного перерасчёта этапа (завершён 30.09.2026 14:41, тот же код и конфиг): от утреннего прогона `facts.json` отличается только названиями типов после слепой проверки (`names_final`, `naming_test`), новым блоком пояснений `post_unsealing` и временем (`seconds`, `timing`); все остальные числа совпали побайтно. `csv:outputs/interpret/…` — CSV того же этапа;
+- `use.<ключ>` — значение ключа в `outputs/usefulness/facts.json` (этап `usefulness`, разведка после вскрытия; первый прогон 01.10.2026 10:23:55 +0300 — время записи файлов, после коммитов `82636b3` и `cf9cd49` в 10:22:51). Повторный прогон 01.10.2026 в отдельную папку дал те же sha256 трёх файлов. `csv:outputs/usefulness/…` — CSV того же этапа;
 - `controls:<ключ>` — поле `actual` в `outputs/panel/controls.json`;
 - `yaml:<путь>` — значение в `configs/default.yaml`;
 - `csv:<файл> [строка; колонка]` — значение в CSV;
@@ -35,6 +36,11 @@
 | 1 | у 93% узлов | `int.tree.accuracy` (0,927) | правило дерева восстанавливает тип |
 | 1 | 47–54%; ρ от 0,46 до 0,55 | `csv:outputs/interpret/node_r1.csv` [same по variant: graph_basket_cos — 833 из 1776 = 0,469; nodes_separate — 1091 из 2016 = 0,541]; `csv:outputs/interpret/t1_runs.csv` [turnover = retail; rho_a: наименьший 0,461 — variant:nodes_separate, наибольший 0,551 — main и seed-прогоны] | тип отдельного МО при другом правиле рёбер; порядок типов по рознице во всех прогонах R1 |
 | 1 | `90991e1`, 29.09.2026; `abc6107` | `git:90991e1` (2026-09-29 23:41 +0300), `git:abc6107` | предрегистрация этапа 5; код, написанный вслепую |
+| 1 | 882 из 1542; 57,2% (95% интервал 54,7–59,7%); «чаще, чем нет»; 50% | `use.rule.vs_D.works` (882), `use.rule.n` (1542), `use.rule.vs_D.share` (0,5720), `use.rule.vs_D.share_ci` (0,5472; 0,5966), `use.rule.vs_D.words`; `use.rule.reference` | доля случаев, где соседи по региону ближе похожих по корзине МО других регионов, цель без поправки на регион |
+| 1 | 0,035 против 0,036; 52,5% (50,1–55,0%) | `use.rule.median_error_abs.R` (0,0353), `use.rule.median_error_abs.B` (0,0362); `use.rule.vs_R.share` (0,5253), `use.rule.vs_R.share_ci` (0,5007; 0,5497) | против случайных МО своего региона (набор R) |
+| 1 | 32,5% | `use.type_flag.stable_share` (0,3255) | флаг «тип устойчив» |
+| 1 | 47–54% (формулировка «при другом правиле рёбер или с районами Москвы и Петербурга отдельными узлами») | как в строке выше: `node_r1.csv`, graph_basket_cos 0,469 и nodes_separate 0,541 | правка 01.10: 54% — вариант «районы отдельно», а не другое правило рёбер |
+| 1 | `82636b3`; `cf9cd49` | `git:82636b3`, `git:cf9cd49` (оба 2026-10-01 10:22:51 +0300) | предрегистрация блока `usefulness`; код и тесты |
 
 Вставка в разделе 7 («Проверка этапа 5») повторяет числа раздела 1: 181, 21, 47, 8 из 9, 148, 33.
 
@@ -324,6 +330,7 @@
 | 8 | +0,29 / +0,31; −0,06 / −0,07; +0,05 / +0,02; +0,19 / +0,27 | то же, window = 2023 и 2024: clr_rel_cafe, clr_rel_food, clr_rel_marketplace, log_level_rel | пример МО относительно региона |
 | 8 | тип 3 у territory_id 44 | `csv:outputs/interpret/types.csv` [territory_id = 44; type] | пример МО, тип |
 | 8 | 0,050; 0,058; 1542; 10 МО | `int.t7.example.error` (0,0496), `csv:outputs/interpret/t7_errors.csv` [territory_id = 44; err_B = 0,0583], `int.t7.n_common`, `yaml:interpret.tests.T7_utility.k` | пример МО, сверка |
+| 8 | 0,058 против 0,033 (пример этапа 5 без поправки на регион); на сайте 0,058 против 0,050 | `use.example.stage5_example.err_B` (0,0583), `use.example.stage5_example.err_D` (0,0330); сайт — `outputs/site_5a/index.html`, глава 6, таблица «Ошибки наборов таблицей», колонка «У муниципалитета примера»: B 0,0583, D 0,0496 (= `int.t7.example.error`) | Благовещенский район, две цели |
 | 8 | T1: 0,52–0,59, 1705; 0,32–0,42, 1241; 0,17, 0,24; 0,28, 0,35; −0,10 (от −0,16 до −0,05); −0,11 (от −0,17 до −0,04) | `int.t1.per.retail.rho_a_ci`, `n_a`; `int.t1.per.catering.rho_a_ci`, `n_a`; `rho_b`; `best_rival_rho`; `int.t1.per.retail.diff_point`, `diff_ci`; `int.t1.per.catering.diff_point`, `diff_ci` | T1 |
 | 8 | T5: 0,28; 0,12; −0,003; не выше 0,10 | `int.t5.ami.sized:log_pop_rel:+` (0,283), `int.t5.ami.sized:log_wage_rel:+` (0,123), `int.t5.region_ami` (−0,0032); наибольший AMI делений `sized:emp_sh_*` — 0,0985 (`emp_sh_industry:+`) | T5 |
 | 8 | 0,024; 0,002–0,003; 0,006–0,026 | `cl.val_nights_pc_difference`; как в разделе 5 | внешняя проверка этапа 3 |
@@ -334,6 +341,41 @@
 | 8 | K = 4 | `cl.final_k` | число типов |
 
 Пояснение к T3 («тяжёлый хвост плацебо» на сети «косинус корзин») опирается только на числа `int.post_unsealing.t3_runs` (95-й перцентиль 236 против 47 в основном расчёте, доля псевдопар выше реальности 0,11). Объяснение причины хвоста («два почти равных решения с K = 4») из сообщения коммита `ea65acd` в текст не вошло: в журнале после вскрытия и в коде его нет, отдельного расчёта в репозитории тоже.
+
+## Раздел 8, «Чем полезно» и «Флаг устойчивости типа» (этап `usefulness`)
+
+| Раздел | Число в тексте | Источник | Что это |
+|---|---|---|---|
+| 8 | `82636b3`; `cf9cd49`; 01.10.2026 | `git:82636b3`, `git:cf9cd49`; время записи `outputs/usefulness/*` — 2026-10-01 10:23:55 +0300 | правила до расчёта, код, первый прогон |
+| 8 | n = 1542; 10 МО в наборах; 100 розыгрышей; 58 групп; 2000 выборок | `use.rule.n`, `yaml:interpret.tests.T7_utility.k`, `use.rule.random_draws`, `use.rule.n_groups`, `use.rule.bootstrap.n` | |
+| 8 | 50% (пороги слов) | `yaml:usefulness.rule_share.words` (комментарии), `munnet.usefulness:share_words` | |
+| 8 | табл.: 882 / 894 / 810 из 1542 | `use.rule.vs_D.works`, `use.rule.vs_C.works`, `use.rule.vs_R.works` | соседи ближе |
+| 8 | табл.: 57,2% (54,7–59,7%); 58,0% (55,4–60,4%); 52,5% (50,1–55,0%) | `use.rule.vs_D.share`, `.share_ci`; `use.rule.vs_C.share` (0,5798), `.share_ci` (0,5541; 0,6045); `use.rule.vs_R.share` (0,5253), `.share_ci` (0,5007; 0,5497) | доли и интервалы |
+| 8 | табл.: «чаще, чем нет» трижды | `use.rule.vs_D.words`, `use.rule.vs_C.words`, `use.rule.vs_R.words` | слова по правилу |
+| 8 | табл.: 0,042; 0,038; 0,035; 0,036 | `use.rule.median_error_abs.D` (0,0416), `.C` (0,0382), `.R` (0,0353), `.B` (0,0362) | медианные ошибки, цель без поправки |
+| 8 | 11 МО | `use.rule.vs_R.ties` | равенства с набором R |
+| 8 | допуск 0,01; около 1% | `use.rule.delta.value`; `yaml:usefulness.rule_share.delta` (комментарий «0,01 ≈ 1% изменения оборота») | |
+| 8 | 691; 381; 470 | `use.rule.delta.b_better`, `use.rule.delta.within`, `use.rule.delta.d_better` | разбор с допуском |
+| 8 | −0,0053 (−0,0083…−0,0035); «у типичного МО соседи по региону ближе» | `use.rule.gain_median`, `use.rule.gain_ci`, `use.rule.gain_words` | медиана поэлементной разности |
+| 8 | −0,005 (разность медиан) | `int.t7.diffs.B-D_abs` (как в разделе 1) | другая величина, не смешивается с медианой разности |
+| 8 | 50,1% | `use.rule.vs_R.share_ci[0]` (0,5007) | нижняя граница против R |
+| 8 | правка `edits.more_often`; `vs_R_not_more_often` не сработала | `use.rule.edit`; ключа `use.rule.edit_R` в `facts.json` нет | |
+| 8 | по типам: 60,8% (55,9–65,1%; 411); 59,0% (55,2–62,9%; 693); 50,3% (44,4–56,8%; 344); 53,2% (44,6–61,3%; 94); слова | `use.rule.by_type` [type = 2, 1, 3, 4: share, share_ci, n, words] | без сравнения между типами |
+| 8 | Йошкар-Ола, Республика Марий Эл, тип 4 «Крупные города, меньше продуктов» | `use.example.name`, `.region`, `.type`, `.type_name` | пример по правилу `median_paired_diff` |
+| 8 | 21,7%; 19,9%; 19,2% | `use.example.own_change` (0,2172), `.median_B_change` (0,1986), `.median_D_change` (0,1922) | изменение оборота, exp − 1 |
+| 8 | 10 соседей и км: 17, 31, 34, 45, 60, 64, 64, 68, 75, 82 | `use.example.members_B` [name, km: 16,9; 30,6; 34,1; 44,7; 60,0; 64,4; 64,5; 68,2; 74,9; 82,0] | |
+| 8 | 10 похожих; от 232 до 5863 км | `use.example.members_D` [name; km: наименьший 232,4 — Кстовский, наибольший 5863,4 — Находкинский] | |
+| 8 | 0,015; 0,021; 0,005 | `use.example.err_B` (0,0154), `.err_D` (0,0207), `.d` (−0,0053) | ошибки примера |
+| 8 | 23-й и 28-й процентили | `use.example.pct_B` (0,2283), `.pct_D` (0,2776) | доля МО с ошибкой не больше, чем у примера |
+| 8 | 0,058 против 0,033; 67-й и 42-й процентили | `use.example.stage5_example.err_B` (0,0583), `.err_D` (0,0330), `.pct_B` (0,6744), `.pct_D` (0,4163) | Благовещенский район, цель без поправки |
+| 8 | Йошкар-Ола по цели относительно региона: 0,013 против 0,015 | `csv:outputs/interpret/t7_errors.csv`, territory_id 269: `err_D` 0,01251, `err_B` 0,01542 | пример по правилу, другая цель |
+| 8 | 3 варианта; 4 повтора; seed 142, 242, 342, 442 | `yaml:usefulness.type_flag.variants`, `.seeds`; `yaml:interpret.robustness.variants`, `yaml:interpret.robustness.seeds` (42 — основной расчёт) | |
+| 8 | флаг «проверен в N из 3» — ни у кого; Москва и Петербург | `use.type_flag.partial_check` (0); `csv:outputs/usefulness/mo_flags.csv` [territory_id 90077, 90078: variant_runs = 2, variant_same = 1] | |
+| 8 | 578 из 1776 (32,5%); 1198 | `use.type_flag.stable`, `use.type_flag.n`, `use.type_flag.stable_share` (0,3255), `use.type_flag.depends` | флаг |
+| 8 | табл.: 100%; 99,8% (1773 из 1776); 57,3% (1016 из 1774); 46,9% (833 из 1776) | `use.type_flag.seeds_only_share` (1,0); `use.type_flag.per_variant` [no_level 0,9983 × 1776; nodes_separate 0,5727 × 1774; graph_basket_cos 0,4690 × 1776]; счёт — `csv:outputs/interpret/node_r1.csv` [kind = variant; same; узлы с типом] | разбивка |
+| 8 | 71,5% (1270 из 1776) | `use.type_flag.majority`, `use.type_flag.majority_share` (0,7151) | мягкое правило |
+| 8 | 54,1% (1091 из 2016); 242 района | `csv:outputs/interpret/node_r1.csv` [variant = nodes_separate: 2016 строк, same 1091]; 242 = 2016 − 1774: районы Москвы (144) и Петербурга (98), которых нет в основном расчёте (`data/processed/territories.parquet`, region_name) | знаменатель раздела 9 и сайта |
+| 8 | по типам: 62,6% (296 из 473); 7,8% (63 из 806); 30,5% (120 из 394); 96,1% (99 из 103) | `use.type_flag.by_type` [type = 2, 1, 3, 4: stable, n, stable_share] | |
 
 ## Раздел 9. Ограничения
 
@@ -350,6 +392,9 @@
 | 9 | 1705; 1241 из 1774 | `int.t1.per.retail.n_a`, `int.t1.per.catering.n_a`, `int.scope.n_territorial` | покрытие оборотов Росстата |
 | 9 | 1115; 1569 | `int.t6.n_nodes`, `int.t7.n_known` | оба года оборота общепита; оба года розницы |
 | 9 | 46,9% (833 из 1776); 54,1% (1091 из 2016); 99,8%; все; ρ от 0,46 до 0,55 | `csv:outputs/interpret/node_r1.csv` [same: graph_basket_cos 833/1776, nodes_separate 1091/2016, no_level 1773/1776 = 0,998, seed:142…442 — 1776/1776]; `csv:outputs/interpret/t1_runs.csv` (как в разделе 1) | тип отдельного МО в прогонах R1; порядок по рознице |
+| 9 | 57,3% среди 1774 | `use.type_flag.per_variant` [nodes_separate] | как в разделе 8 |
+| 9 | 32,5% (578 из 1776); у типа 1 — 7,8% | `use.type_flag.stable_share`, `use.type_flag.stable`; `use.type_flag.by_type` [type = 1] | флаг устойчивости |
+| 9 | 57,2%; у типов 3 и 4 — «примерно в половине случаев» | `use.rule.vs_D.share`; `use.rule.by_type` [type = 3, 4: words] | совет «сверяйте с соседями» |
 
 ## Раздел 10. Воспроизводимость
 
@@ -371,6 +416,8 @@
 | 10 | 30.09.2026; seed 43 и 44; 1776 узлах; ARI 1,00 | сравнение `data/processed/cluster_final.parquet` с `cluster_final.parquet` прогонов с `seed: 43` и `seed: 44` во временных папках: `sklearn.metrics.adjusted_rand_score` = 1.0, доля совпавших меток 1.0 на 1776 общих узлах | проверено при подготовке отчёта 30.09 |
 | 10 | спектральная с K = 4 при seed 43 | `cl.all_winner` в `report_facts.json` прогона с `seed: 43` | |
 | 10 | 7241 с, около 2 ч; 6 процессов; 101 мин | `int.seconds` (7240,5), `int.workers` (6), `int.timing.robustness` (6057,8 с) | время этапа `interpret`, полный перерасчёт 30.09.2026 (утренний прогон — 7374 с) |
+| 10 | около 10 с; 0,3 МБ | замер 01.10.2026: `usefulness` с выходом во временную папку — 10 с от запуска до выхода (по журналу этапа — 8 с); `du -sh outputs/usefulness` → 336K | время и место этапа |
+| 10 | побайтно (sha256) | повторный прогон 01.10.2026: sha256 `facts.json` 892c5209…, `rule_by_mo.csv` 660936db…, `mo_flags.csv` 1a56bb12… совпали с файлами `outputs/usefulness/` | воспроизведение этапа |
 
 ## Приложение А
 
