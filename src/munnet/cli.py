@@ -26,6 +26,10 @@ STAGES = {
     "evaluate": ("munnet.icvi", "посчитать ICVI: SW, CH, S_Dbw, AVI, AVU, MQ"),
     "dynamics": ("munnet.dynamics", "проследить изменения кластеров во времени"),
     "interpret": ("munnet.interpret", "проверки тезиса, профили, названия и примеры типов (этап 5)"),
+    "usefulness": (
+        "munnet.usefulness",
+        "разведка после вскрытия: польза сверки с соседями по региону, устойчивость типа МО",
+    ),
     "site": ("munnet.landing", "собрать данные для интерактивного лендинга"),
 }
 

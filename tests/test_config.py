@@ -38,6 +38,7 @@ def test_stage_order():
         "evaluate",
         "dynamics",
         "interpret",
+        "usefulness",
         "site",
     ]
 
