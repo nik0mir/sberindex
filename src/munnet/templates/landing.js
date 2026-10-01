@@ -356,7 +356,7 @@ function rhythmChart(rh) {
 // 2023 → 2024: типы годовых окон и итоговый тип (по всем 24 месяцам) говорятся одной строкой, без путаницы
 function statusLine(r) {
   if (r.t23 == null || r.t24 == null) return "";
-  const T = (t) => `тип ${t}`;
+  const T = (t) => `тип «${esc(typeName(t))}»`;  // порция 6a: название, а не номер
   if (r.t23 === r.t24) {
     if (r.t == null || r.t === r.t23) return `<p class="status">В 2023 и 2024 годах тип не менялся.</p>`;
     return `<p class="status">В 2023 и 2024 годах по отдельности — ${T(r.t23)}. Итоговый ${T(r.t)} посчитан по всем 24 месяцам сразу, поэтому может отличаться от типа отдельного года.</p>`;
@@ -729,7 +729,7 @@ function showFlow(a, b) {
   const rows = flowMembers(a, b);
   box.dataset.key = key;
   box.hidden = false;
-  const head = `${fig(a)}Тип ${a} → ${fig(b)}Тип ${b}: ${nf.format(rows.length)} ${plural(rows.length, "муниципалитет", "муниципалитета", "муниципалитетов")}`;
+  const head = `${fig(a)}${esc(typeName(a))} → ${fig(b)}${esc(typeName(b))}: ${nf.format(rows.length)} ${plural(rows.length, "муниципалитет", "муниципалитета", "муниципалитетов")}`;
   box.innerHTML = `<p><b>${head}</b></p><ul>${rows.map((r) =>
     `<li><a href="#mo=${r.id}" data-go="${r.id}">${esc(r.ns || r.n)}</a> <small>${esc(r.r)}</small></li>`).join("")}</ul>`;
 }

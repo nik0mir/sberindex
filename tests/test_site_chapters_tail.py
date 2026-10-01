@@ -152,7 +152,7 @@ def test_every_chapter_has_title_source_and_alt():
 
 def test_comparable_rows_sorted_b_always_and_verbatim_text():
     sec = section(page(), "comparable")
-    comp = re.search(r'<svg class="ch-svg comp dots".*?</svg>', sec, re.S).group(0)
+    comp = re.search(r'<svg class="vw ch-svg comp dots".*?</svg>', sec, re.S).group(0)
     order = re.findall(r">([ABCD]) · ", comp)
     assert order == ["B", "C", "A", "D"]  # по возрастанию медианной ошибки; B — всегда
     assert re.search(r'<details class="how"><summary>Как проверяли</summary><p>Текст T7\.</p>', sec)
@@ -180,7 +180,8 @@ def test_r1_maps_mark_exactly_changed_nodes():
     first = re.search(r'<path d="([^"]*)"', maps[0]).group(1)
     assert first.count("h0") == 2  # узлы 2 и 3
     assert re.search(r'<path d=""', maps[1])  # в варианте без уровня тип у всех тот же
-    assert "тот же тип у 50% (2 из 4)" in sec and "0,22" in sec
+    # доля — с одним знаком, как в блоке «Что устояло» (порция 6a)
+    assert "тот же тип у 50,0% (2 из 4)" in sec and "0,22" in sec
     assert '<p class="kicker">Чего данные не показывают</p><h2' in sec
 
 

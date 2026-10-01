@@ -608,6 +608,7 @@ def hero_texts(cfg: Config, tx: Mapping[str, str], scope: Mapping, n_types: int)
         "n_types_gen": gen,
         "n_types": f"{nom} {plural_ru(n_types, 'тип', 'типа', 'типов')}",
         "n_cells": style.fmt_num(n_cells) if n_cells else "",
+        "n_untyped": style.fmt_num(int(scope.get("n_untyped") or 0)),
     }
     return {k: fill(str(v), vals) for k, v in tx.items() if k != "island_note"}
 
@@ -2213,7 +2214,7 @@ def screen0_html(
 HERO_KEYS = (
     "brand", "brand_sub", "to_types", "to_map", "howto", "howto_touch", "more", "reset", "zoom_in",
     "zoom_out",
-    "canvas_label", "checked_label",
+    "canvas_label", "checked_label", "to_flat", "to_3d", "flat_note", "picked_note",
 )  # fmt: skip
 
 

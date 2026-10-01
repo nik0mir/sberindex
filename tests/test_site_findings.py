@@ -112,7 +112,8 @@ def test_findings_html_and_lint():
     story = _story()
     ft = site_findings.findings_texts(TX["findings"], story, _facts(), _checks())
     h = site_findings.findings_html(ft, story, [2, 1, 3, 4], ESC, "Источник: СберИндекс (CC BY-SA 4.0).")
-    assert h.count('class="fd fd-') == 3 and h.count("<svg") == 3 and 'id="findings"' in h
+    assert h.count('class="fd fd-') == 3 and h.count("<svg") == 6 and 'id="findings"' in h
+    assert h.count('<svg class="vw fd-svg') == 3 and h.count('<svg class="vp fd-svg') == 3  # и для телефона
     assert "×2,13" in h and "×0,75" in h  # exp(med_a) у типов 4 и 2
     assert h.index("Тип четыре") < h.index("Тип два")  # ступени снизу вверх: тип 4 — верхняя строка
     assert "stroke-dasharray" in h  # линия overall_only — пунктир

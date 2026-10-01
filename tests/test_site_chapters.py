@@ -177,17 +177,17 @@ def test_order_columns_by_size_has_no_line():
     st = story(t1_layout="columns_by_size", legend_order=[3, 1, 4, 2])
     a, _, _ = SC.order_svgs(st, checks("dashed", "dashed"))
     assert 'stroke-width="1.5"' not in a
-    labels = re.findall(r'class="lab">(Тип \d)<', a)
-    assert labels == ["Тип 3", "Тип 1", "Тип 4", "Тип 2"]
+    labels = re.findall(r'class="lab">([^<]+)<', a)  # порция 6a: названия типов, а не «Тип N»
+    assert labels == ["Тип 3: пример", "Тип 1: пример", "Тип 4: пример", "Тип 2: пример"]
 
 
 def test_order_ladder_bottom_up():
     a, _, _ = SC.order_svgs(story(), checks())
-    assert re.findall(r'class="lab">(Тип \d)<', a) == [
-        "Тип 4",
-        "Тип 3",
-        "Тип 1",
-        "Тип 2",
+    assert re.findall(r'class="lab">([^<]+)<', a) == [
+        "Тип 4: пример",
+        "Тип 3: пример",
+        "Тип 1: пример",
+        "Тип 2: пример",
     ]  # 2 < 1 < 3 < 4 снизу
 
 

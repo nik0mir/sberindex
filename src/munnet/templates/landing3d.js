@@ -74,6 +74,13 @@ async function main() {
   });
   const N = cells.length;
   const byId = new Map(cells.map((c, i) => [c.id, i]));
+  // подписи крупнейших городов (порция 6a): те же, что на плоской карте (hexgrid.json, cities — по населению,
+  // считает этап site); HTML поверх холста, перекрывающиеся прячутся, при выборе МО и в островах не видны
+  let hexg = readJSON("data-hexgrid");
+  if (!hexg && location.protocol !== "file:") {
+    try { const r = await fetch("data/hexgrid.json"); hexg = r.ok ? await r.json() : null; } catch (e) { hexg = null; }
+  }
+  const CITIES = ((hexg || {}).cities || []).map((c) => ({ i: byId.get(c.id), name: c.name })).filter((c) => c.i !== undefined);
   const islands = (scene0.islands || []).map((s) => ({ ...s, cx: s.x - W2, cz: s.y - H2 }));
 
   function ratioText(r) {
@@ -273,6 +280,20 @@ async function main() {
   btnTypes.addEventListener("click", () => toIslands(true));
   btnMap.addEventListener("click", () => toMap(true));
 
+  // плоская карта (порция 6a): та же SVG-карта ячеек, что без WebGL (landing.js: выбор, эго-сеть, масштаб)
+  let flat = false;
+  const btnFlat = $("#h0-flat");
+  function setFlat(on, focus) {
+    if (on && mode === "islands") toMap(false, false);
+    flat = on;
+    doc.documentElement.classList.toggle("h0-flat", on);
+    btnFlat.textContent = on ? btnFlat.dataset.solid : btnFlat.dataset.flat;
+    btnTypes.hidden = on || mode === "islands";
+    tip.hidden = true;
+    if (focus) btnFlat.focus({ preventScroll: true });
+  }
+  btnFlat.addEventListener("click", () => setFlat(!flat, true));
+
   // ------------------------------------------------------------------ наведение, выбор
   const ray = new THREE.Raycaster();
   const ptr = new THREE.Vector2();
@@ -319,18 +340,32 @@ async function main() {
     if (window.munnet && window.munnet.go) window.munnet.go(cells[i].id); else select(i);
   });
 
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(S * 1.25, 1.1, 8, 40), new THREE.MeshBasicMaterial({ color: 0xa3172d }));
+  // выбранная ячейка (порция 6a): яркое кольцо с белой подложкой поверх всего и подпись-флажок над столбиком
+  const ringMat = (color) => new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true });
+  const ring = new THREE.Group();
+  const ringCase = new THREE.Mesh(new THREE.TorusGeometry(S * 1.45, 2.6, 8, 48), ringMat(0xffffff));
+  const ringAcc = new THREE.Mesh(new THREE.TorusGeometry(S * 1.45, 1.5, 8, 48), ringMat(0xa3172d));
+  ringCase.renderOrder = 10; ringAcc.renderOrder = 11;
+  ring.add(ringCase, ringAcc);
   ring.rotation.x = Math.PI / 2;
   ring.visible = false;
   scene.add(ring);
-  function spotlight(region, keep = new Set()) {
+  const flag = $("#h0-flag"), pickedNote = $("#h0-picked-note");
+  // выбор: всё, кроме выбранной ячейки, её соседей по своему региону и похожих по тратам, понижено (×LOW) и бледнее —
+  // иначе высокие соседи заслоняют выбранную; это показ, а не данные: подпись h0-picked-note говорит об этом,
+  // и высоты возвращаются, когда выбор снят
+  const LOW = 0.22;
+  function spotlight(region, keep = null) {
     const pale = new THREE.Color("#eef0f3");
     cells.forEach((c, j) => {
       const col = base[j].clone();
-      if (region && c.region !== region && !keep.has(j)) col.lerp(pale, 0.8);
+      if (keep && !keep.has(j)) col.lerp(pale, c.region === region ? 0.55 : 0.85);
       mesh.setColorAt(j, col);
     });
     mesh.instanceColor.needsUpdate = true;
+  }
+  function heights(keep = null) {
+    return cells.map((c, j) => ({ x: c.x, z: c.z, h: keep && !keep.has(j) ? c.h * LOW : c.h }));
   }
   // дуги над картой (сходство трат, не поездки и не потоки; порция 5b): к соседям по своему региону (набор B T7,
   // с ними сверять изменения) — главные, тёмные; к похожим по тратам в других регионах — тонкие и бледные
@@ -366,31 +401,41 @@ async function main() {
     doc.documentElement.classList.add("h0-picked"); // карточка открыта слева: текст экрана под ней прячется
     const simIdx = simIds.map((id) => byId.get(id)).filter((j) => j !== undefined);
     const simbIdx = simbIds.map((id) => byId.get(id)).filter((j) => j !== undefined);
-    spotlight(c.region, new Set(simIdx));
+    const keep = new Set([i, ...simIdx, ...simbIdx]);
+    spotlight(c.region, keep);
+    startTween(heights(keep), { dur: 700, ease: easeOut });
     drawEgo(i, simIdx, simbIdx);
-    // в кадре — выбранная ячейка и её сопоставимые территории (рамка по всем), и не под карточкой слева
-    // в кадре — выбранная ячейка и соседи по своему региону (с ними сверять); если соседей нет — похожие по тратам;
-    // дуги к похожим в других регионах уходят за край кадра — их список в карточке (порция 5b)
-    const pts = [i, ...(simbIdx.length ? simbIdx : simIdx)].map((j) => cells[j]);
-    const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
-    const z0 = Math.min(...pts.map((p) => p.z)), z1 = Math.max(...pts.map((p) => p.z));
+    flag.innerHTML = `<b>${esc(cap1(c.name))}</b><span>${esc(c.region)}</span>`;
+    flag.hidden = false;
+    pickedNote.hidden = false;
+    // кадр (порция 6a): камера выше и дальше, выбранная ячейка — в нижней трети кадра, соседи по своему региону
+    // (с ними сверять) — в кадре; на телефоне — почти сверху. e — наибольшее удаление соседа от выбранной ячейки.
+    // Видимая глубина земли у цели ≈ 2·dist·tanV / sin φ; выбранная — на −0,3 высоты кадра (нижняя треть, над
+    // легендой), соседи помещаются, если половина глубины ≥ e / 0,6; по ширине — с учётом карточки слева.
+    const near = (simbIdx.length ? simbIdx : simIdx).map((j) => cells[j]);
+    const e = Math.max(60, ...near.map((p) => Math.max(Math.abs(p.x - c.x), Math.abs(p.z - c.z)))) + 30;
+    const phone = stage.clientWidth < 700;
+    const dir = phone ? new THREE.Vector3(0, 0.985, 0.17) : new THREE.Vector3(0, 0.92, 0.39);
+    dir.normalize();
+    const sinF = dir.y;
     const card = doc.getElementById("card");
     const cardFrac = !narrow && card && !card.hidden ? Math.min(0.45, card.offsetWidth / Math.max(1, stage.clientWidth)) : 0;
     const tanV = Math.tan((camera.fov * Math.PI) / 360), tanH = tanV * camera.aspect;
-    // запас на перспективу (ближний к камере край шире) и на высоту дуг
-    const halfW = (x1 - x0) / 2 + 60, halfD = (z1 - z0) / 2 + 60;
-    const dist = Math.min(3200, Math.max(narrow ? 1100 : 880, (halfW / (tanH * (1 - cardFrac))) * 1.7, (halfD / tanV) * 1.9));
-    const tgt = new THREE.Vector3((x0 + x1) / 2 - cardFrac * dist * tanH, 0, (z0 + z1) / 2);
-    const off = new THREE.Vector3(0, 0.84, 0.54).normalize().multiplyScalar(dist);
-    flyTo(tgt, tgt.clone().add(off), 1300);
+    const dist = Math.min(3600, Math.max(phone ? 900 : 950, (e * sinF) / (0.6 * tanV), (e * 1.15) / (tanH * (1 - cardFrac))));
+    const hd = (dist * tanV) / sinF;
+    const tgt = new THREE.Vector3(c.x - cardFrac * dist * tanH, 0, c.z - 0.3 * hd);
+    flyTo(tgt, tgt.clone().add(dir.multiplyScalar(dist)), 1300);
   }
   function clearSelection() {
     if (selected < 0) return;
     selected = -1;
     ring.visible = false;
+    flag.hidden = true;
+    pickedNote.hidden = true;
     clearEgo();
     doc.documentElement.classList.remove("h0-picked");
     spotlight(null);
+    if (mode === "map") startTween(heights(), { dur: 700, ease: easeOut });
   }
   onSelect = (id, sim = [], simb = []) => {
     const i = id == null ? undefined : byId.get(id);
@@ -399,12 +444,39 @@ async function main() {
 
   // ------------------------------------------------------------------ кадр
   const proj = new THREE.Vector3();
+  const cityBox = $("#h0-cities");
+  cityBox.innerHTML = CITIES.map((c) => `<span>${esc(c.name)}</span>`).join("");
+  const cityEls = [...cityBox.children];
+  let cityW = null;
+  function placeCities() {
+    const show = mode === "map" && selected < 0 && !tween;
+    if (cityBox.classList.contains("show") !== show) {
+      cityBox.classList.toggle("show", show);
+      if (!show) cityEls.forEach((el) => { el.style.visibility = "hidden"; });
+    }
+    if (!show) return;
+    if (!cityW) cityW = cityEls.map((el) => [el.offsetWidth, el.offsetHeight]);
+    const w = stage.clientWidth, h = stage.clientHeight, taken = [];
+    CITIES.forEach((c, j) => {  // по убыванию населения: крупный город важнее
+      const s = cur[c.i];
+      proj.set(s.x, s.h + 2, s.z).project(camera);
+      const x = (proj.x * 0.5 + 0.5) * w, y = (-proj.y * 0.5 + 0.5) * h;
+      const [bw, bh] = cityW[j];
+      const box = [x - bw / 2, y - bh - 6, x + bw / 2, y - 6];
+      const off = proj.z > 1 || box[0] < 0 || box[2] > w || box[1] < 0 || box[3] > h;
+      const hit = taken.some((b) => box[0] < b[2] + 4 && box[2] + 4 > b[0] && box[1] < b[3] + 2 && box[3] + 2 > b[1]);
+      const ok = !off && !hit;
+      if (ok) taken.push(box);
+      cityEls[j].style.visibility = ok ? "visible" : "hidden";
+      cityEls[j].style.transform = `translate(${box[0].toFixed(1)}px, ${box[1].toFixed(1)}px)`;
+    });
+  }
   let userMoved = false, visible = true;
   controls.addEventListener("start", () => { userMoved = true; tip.hidden = true; });
   new IntersectionObserver((es) => { visible = es[0].isIntersecting; }).observe(stage);
   function frame(now) {
     requestAnimationFrame(frame);
-    if (!visible && !tween && !camTween) return;
+    if ((!visible || flat) && !tween && !camTween) return;
     stepTween(now);
     if (camTween) {
       const k = Math.min(1, (now - camTween.t0) / camTween.dur), e = easeInOut(k);
@@ -421,7 +493,11 @@ async function main() {
     if (selected >= 0) {
       const s = cur[selected];
       ring.position.set(s.x, s.h + 1.6, s.z);
-      ring.scale.setScalar(reduce ? 1 : 1 + 0.12 * Math.sin(now / 260));
+      ring.scale.setScalar(reduce ? 1 : 1 + 0.1 * Math.sin(now / 260));
+      proj.set(s.x, s.h + 4, s.z).project(camera);
+      const off = proj.z > 1 || Math.abs(proj.x) > 1.05 || Math.abs(proj.y) > 1.05;
+      flag.style.visibility = off ? "hidden" : "visible";
+      flag.style.transform = `translate(${(proj.x * 0.5 + 0.5) * stage.clientWidth}px, ${(-proj.y * 0.5 + 0.5) * stage.clientHeight}px) translate(-50%, calc(-100% - 14px))`;
     }
     if (labels.classList.contains("show")) {
       const w = stage.clientWidth, h = stage.clientHeight;
@@ -431,6 +507,7 @@ async function main() {
         labelEls[j].style.transform = `translate(${(proj.x * 0.5 + 0.5) * w}px, ${(-proj.y * 0.5 + 0.5) * h}px) translate(${dx}%, ${dy}px)`;
       });
     }
+    placeCities();
     renderer.render(scene, camera);
   }
   requestAnimationFrame(frame);

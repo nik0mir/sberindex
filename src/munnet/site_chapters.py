@@ -212,6 +212,34 @@ def _svg(w: float, h: float, body: str, label: str, cls: str) -> str:
     )
 
 
+# Порция 6a: у каждого графика — вариант для телефона. Подписи остаются в тех же единицах (CSS ``.ch-svg``:
+# 10–11,5), а ширина холста меньше: на экране 343 px подпись в 10 единиц — 343 / 280 × 10 ≈ 12,3 px.
+PHONE_W = 280
+PHONE_MIN_PX = 12.0  # нижняя граница подписи на телефоне (проверяет тест на собранной странице)
+
+
+def _with_cls(svg: str, c: str) -> str:
+    return svg.replace('<svg class="', f'<svg class="{c} ', 1) if svg else svg
+
+
+def _clamp(cx: float, w: float, lo: float, hi: float) -> float:
+    """Центр подписи шириной ``w`` у точки ``cx``, но целиком внутри [lo, hi]."""
+    return min(max(cx, lo + w / 2), hi - w / 2) if hi - lo > w else (lo + hi) / 2
+
+
+def _text_w(s: str, size: float) -> float:
+    """Оценка ширины строки Golos Text в единицах SVG (средний знак ≈ 0,56 кегля) — для раскладки подписей."""
+    return len(s) * size * 0.56
+
+
+def phone_pair(wide: str, phone: str) -> str:
+    """Широкий вариант (``vw``) и вариант для телефона (``vp``): CSS показывает один по ширине экрана
+    (до 700 px — ``vp``). Скрытый ``display: none`` недоступен и экранному диктору, подпись не дублируется."""
+    if not wide or not phone:
+        return wide or phone
+    return _with_cls(wide, "vw") + _with_cls(phone, "vp")
+
+
 def _text(x: float, y: float, s: str, cls: str = "", anchor: str = "start", extra: str = "") -> str:
     c = f' class="{cls}"' if cls else ""
     a = f' text-anchor="{anchor}"' if anchor != "start" else ""
@@ -246,6 +274,16 @@ def _fig_mark(t: int | None, view: Mapping) -> str:
 
 def _type_name(story: Mapping, t: int) -> str:
     return str(story["names"]["final"].get(str(t)) or UI["type_n"].format(t=t))
+
+
+def _type_label(story: Mapping, t: int, x: float, y: float, cls: str = "lab", n: int = 0) -> list[str]:
+    """Фигура и название типа (как в легенде): цвет не единственный носитель; длинное — в ``n`` знаков
+    строкой, переносы — ниже через 13 единиц."""
+    view = story["view"]
+    out = [_shape(t, x + 4.5, y - 4, 4.5, view["type_colors"].get(str(t), INK2), view)]
+    lines = _wrap(_type_name(story, t), n) if n else [_type_name(story, t)]
+    out += [_text(x + 14, y + j * 13, ln, cls) for j, ln in enumerate(lines)]
+    return out
 
 
 def _shape(t: int, x: float, y: float, r: float, color: str, view: Mapping, extra: str = "") -> str:
@@ -295,22 +333,28 @@ def _section(
 # --- глава 1: корзина относительно своего региона (§3.4)
 
 
-def basket_svg(b: Sequence[float | None], labels: Sequence[str], unstable: set[int], name: str) -> str:
-    """Шесть горизонтальных полос от нуля: ноль — «как обычно в регионе»; значения не подписаны (§3.4)."""
-    W, lab_w, row, top = 360, 118, 30, 8
+def basket_svg(
+    b: Sequence[float | None], labels: Sequence[str], unstable: set[int], name: str, W: float = 360
+) -> str:
+    """Шесть горизонтальных полос от нуля: ноль — «как обычно в регионе»; значения не подписаны (§3.4).
+    «Знак у типа неустойчив» — строкой под своей полосой (порция 6a: раньше налезал на подпись части)."""
+    lab_w, row, top, note_h = 118, 30, 8, 13
     x0, x1 = lab_w + 6, W - 8
     zero = (x0 + x1) / 2
     lim = max([0.1, *[abs(v) for v in b if v is not None]]) * 1.08
     sx = lambda v: zero + v / lim * (x1 - zero)  # noqa: E731
-    H = top + row * len(labels) + 34
-    pid = _uid("hb", name)[:40]
+    ys, y = [], top
+    for i in range(len(labels)):
+        ys.append(y)
+        y += row + (note_h if i in unstable and i < len(b) and b[i] is not None else 0)
+    yb = y
+    H = yb + 34
+    pid = _uid("hb", name, int(W))[:40]
     g = [_hatch(pid)]
-    g.append(
-        f'<line class="zero" x1="{zero:.1f}" x2="{zero:.1f}" y1="{top - 4}" y2="{top + row * len(labels)}"/>'
-    )
+    g.append(f'<line class="zero" x1="{zero:.1f}" x2="{zero:.1f}" y1="{top - 4}" y2="{yb}"/>')
     parts = []
     for i, lab in enumerate(labels):
-        y = top + i * row
+        y = ys[i]
         v = b[i] if i < len(b) else None
         g.append(_text(lab_w, y + row / 2 + 4, lab, "lab", "end"))
         if v is None:
@@ -324,15 +368,18 @@ def basket_svg(b: Sequence[float | None], labels: Sequence[str], unstable: set[i
             g.append(
                 f'<rect x="{xa:.1f}" y="{y + 7}" width="{w:.1f}" height="{row - 14}" fill="url(#{pid})"/>'
             )
-            tx, anc = (xa - 4, "end") if v >= 0 and xa - x0 > 90 else (xb + 4, "start")
-            if v < 0:
-                tx, anc = (xb + 4, "start")
-            g.append(_text(tx, y + row / 2 + 4, UI["basket_unst"], "note", anc))
+            # своей строкой под полосой, от нуля в сторону полосы и в пределах холста
+            wn = _text_w(UI["basket_unst"], 10)
+            right = (zero + 4, "start") if zero + 4 + wn <= W else None
+            left = (zero - 4, "end") if zero - 4 - wn >= 0 else None
+            # не поперёк линии нуля: сначала сторона полосы, иначе другая, иначе — по краю холста
+            tx, anc = (right or left or (W, "end")) if v >= 0 else (left or right or (0, "start"))
+            g.append(_text(tx, y + row - 1 + 4, UI["basket_unst"], "note", anc))
         word = UI["basket_more"] if v > 0.02 else UI["basket_less"] if v < -0.02 else UI["basket_same"]
         parts.append(f"{lab} — {word}")
-    yb = top + row * len(labels)
     g.append(_text(zero, yb + 14, UI["basket_zero"], "axis", "middle"))
-    g.append(_text(x0, yb + 30, UI["basket_left"], "axis"))
+    # «← меньше…» — от левого края, если до нуля не хватает места (телефон), иначе от начала шкалы
+    g.append(_text(x0 if W >= 340 else 0, yb + 30, UI["basket_left"], "axis"))
     g.append(_text(x1, yb + 30, UI["basket_right"], "axis", "end"))
     return _svg(
         W, H, "".join(g), UI["basket_aria"].format(name=name, parts="; ".join(parts)), "ch-svg basket"
@@ -366,7 +413,7 @@ def chapter_basket(story: Mapping, types: Sequence[Mapping], mo: Mapping[int, Ma
         panes.append(
             f'<div class="step-pane" data-step="{k}"{" hidden" if k else ""}>'
             f'<p class="fig-head">{_fig_mark(t, view)}{esc(head)} · {esc(_type_name(story, t))}</p>'
-            f"{basket_svg(b, labels, unst, name)}"
+            f"{phone_pair(basket_svg(b, labels, unst, name), basket_svg(b, labels, unst, name, PHONE_W))}"
             f'<p><a class="open-card" href="#mo={int(r["id"])}" data-go="{int(r["id"])}">'
             f"{esc(UI['basket_open'])}"
             "</a></p></div>"
@@ -560,7 +607,9 @@ def types_svgs(story: Mapping, types: Sequence[Mapping], ref: Mapping[str, float
     for ty in types:
         t = int(ty["t"])
         mark = {f.split(":", 1)[-1] for f in ty.get("unstable_parts") or []}
-        lw, Wp = 150.0, 350.0
+        # порция 6a: холст 310 — подпись в 11 единиц на 343 px ≥ 12 px; колонка подписей 172 — длинная
+        # подпись занятости («стройка, торговля, транспорт») не выходит за левый край
+        lw, Wp = 172.0, 310.0
         g = labels_col(lw - 6, 4, mark)
         g += _dots_panel(ty, groups, dom, ref, view, lw + 4, Wp - 8, 4, row, gap)
         Hp = 4 + len(groups) * gap + n_rows * row + 8
@@ -570,27 +619,32 @@ def types_svgs(story: Mapping, types: Sequence[Mapping], ref: Mapping[str, float
     return wide, panels
 
 
-def ami_svg(ami: Sequence[Mapping], n: int = 8) -> str:
-    """Полосы AMI от нуля, сильнейшее деление — акцентом (§3.5, T5 показывается всегда)."""
+def ami_svg(ami: Sequence[Mapping], n: int = 8, W: float = 360) -> str:
+    """Полосы AMI от нуля, сильнейшее деление — акцентом (§3.5, T5 показывается всегда). Узкий холст
+    (телефон) — подпись над своей полосой, полоса во всю ширину."""
     rows = list(ami)[:n]
     if not rows:
         return ""
-    W, lab_w, row = 360, 186, 20
+    stacked = True  # порция 6a: подпись над полосой и на широком экране — длинные деления без обрезки слева
+    lab_w, row = (0, 32) if stacked else (186, 20)
     vmax = max(0.5, max(float(r["ami"] or 0) for r in rows)) * 1.05
-    x0, x1 = lab_w + 6, W - 34
+    x0, x1 = (0 if stacked else lab_w + 6), W - 34
     g = []
     for i, r in enumerate(rows):
         y = 4 + i * row
         a = float(r["ami"] or 0)
         w = max(1.0, a / vmax * (x1 - x0))
         lab = str(r["label"])
-        lab = lab if len(lab) <= 34 else lab[:33] + "…"
-        g.append(_text(lab_w, y + 14, lab, "lab", "end"))
-        g.append(
-            f'<rect x="{x0}" y="{y + 4}" width="{w:.1f}" height="{row - 8}" '
-            f'fill="{ACCENT if i == 0 else INK2}"/>'
-        )
-        g.append(_text(x0 + w + 4, y + 14, _f(a, 2), "val"))
+        yb = y + (14 if stacked else 4)
+        if stacked:
+            n_ch = int(W / (11 * 0.56))
+            lab = lab if len(lab) <= n_ch else lab[: n_ch - 1] + "…"
+            g.append(_text(0, y + 10, lab, "lab"))
+        else:
+            lab = lab if len(lab) <= 34 else lab[:33] + "…"
+            g.append(_text(lab_w, y + 14, lab, "lab", "end"))
+        g.append(f'<rect x="{x0}" y="{yb}" width="{w:.1f}" height="12" fill="{ACCENT if i == 0 else INK2}"/>')
+        g.append(_text(x0 + w + 4, yb + 10, _f(a, 2), "val"))
     g.append(f'<line class="zero" x1="{x0}" x2="{x0}" y1="2" y2="{4 + len(rows) * row}"/>')
     return _svg(W, 8 + len(rows) * row, "".join(g), UI["ami_aria"], "ch-svg ami")
 
@@ -668,7 +722,8 @@ def chapter_types(
     if ami:
         n = min(8, len(ami))
         ami_html = (
-            f'<div class="ami-block"><h3>{esc(UI["ami_title"])}</h3>{ami_svg(ami, n)}'
+            f'<div class="ami-block"><h3>{esc(UI["ami_title"])}</h3>'
+            f"{phone_pair(ami_svg(ami, n), ami_svg(ami, n, PHONE_W))}"
             f'<p class="source">{esc(UI["ami_cap"].format(n=n))} {esc(UI["src_rosstat"])}</p>'
             + _table(["", "AMI"], [[esc(r["label"]), _f(r["ami"], 3)] for r in ami], esc, UI["alt_ami"])
             + "</div>"
@@ -723,7 +778,7 @@ def _log_ticks(lo: float, hi: float) -> list[tuple[float, str]]:
     return out
 
 
-def order_svgs(story: Mapping, checks: Mapping) -> tuple[str, str, list[list[str]]]:
+def order_svgs(story: Mapping, checks: Mapping, W: float = 360) -> tuple[str, str, list[list[str]]]:
     """Панель A — медианы оборота по типам (строки по ``view.t1_layout``, линия по ``line_by_turnover``);
     панель B — сила порядка внутри страт у типов (акцент) и у делений без типов (серые)."""
     view = story["view"]
@@ -737,35 +792,34 @@ def order_svgs(story: Mapping, checks: Mapping) -> tuple[str, str, list[list[str
     rows_top = (
         list(reversed(order)) if layout != "columns_by_size" else [int(x) for x in view["legend_order"]]
     )
-    # панель A
-    W, lab_w, row, top = 360, 64, 26, 22
-    pw = (W - lab_w - 10) / max(1, len(names))
+    # панель A: строка — фигура и название типа над своими точками (порция 6a: названия вместо «Тип N»)
+    row, top = 40, 22
+    pw = (W - 4) / max(1, len(names))
     vals = [v for k in names for v in t1[k]["med_a"] if v is not None]
     lo, hi = min([*vals, 0.0]), max([*vals, 0.0])
     lo, hi = lo - (hi - lo) * 0.08, hi + (hi - lo) * 0.08
-    H = top + row * len(rows_top) + 30
+    H = top + row * len(rows_top) + 18
+    cy_of = lambda j: top + j * row + 28  # noqa: E731
     g = []
+    labs = []  # подписи строк — поверх линий (с подложкой цвета бумаги, CSS .order-a .lab)
     for j, t in enumerate(rows_top):
-        y = top + j * row + row / 2
-        g.append(_shape(t, 10, y, 4.5, view["type_colors"].get(str(t), INK2), view))
-        g.append(_text(20, y + 4, UI["type_n"].format(t=t), "lab"))
+        labs += _type_label(story, t, 0, top + j * row + 12)
     table = []
     for i, k in enumerate(names):
-        x0 = lab_w + i * pw + 8
-        x1 = x0 + pw - 16
+        x0 = i * pw + 10
+        x1 = x0 + pw - 20
         sx = lambda v, x0=x0, x1=x1: x0 + (v - lo) / (hi - lo) * (x1 - x0)  # noqa: E731
         g.append(_text((x0 + x1) / 2, 12, UI[k], "th", "middle"))
-        for v, s in _log_ticks(lo, hi):
-            g.append(
-                f'<line class="grid" x1="{sx(v):.1f}" x2="{sx(v):.1f}" y1="{top - 2}" '
-                f'y2="{top + row * len(rows_top)}"/>'
-            )
-            g.append(_text(sx(v), top + row * len(rows_top) + 13, s, "axis", "middle"))
+        for v, s_ in _log_ticks(lo, hi):
+            for j in range(len(rows_top)):
+                g.append(
+                    f'<line class="grid" x1="{sx(v):.1f}" x2="{sx(v):.1f}" y1="{cy_of(j) - 8}" '
+                    f'y2="{cy_of(j) + 8}"/>'
+                )
+            g.append(_text(sx(v), top + row * len(rows_top) + 10, s_, "axis", "middle"))
         med = dict(zip(order, t1[k]["med_a"], strict=False))
         line = (view.get("line_by_turnover") or {}).get(k) or t1[k].get("line", "none")
-        pts = [
-            (sx(med[t]), top + j * row + row / 2) for j, t in enumerate(rows_top) if med.get(t) is not None
-        ]
+        pts = [(sx(med[t]), cy_of(j)) for j, t in enumerate(rows_top) if med.get(t) is not None]
         if line in ("solid", "dashed") and layout != "columns_by_size" and len(pts) > 1:
             d = "M" + "L".join(f"{x:.1f},{y:.1f}" for x, y in pts)
             dash = ' stroke-dasharray="4 3"' if line == "dashed" else ""
@@ -778,7 +832,7 @@ def order_svgs(story: Mapping, checks: Mapping) -> tuple[str, str, list[list[str
                 _shape(
                     t,
                     sx(med[t]),
-                    top + j * row + row / 2,
+                    cy_of(j),
                     5,
                     view["type_colors"].get(str(t), INK2),
                     view,
@@ -787,12 +841,12 @@ def order_svgs(story: Mapping, checks: Mapping) -> tuple[str, str, list[list[str
             )
         for t in order:
             if med.get(t) is not None:
-                table.append([_e(UI[k]), _e(UI["type_n"].format(t=t)), _f(med[t], 2)])
+                table.append([_e(UI[k]), _e(_type_name(story, t)), _f(med[t], 2)])
     aria_a = UI["order_aria_a"].format(turnover=" и ".join(UI[k] for k in names))
-    svg_a = _svg(W, H, "".join(g), aria_a, "ch-svg order-a")
+    svg_a = _svg(W, H, "".join(g + labs), aria_a, "ch-svg order-a")
     # панель B
     rivals = checks.get("t1_rivals") or []
-    W2, lab2, row2, top2 = 360, 64, 80, 8
+    W2, lab2, row2, top2 = W, 64, 80, 8
     xs = [r.get(f"rho_b_{k}") for r in rivals for k in names] + [
         v for k in names for v in (t1[k].get("rho_b_ci") or []) + [t1[k].get("rho_b")]
     ]
@@ -836,14 +890,14 @@ def order_svgs(story: Mapping, checks: Mapping) -> tuple[str, str, list[list[str
         if t1[k].get("rho_b") is not None:
             rx = sx(t1[k]["rho_b"])
             g.append(f'<path d="M{rx:.1f} {yd - 6}l6 6l-6 6l-6 -6z" fill="{ACCENT}"/>')
-            g.append(_text(rx, yd - 9, UI["order_types"].format(rho=_f(t1[k]["rho_b"], 2)), "acc", "middle"))
+            lt = UI["order_types"].format(rho=_f(t1[k]["rho_b"], 2))
+            g.append(_text(_clamp(rx, _text_w(lt, 11), x0 - 6, W2), yd - 9, lt, "acc", "middle"))
         if best is not None:
             bx = sx(best[0])
             g.append(f'<circle cx="{bx:.1f}" cy="{best[2]:.1f}" r="5.5" fill="none" stroke="{INK2}"/>')
             bl = UI["order_best"].format(label=best[1])
             bl = bl if len(bl) <= 44 else bl[:43] + "…"
-            anc = "end" if bx > (x0 + x1) / 2 else "start"
-            g.append(_text(bx + (6 if anc == "start" else 6), y + 73, bl, "note", anc))
+            g.append(_text(_clamp(bx, _text_w(bl, 10), 0, W2), y + 73, bl, "note", "middle"))
     aria_b = UI["order_aria_b"].format(turnover=" и ".join(UI[k] for k in names))
     svg_b = _svg(W2, H2, "".join(g), aria_b, "ch-svg order-b")
     return svg_a, svg_b, table
@@ -861,6 +915,8 @@ def chapter_order(story: Mapping, checks: Mapping, esc: Esc) -> str:
             f"<p>{esc(ch['proxies'])}</p></details>"
         )
     svg_a, svg_b, table = order_svgs(story, checks)
+    pa, pb, _ = order_svgs(story, checks, PHONE_W)
+    svg_a, svg_b = phone_pair(svg_a, pa), phone_pair(svg_b, pb)
     if not svg_a:
         return _section("order", ch["title"], text, "", esc)
     lines = {v for v in (view.get("line_by_turnover") or {}).values()}
@@ -910,8 +966,9 @@ def _band(xa: float, ya0: float, ya1: float, xb: float, yb0: float, yb1: float) 
     )
 
 
-def flow_label(a: int, b: int, n: int) -> str:
-    return UI["flows_item"].format(a=UI["type_n"].format(t=a), b=UI["type_n"].format(t=b), n=n)
+def flow_label(a: int, b: int, n: int, story: Mapping | None = None) -> str:
+    nm = (lambda t: _type_name(story, t)) if story else (lambda t: UI["type_n"].format(t=t))
+    return UI["flows_item"].format(a=nm(a), b=nm(b), n=n)
 
 
 FLOW_STYLE = {
@@ -922,16 +979,22 @@ FLOW_STYLE = {
 }
 
 
-def alluvial_svg(story: Mapping, flows: Mapping) -> str:
-    """Аллювиальная диаграмма 4 × 4: оставшиеся — серые, смены — стилем по вердикту T3 (``view.flows``)."""
+def alluvial_svg(story: Mapping, flows: Mapping, W: float = 480) -> str:
+    """Аллювиальная диаграмма 4 × 4: оставшиеся — серые, смены — стилем по вердикту T3 (``view.flows``).
+    Блоки подписаны фигурой и названием типа (порция 6a); на узком холсте (телефон) справа — фигура и число,
+    порядок блоков тот же, названия — слева и в ключе под графиком."""
     view = story["view"]
     order = [int(t) for t in view.get("legend_order") or flows.get("types") or []]
     tot = {k: int(v) for k, v in (flows.get("total") or {}).items()}
     rel = {k: int(v) for k, v in (flows.get("reliable") or {}).items()}
     if not order or not tot:
         return ""
-    W, H, top, gapn = 360, 440, 30, 14
-    xa, xb, bw = 76, 272, 12
+    H, top, gapn = 440, 30, 14
+    narrow = W < 400
+    lab_w, wrap = (118, 16) if narrow else (150, 21)
+    bw = 10 if narrow else 12
+    xa = lab_w + 4
+    xb = W - (46 if narrow else lab_w + 4) - bw
     left = {a: sum(tot.get(f"{a}-{b}", 0) for b in order) for a in order}
     right = {b: sum(tot.get(f"{a}-{b}", 0) for a in order) for b in order}
     n = max(1, sum(left.values()))
@@ -945,7 +1008,7 @@ def alluvial_svg(story: Mapping, flows: Mapping) -> str:
         ry[b] = y
         y += right[b] * k + gapn
     st = view.get("flows") or {}
-    pid = "hflow"
+    pid = "hflow" if not narrow else "hflowp"
     g = [_hatch(pid)]
     g.append(_text(xa + bw / 2, 14, UI["flows_a"], "th", "middle"))
     g.append(_text(xb + bw / 2, 14, UI["flows_b"], "th", "middle"))
@@ -977,7 +1040,7 @@ def alluvial_svg(story: Mapping, flows: Mapping) -> str:
         dash = ' stroke="' + color + '" stroke-width="0.8" stroke-dasharray="3 2"' if s["dash"] else ""
         attrs = (
             f' class="flow chg" data-a="{a}" data-b="{b}" tabindex="0" role="button" '
-            f'aria-label="{_e(flow_label(a, b, tot.get(f"{a}-{b}", 0)))}"'
+            f'aria-label="{_e(flow_label(a, b, tot.get(f"{a}-{b}", 0), story))}"'
         )  # noqa: E501
         g.append(
             f'<g{attrs}><path d="{d}" fill="{color}" opacity="{s["opacity"]}"{dash}/>'
@@ -990,36 +1053,46 @@ def alluvial_svg(story: Mapping, flows: Mapping) -> str:
             f'<rect x="{xa}" y="{ly[a]:.1f}" width="{bw}" height="{max(1.0, left[a] * k):.1f}" fill="{c}"/>'
         )
         cy = ly[a] + left[a] * k / 2
-        g.append(_shape(a, xa - 60, cy, 4.5, c, view))
-        g.append(_text(xa - 50, cy + 4, UI["type_n"].format(t=a), "lab"))
-        g.append(_text(xa - 50, cy + 17, _f(left[a]), "val"))
+        nl = len(_wrap(_type_name(story, a), wrap))
+        y0 = cy + 4 - nl * 13 / 2
+        g += _type_label(story, a, 0, y0, n=wrap)
+        g.append(_text(14, y0 + nl * 13, _f(left[a]), "val"))
     for b in order:
         c = view["type_colors"].get(str(b), INK2)
         g.append(
             f'<rect x="{xb}" y="{ry[b]:.1f}" width="{bw}" height="{max(1.0, right[b] * k):.1f}" fill="{c}"/>'
         )
         cy = ry[b] + right[b] * k / 2
-        g.append(_shape(b, xb + bw + 10, cy, 4.5, c, view))
-        g.append(_text(xb + bw + 20, cy + 4, UI["type_n"].format(t=b), "lab"))
-        g.append(_text(xb + bw + 20, cy + 17, _f(right[b]), "val"))
+        if narrow:
+            g.append(_shape(b, xb + bw + 10, cy, 4.5, c, view))
+            g.append(_text(xb + bw + 18, cy + 4, _f(right[b]), "val"))
+            continue
+        nl = len(_wrap(_type_name(story, b), wrap))
+        y0 = cy + 4 - nl * 13 / 2
+        g += _type_label(story, b, xb + bw + 6, y0, n=wrap)
+        g.append(_text(xb + bw + 20, y0 + nl * 13, _f(right[b]), "val"))
     return _svg(W, H, "".join(g), UI["flows_aria"], "ch-svg alluvial")
 
 
-def placebo_svg(runs: Sequence[Mapping]) -> str:
+def placebo_svg(runs: Sequence[Mapping], W: float = 360) -> str:
     """Облака плацебо (точка — псевдогод), пунктир — 95-й перцентиль, акцентная черта — наблюдение;
     ось общая для всех строк."""
     runs = [r for r in runs if r.get("placebo")]
     if not runs:
         return ""
-    W, lab_h, row, x0, x1 = 360, 30, 50, 10, 346
+    lab_h, row, x0, x1 = 30, 50, 10, W - 14
+    n_lab, n_sub = int(W / (11 * 0.56)), int(W / (10 * 0.56))  # знаков в строке подписи и пометки
     vmax = max(max(max(r["placebo"]), r.get("observed") or 0, r.get("p95") or 0) for r in runs)
     step = 50 if vmax > 150 else 20 if vmax > 60 else 10
     xmax = math.ceil(vmax * 1.04 / step) * step
     sx = lambda v: x0 + v / xmax * (x1 - x0)  # noqa: E731
     g, y = [], 0.0
     for r in runs:
-        g.append(_text(x0, y + 12, r["label"], "lab"))
-        sub = _wrap(str(r["sub"]), 62) if r.get("sub") else []
+        labs = _wrap(str(r["label"]), n_lab)
+        for j, ln in enumerate(labs):
+            g.append(_text(x0, y + 12 + j * 13, ln, "lab"))
+        y += 13 * (len(labs) - 1)
+        sub = _wrap(str(r["sub"]), n_sub) if r.get("sub") else []
         for j, ln in enumerate(sub):
             g.append(_text(x0, y + 25 + j * 12, ln, "note"))
         y0 = y + lab_h + 12 * max(0, len(sub) - 1)
@@ -1105,9 +1178,9 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
         body = "".join(f"<p>{esc(x)}</p>" for x in texts)
         text += f'<details class="how"><summary>{esc(UI["how"])}</summary>{body}</details>'
     flows = checks.get("flows") or {}
-    svg = alluvial_svg(story, flows)
+    svg = phone_pair(alluvial_svg(story, flows), alluvial_svg(story, flows, PHONE_W))
     runs = placebo_runs(story, checks.get("t3"))
-    psvg = placebo_svg(runs)
+    psvg = phone_pair(placebo_svg(runs), placebo_svg(runs, PHONE_W))
     if not svg and not psvg:
         return _section("dynamics", ch["title"], text, "", esc)
     st = view.get("flows") or {}
@@ -1134,14 +1207,14 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
     )
     items = "".join(
         f'<li><button type="button" class="flow-btn" data-a="{a}" data-b="{b}" aria-expanded="false">'
-        f"{_fig_mark(a, view)}{esc(UI['type_n'].format(t=a))} → "
-        f"{_fig_mark(b, view)}{esc(UI['type_n'].format(t=b))}"
+        f"{_fig_mark(a, view)}{esc(_type_name(story, a))} → "
+        f"{_fig_mark(b, view)}{esc(_type_name(story, b))}"
         f" · {_f(n)}</button></li>"
         for a, b, n in chg
     )
     show_rel = not same_style
     trows = [
-        [esc(UI["type_n"].format(t=a)), esc(UI["type_n"].format(t=b)), _f(n)]
+        [esc(_type_name(story, a)), esc(_type_name(story, b)), _f(n)]
         + ([_f(int(rel.get(f"{a}-{b}", 0)))] if show_rel else [])
         for a, b, n in chg
     ]

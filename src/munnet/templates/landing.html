@@ -69,6 +69,7 @@ $hero_head
       <div class="h0-actions" id="h0-actions" hidden>
         <button type="button" class="h0-btn" id="h0-types">$to_types</button>
         <button type="button" class="h0-btn ghost" id="h0-map" hidden>$to_map</button>
+        <button type="button" class="h0-btn ghost" id="h0-flat" data-flat="$to_flat" data-solid="$to_3d" aria-controls="map0">$to_flat</button>
       </div>
     </div>
 
@@ -84,6 +85,9 @@ $hero_head
         <a class="h0-more" href="#types">$more <span aria-hidden="true">↓</span></a>
         <div class="h0-labels" id="h0-labels" aria-hidden="true"></div>
         <div class="h0-tip" id="h0-tip" hidden></div>
+        <div class="h0-flag" id="h0-flag" aria-hidden="true" hidden></div>
+        <div class="h0-cities" id="h0-cities" aria-hidden="true"></div>
+        <p class="h0-picked-note" id="h0-picked-note" hidden>$picked_note</p>
       </div>
       <figure class="answer-map h0-fallback" id="map-fig">
         <div class="map-tools" id="map-tools" hidden>
@@ -97,6 +101,7 @@ $first_screen_svg
           <div class="pick" id="map-pick" role="dialog" aria-label="Выберите муниципалитет" hidden></div>
         </div>
         <p class="ego-note" id="ego-note" hidden></p>
+        <p class="flat-note" id="flat-note">$flat_note</p>
         <ul class="map-key" id="map-key" aria-label="Типы на карте">$map_key</ul>
         <figcaption class="source" id="map-caption">
           Одна ячейка — один муниципалитет (Москва и Петербург — по ячейке на город); ячейки сдвинуты с мест, чтобы
@@ -126,7 +131,7 @@ $chapters_html
     <div class="card-grip" id="card-grip" aria-hidden="true"></div>
     <div class="card-head">
       <button type="button" class="back" id="card-back" hidden>← к исходному муниципалитету</button>
-      <h2 id="card-title" tabindex="-1"></h2>
+      <h2 id="card-title" tabindex="-1">Карточка муниципалитета</h2>
       <p class="card-sub" id="card-sub"></p>
       <div class="card-actions">
         <button type="button" class="tool tool-text show-map" id="card-showmap">Показать на карте</button>

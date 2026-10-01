@@ -226,7 +226,7 @@ def _shape(t: int, x: float, y: float, r: float, color: str, shapes: Mapping) ->
     return f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{color}" stroke="#fff" stroke-width="1"/>'
 
 
-def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str) -> str:
+def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str, W: float = 440) -> str:
     """Медианы розничного оборота на жителя по типам к своему региону (лог-шкала, подписи «×0,75»):
     строки — как в главе 4 при ``t1_layout`` (снизу вверх по ``ladder.order``), линия по ``line_by_turnover``
     (пунктир — прошла только проверка «в целом»)."""
@@ -237,8 +237,10 @@ def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str) ->
         list(reversed(order)) if layout != "columns_by_size" else [int(x) for x in view["legend_order"]]
     )
     med = dict(zip(order, t1["med_a"], strict=False))
-    W, lab_w, row, top = 440, 184, 26, 6
-    x0, x1 = lab_w + 12, W - 58
+    stacked = W < 400  # телефон (порция 6a): название типа — над своей точкой, шкала во всю ширину
+    lab_w, row, top = (0, 40, 6) if stacked else (184, 26, 6)
+    x0, x1 = (8 if stacked else lab_w + 12), W - 58
+    dy = 10 if stacked else 0  # точка ниже подписи
     lo, hi = math.log(0.5), math.log(2.5)
     vals = [v for v in med.values() if v is not None]
     lo, hi = min([lo, *vals]) - 0.05, max([hi, *vals]) + 0.05
@@ -253,9 +255,9 @@ def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str) ->
     pts = []
     for j, t in enumerate(rows_top):
         y = top + j * row + row / 2
-        g.append(_text(0, y + 4, str(names.get(str(t)) or f"Тип {t}"), "lab"))
+        g.append(_text(0, y + 4 - dy, str(names.get(str(t)) or f"Тип {t}"), "lab"))
         if med.get(t) is not None:
-            pts.append((sx(med[t]), y, t))
+            pts.append((sx(med[t]), y + dy, t))
     line = (view.get("line_by_turnover") or {}).get("retail") or t1.get("line", "none")
     if line in ("solid", "dashed") and layout != "columns_by_size" and len(pts) > 1:
         d = "M" + "L".join(f"{x:.1f},{y:.1f}" for x, y, _ in pts)
@@ -267,9 +269,9 @@ def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str) ->
     return _svg(W, H, "".join(g), title, "fd-svg")
 
 
-def shares_svg(shares: Sequence[Mapping], title: str) -> str:
+def shares_svg(shares: Sequence[Mapping], title: str, W: float = 440) -> str:
     """Доли «тот же тип» по вариантам расчёта: полосы от нуля до 100%, подписи прямо у полос."""
-    W, row, top = 440, 34, 2
+    row, top = 34, 2
     x1 = W - 56
     g = []
     for i, s in enumerate(shares):
@@ -282,9 +284,9 @@ def shares_svg(shares: Sequence[Mapping], title: str) -> str:
     return _svg(W, H, "".join(g), title, "fd-svg")
 
 
-def errors_svg(t7: Mapping, bar_b: str, bar_p: str, title: str) -> str:
+def errors_svg(t7: Mapping, bar_b: str, bar_p: str, title: str, W: float = 440) -> str:
     """Медианные ошибки сверки: соседи по региону и набор продукта T7, полосы от нуля, подписи у полос."""
-    W, row, top = 440, 34, 2
+    row, top = 34, 2
     x1 = W - 60
     mx = max(t7["raw"]["B"], t7["raw"]["P"]) * 1.05
     g = []
@@ -299,15 +301,30 @@ def errors_svg(t7: Mapping, bar_b: str, bar_p: str, title: str) -> str:
     return _svg(W, H, "".join(g), title, "fd-svg")
 
 
+# телефон (порция 6a): холст 320 единиц — подпись в 11,5 единиц на 343 px ≈ 12,3 px
+PHONE_W = 320
+
+
+def _pair(build: Callable[[float], str]) -> str:
+    from munnet.site_chapters import phone_pair
+
+    return phone_pair(build(440), build(PHONE_W))
+
+
 def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc: Esc, src: str) -> str:
     """Раздел «Что устояло и чем полезно» (три колонки; на телефоне — одна). Нет текстов — пусто."""
     if not ft:
         return ""
     cols = []
     for key, fig in (
-        ("stood", retail_svg(story, order, ft["_t1"], ft["stood"]["chart"])),
-        ("border", shares_svg(ft["_shares"], ft["border"]["chart"])),
-        ("use", errors_svg(ft["_t7"], ft["use"]["bar_b"], ft["use"]["bar_p"], ft["use"]["chart"])),
+        ("stood", _pair(lambda w: retail_svg(story, order, ft["_t1"], ft["stood"]["chart"], w))),
+        ("border", _pair(lambda w: shares_svg(ft["_shares"], ft["border"]["chart"], w))),
+        (
+            "use",
+            _pair(
+                lambda w: errors_svg(ft["_t7"], ft["use"]["bar_b"], ft["use"]["bar_p"], ft["use"]["chart"], w)
+            ),
+        ),
     ):
         p = ft[key]
         extra = ""

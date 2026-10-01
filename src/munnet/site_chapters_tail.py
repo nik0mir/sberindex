@@ -16,6 +16,8 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from munnet import site_chapters as SC
+from munnet import style as mstyle
 from munnet.site_chapters import (
     ACCENT,
     GREY,
@@ -322,7 +324,13 @@ def _mini_map(geo: Mapping, layers: str, label: str, cls: str = "mini-map") -> s
 W, X0, X1 = 380, 4, 336  # ширина, начало и конец шкалы; справа — подпись значения
 
 
-def comparable_svg(t7: Mapping, view: Mapping, ex_err: Mapping | None) -> tuple[str, float]:
+def _axis_caption(s: str, w: float, y: float) -> list[str]:
+    """Подпись оси у правого края шкалы; на узком холсте — переносом, чтобы не уйти за левый край."""
+    lines = _wrap(s, int((w - 44) / 5.6))  # 10 единиц × 0,56 — средний знак
+    return [_text(w - 44, y + j * 13, ln, "axis", "end") for j, ln in enumerate(lines)]
+
+
+def comparable_svg(t7: Mapping, view: Mapping, ex_err: Mapping | None, W: float = W) -> tuple[str, float]:
     """Точечный график медианных ошибок наборов A, B, C, D: точка — цель относительно региона, кольцо —
     без поправки; шкала от нуля, строки — по возрастанию ошибки. Возвращает SVG и правый край шкалы
     (для графика примера — та же шкала)."""
@@ -332,15 +340,15 @@ def comparable_svg(t7: Mapping, view: Mapping, ex_err: Mapping | None) -> tuple[
     xmax = max(vals) * 1.08
     ticks = _ticks(0, xmax, 3)
     xmax = max(xmax, ticks[-1])
-    sx = lambda v: X0 + v / xmax * (X1 - X0)  # noqa: E731
+    sx = lambda v: X0 + v / xmax * ((W - 44) - X0)  # noqa: E731
     g, y = [], 0.0
     for s in sets:
-        lines = _wrap(f"{s} · {_set_label(s, view)}", 58)[:2]
+        lines = _wrap(f"{s} · {_set_label(s, view)}", int(58 * W / 380))[:3]
         cls = "th" if s == view.get("product_set") else "lab"
         for j, ln in enumerate(lines):
             g.append(_text(X0, y + 11 + j * 13, ln, cls))
         yl = y + 13 * len(lines) + 9
-        g.append(f'<line class="row-rule" x1="{X0}" x2="{X1}" y1="{yl:.1f}" y2="{yl:.1f}"/>')
+        g.append(f'<line class="row-rule" x1="{X0}" x2="{(W - 44)}" y1="{yl:.1f}" y2="{yl:.1f}"/>')
         if mab.get(s) is not None:
             g.append(
                 f'<circle cx="{sx(mab[s]):.1f}" cy="{yl:.1f}" r="4.5" fill="#fff" stroke="{INK2}" '
@@ -352,8 +360,10 @@ def comparable_svg(t7: Mapping, view: Mapping, ex_err: Mapping | None) -> tuple[
     dec = _dec(ticks[1] - ticks[0]) if len(ticks) > 1 else 2
     for t in ticks:
         g.append(f'<line class="grid" x1="{sx(t):.1f}" x2="{sx(t):.1f}" y1="{y - 4:.1f}" y2="{y:.1f}"/>')
-        g.append(_text(sx(t), y + 12, _num(t, dec), "axis", "middle"))
-    g.append(_text(X1, y + 26, UI["comp_axis"], "axis", "end"))
+        lab = _num(t, dec)  # крайняя подпись у начала шкалы — от края, чтобы не выйти за холст
+        g.append(_text(sx(t), y + 12, lab, "axis", "start" if sx(t) < len(lab) * 3 else "middle"))
+    g += _axis_caption(UI["comp_axis"], W, y + 26)
+    y += 13 * (len(_wrap(UI["comp_axis"], int((W - 44) / 5.6))) - 1)
     items = "; ".join(f"{s} — {_num(med[s], 3)}" for s in sets)
     return _svg(W, y + 32, "".join(g), UI["comp_aria"].format(items=items), "ch-svg comp dots"), xmax
 
@@ -370,7 +380,7 @@ def diff_rows(t7: Mapping) -> list[tuple[str, str, Mapping]]:
     return out
 
 
-def diff_svg(rows: Sequence[tuple[str, str, Mapping]], view: Mapping) -> str:
+def diff_svg(rows: Sequence[tuple[str, str, Mapping]], view: Mapping, W: float = W) -> str:
     """Разности медианных ошибок с 95% интервалами у нуля: точка и отрезок — цель относительно региона,
     кольцо и отрезок ниже — без поправки."""
     if not rows:
@@ -383,11 +393,13 @@ def diff_svg(rows: Sequence[tuple[str, str, Mapping]], view: Mapping) -> str:
     span = max(abs(min(vals)), abs(max(vals))) * 1.12
     ticks = _ticks(-span, span, 4)
     lo, hi = min(ticks[0], -span), max(ticks[-1], span)
-    sx = lambda v: X0 + (v - lo) / (hi - lo) * (X1 - X0)  # noqa: E731
+    sx = lambda v: X0 + (v - lo) / (hi - lo) * ((W - 44) - X0)  # noqa: E731
     g, y, zero_rows = [], 0.0, []
     for a, b, d in rows:
-        g.append(_text(X0, y + 11, f"{a} − {b}: {UI['short_' + a]} − {UI['short_' + b]}", "th"))
-        yl = y + 24
+        head = _wrap(f"{a} − {b}: {UI['short_' + a]} − {UI['short_' + b]}", int(W / (11.5 * 0.56)))
+        for j, ln in enumerate(head):
+            g.append(_text(X0, y + 11 + j * 13, ln, "th"))
+        yl = y + 24 + 13 * (len(head) - 1)
         zero_rows.append(yl)
         for key, dy, style in (("rel", 0, "dot"), ("abs", 9, "ring")):
             v = d.get(key)
@@ -415,7 +427,8 @@ def diff_svg(rows: Sequence[tuple[str, str, Mapping]], view: Mapping) -> str:
     dec = _dec(ticks[1] - ticks[0]) if len(ticks) > 1 else 3
     for t in ticks:
         g.append(_text(sx(t), y + 12, _signed(t, dec) if t else "0", "axis", "middle"))
-    g.append(_text(X1, y + 26, UI["diff_axis"], "axis", "end"))
+    g += _axis_caption(UI["diff_axis"], W, y + 26)
+    y += 13 * (len(_wrap(UI["diff_axis"], int((W - 44) / 5.6))) - 1)
     items = "; ".join(
         f"{a} − {b}: {_signed(d['rel'][0])}, интервал {_signed(d['rel'][1][0])}…{_signed(d['rel'][1][1])}"
         for a, b, d in rows
@@ -424,16 +437,16 @@ def diff_svg(rows: Sequence[tuple[str, str, Mapping]], view: Mapping) -> str:
     return _svg(W, y + 32, "".join(g), UI["diff_aria"].format(items=items), "ch-svg diff dots")
 
 
-def example_err_svg(t7: Mapping, ex_err: Mapping, xmax: float, name: str) -> str:
+def example_err_svg(t7: Mapping, ex_err: Mapping, xmax: float, name: str, W: float = W) -> str:
     """Ошибка у муниципалитета примера (акцент) рядом с медианой по всем (серая черта), та же шкала."""
     med = t7["median_error"]
     sets = sorted(med, key=lambda s: (med[s], s))
-    sx = lambda v: X0 + v / xmax * (X1 - X0)  # noqa: E731
-    g, y = [_text(X0, 11, UI["ex_mo"], "acc"), _text(X1, 11, UI["ex_all"], "note", "end")], 18.0
+    sx = lambda v: X0 + v / xmax * ((W - 44) - X0)  # noqa: E731
+    g, y = [_text(X0, 11, UI["ex_mo"], "acc"), _text((W - 44), 11, UI["ex_all"], "note", "end")], 18.0
     for s in sets:
         g.append(_text(X0, y + 11, f"{s} · {UI['short_' + s]}", "lab"))
         yl = y + 22
-        g.append(f'<line class="row-rule" x1="{X0}" x2="{X1}" y1="{yl:.1f}" y2="{yl:.1f}"/>')
+        g.append(f'<line class="row-rule" x1="{X0}" x2="{(W - 44)}" y1="{yl:.1f}" y2="{yl:.1f}"/>')
         g.append(
             f'<line x1="{sx(med[s]):.1f}" x2="{sx(med[s]):.1f}" y1="{yl - 7:.1f}" y2="{yl + 7:.1f}" '
             f'stroke="{INK2}" stroke-width="2"/>'
@@ -507,8 +520,9 @@ def chapter_comparable(
     ex = t7.get("example") or {}
     ex_err = ex.get("errors") or {}
     svg, xmax = comparable_svg(t7, view, ex_err)
+    svg = SC.phone_pair(svg, comparable_svg(t7, view, ex_err, SC.PHONE_W)[0])
     rows = diff_rows(t7)
-    dsvg = diff_svg(rows, view)
+    dsvg = SC.phone_pair(diff_svg(rows, view), diff_svg(rows, view, SC.PHONE_W))
     med, mab = t7["median_error"], t7.get("median_error_abs") or {}
     sets = sorted(med, key=lambda s: (med[s], s))
     trows = [
@@ -568,7 +582,9 @@ def chapter_comparable(
                 card = story["card"]
                 fig += f'<p class="note">{esc(card["shifted"])}. {esc(card.get("lines") or "")}.</p>'
         if ex_err:
-            fig += example_err_svg(t7, ex_err, xmax, name)
+            fig += SC.phone_pair(
+                example_err_svg(t7, ex_err, xmax, name), example_err_svg(t7, ex_err, xmax, name, SC.PHONE_W)
+            )
         rid = int(r["id"])
         fig += f'<p><a class="open-card" href="#mo={rid}" data-go="{rid}">{esc(UI["ex_open"])}</a></p>'
         exrows = [
@@ -626,7 +642,8 @@ def r1_maps(r1: Mapping, geo: Mapping | None, esc: Esc) -> tuple[str, list[list[
 
 
 def _pct0(x: float) -> str:
-    return f"{round(x * 100):d}%"
+    """Доля «тот же тип» — с одним знаком, как в блоке «Что устояло» (порция 6a: было 47% против 46,9%)."""
+    return mstyle.fmt_pct(x, 1)
 
 
 def chapter_limits(story: Mapping, checks: Mapping, geo: Mapping | None, esc: Esc) -> str:
