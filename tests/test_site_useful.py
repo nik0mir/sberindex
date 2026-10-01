@@ -398,7 +398,9 @@ def test_search_none_types_explain_comp_link_from_numbers():
 def test_hero_why_and_stood_title():
     """Строка «зачем» на первом экране; заголовок «Что устояло» — без «оси», ρ расшифрована один раз."""
     st, _ = _story({})
-    assert st["screen0"]["hero"]["why"].startswith("Проверки записаны до расчётов")
+    # порция 6d (check-facts): предрегистрация — только о проверках, совет сверки — «после проверки»
+    why = st["screen0"]["hero"]["why"]
+    assert why.startswith("Проверки смысла типов записаны до расчётов") and "после проверки" in why
     f = TX["findings"]
     assert f["stood"]["title"] == "Тот же порядок виден в обороте Росстата"
     assert f["stood"]["text"].count("ранговая корреляция Спирмена") == 1 and "вскрыт" not in f["use"]["note"]
