@@ -186,6 +186,18 @@ def use_texts(tx: Mapping, uf: Mapping, cfg_words: Mapping[str, str]) -> dict[st
     }
 
 
+# хвост названия по виду МО (mo.json, поле «k»): «Благовещенский» → «Благовещенский район», как в отчёте
+KIND_SUFFIX = {"муниципальный район": " район", "муниципальный округ": " муниципальный округ"}
+
+
+def display_name(r: Mapping, fallback: str = "") -> str:
+    """Короткое название МО с заглавной буквы и хвостом вида МО для районов и муниципальных округов."""
+    name = str(r.get("ns") or r.get("n") or fallback or "")
+    name = name[:1].upper() + name[1:]
+    suffix = KIND_SUFFIX.get(str(r.get("k") or ""), "")
+    return name if not suffix or name.endswith(suffix.strip()) else name + suffix
+
+
 def example_texts(tx: Mapping, uf: Mapping, mo: Mapping[int, Mapping], k: int = 10) -> dict[str, Any] | None:
     """Пример по правилу (``example``) и обратный пример этапа 5 (``example.stage5_example``)."""
     ex = uf.get("example") or {}
@@ -193,8 +205,7 @@ def example_texts(tx: Mapping, uf: Mapping, mo: Mapping[int, Mapping], k: int = 
         return None
     tid = int(ex["territory_id"])
     r = mo.get(tid) or {}
-    name = str(r.get("ns") or r.get("n") or ex.get("name") or "")
-    name = name[:1].upper() + name[1:]
+    name = display_name(r, str(ex.get("name") or ""))
     region = str(r.get("r") or ex.get("region") or "")
     kb, kd = len(ex.get("members_B") or []) or k, len(ex.get("members_D") or []) or k
     pct = lambda v: style.fmt_pct(v, 1, sign=True)  # noqa: E731
@@ -228,11 +239,10 @@ def example_texts(tx: Mapping, uf: Mapping, mo: Mapping[int, Mapping], k: int = 
     # обратный случай — только если у примера этапа 5 соседи по региону и правда ошибаются больше
     if s5 and s5.get("err_B") is not None and float(s5["err_B"]) > float(s5["err_D"]):
         r5 = mo.get(int(s5["territory_id"])) or {}
-        n5 = str(r5.get("ns") or r5.get("n") or s5.get("name") or "")
         out["reverse"] = _fill(
             tx["ex_reverse"],
             {
-                "name": n5[:1].upper() + n5[1:],
+                "name": display_name(r5, str(s5.get("name") or "")),
                 "region": str(r5.get("r") or s5.get("region") or ""),
                 "err_b": style.fmt_num(s5["err_B"], 3),
                 "err_d": style.fmt_num(s5["err_D"], 3),
