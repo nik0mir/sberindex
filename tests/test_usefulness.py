@@ -128,7 +128,7 @@ def test_region_random_errors_uses_own_group_without_self():
         U.region_random_errors(y, np.array([5]), np.array([3]), g, 5, 0)
 
 
-# --- сквозной прогон на синтетике ---------------------------------------------------------------------
+# --- сквозной прогон на синтетике ---------------------------------------------------------------------------
 
 
 def _synthetic(tmp: Path, rng: np.random.Generator, n: int = 60, break_errors: bool = False) -> tuple:
@@ -149,6 +149,9 @@ def _synthetic(tmp: Path, rng: np.random.Generator, n: int = 60, break_errors: b
             "ndfl_income_pc": np.r_[r23 * 3, r24 * 3 * np.exp(rng.normal(0, 0.1, n))],
             "shipments_pc": np.r_[r23 * 5, r24 * 5 * np.exp(rng.normal(0, 0.2, n))],
             "ndfl_ok": np.r_[np.ones(n, bool), ids % 13 != 0],
+            # население для usefulness.size_posthoc (tests/test_usefulness_size.py); без генератора —
+            # прочие числа синтетики те же
+            "pop_avg": np.r_[1000.0 * ids, 1010.0 * ids],
         }
     )
     ctx.to_parquet(processed / "context_annual.parquet")
@@ -246,6 +249,8 @@ def test_run_end_to_end(tmp_path):
         "by_type.json",  # проверка usefulness.by_type_test — свои файлы
         "by_type_runs.csv",
         "by_type_by_mo.csv",
+        "size_check.json",  # разведка usefulness.size_posthoc — свои файлы
+        "size_by_mo.csv",
     }
     r = facts["rule"]
     v = r["vs_D"]
