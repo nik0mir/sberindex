@@ -18,7 +18,9 @@
    вариантах R1 и повторах seed и везде тот же тип; тот же тип везде, где узел есть, но вариантов меньше —
    «проверен в N из 3 вариантов»; иначе — «тип зависит от варианта расчёта».
 
-Выходы — ``<paths.outputs>/usefulness/``: ``facts.json``, ``rule_by_mo.csv``, ``mo_flags.csv``.
+Выходы — ``<paths.outputs>/usefulness/``: ``facts.json``, ``rule_by_mo.csv``, ``mo_flags.csv``. После них —
+проверка ``usefulness.by_type_test`` (модуль ``munnet.usefulness_by_type``) в свои файлы ``by_type.json``,
+``by_type_runs.csv``, ``by_type_by_mo.csv``.
 """
 
 from __future__ import annotations
@@ -528,4 +530,9 @@ def run(cfg: Config) -> dict:
         r["works"], rule["n"], r["share"], *r["share_ci"], r["words"], ex["name"], ex["region"],
         facts["type_flag"]["stable"], facts["type_flag"]["n"],
     )  # fmt: skip
+    # Проверка usefulness.by_type_test (предрегистрация 01.10, f744563) — после существующих расчётов, в свои
+    # файлы by_type*.json/csv; facts.json, rule_by_mo.csv и mo_flags.csv выше уже записаны и не меняются.
+    from munnet import usefulness_by_type
+
+    usefulness_by_type.run(cfg, rule["by_type"])
     return facts

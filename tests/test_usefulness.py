@@ -144,6 +144,11 @@ def _synthetic(tmp: Path, rng: np.random.Generator, n: int = 60, break_errors: b
             "territory_id": np.r_[ids, ids],
             "year": np.r_[np.full(n, 2023), np.full(n, 2024)],
             "retail_pc": np.r_[r23, r24],
+            # новые цели usefulness.by_type_test (проверка — tests/test_usefulness_by_type.py)
+            "catering_turnover_pc": np.r_[r23 * 0.2, r24 * 0.2 * np.exp(rng.normal(0, 0.1, n))],
+            "ndfl_income_pc": np.r_[r23 * 3, r24 * 3 * np.exp(rng.normal(0, 0.1, n))],
+            "shipments_pc": np.r_[r23 * 5, r24 * 5 * np.exp(rng.normal(0, 0.2, n))],
+            "ndfl_ok": np.r_[np.ones(n, bool), ids % 13 != 0],
         }
     )
     ctx.to_parquet(processed / "context_annual.parquet")
@@ -154,6 +159,7 @@ def _synthetic(tmp: Path, rng: np.random.Generator, n: int = 60, break_errors: b
             "name_short": [f"МО {i}" for i in ids],
             "region_name": [f"Регион {g}" for g in groups],
             "region_group": groups,
+            "mo_type": np.where(ids % 3 == 0, "go", np.where(ids % 3 == 1, "mr", "mo")),
         }
     ).to_parquet(processed / "features_nodes.parquet")
     rows = []
@@ -190,14 +196,18 @@ def _synthetic(tmp: Path, rng: np.random.Generator, n: int = 60, break_errors: b
             "n_runs": np.ravel([[4, 3] for _ in ids]),
         }
     ).to_csv(out / "interpret" / "node_seed.csv", index=False)
+    rob = load_config()["interpret"]["robustness"]
+    variants = [f"variant:{v}" for v in rob["variants"]]  # по алфавиту — тот же порядок, что a, b, c
+    seeds = [f"seed:{s}" for s in rob["seeds"] if s != 42]
+    main_type = (ids % 4) + 1
     pd.DataFrame(
         {
-            "territory_id": np.repeat(ids, 3),
-            "variant": ["variant:a", "variant:b", "variant:c"] * n,
-            "kind": "variant",
-            "matched_type": 1,
-            "main_type": 1,
-            "same": np.ravel([[True, bool(i % 3), True] for i in ids]),
+            "territory_id": np.r_[np.repeat(ids, 3), np.repeat(ids, 4)],
+            "variant": [*(variants * n), *(seeds * n)],
+            "kind": ["variant"] * (3 * n) + ["seed"] * (4 * n),
+            "matched_type": np.r_[np.repeat(main_type, 3), np.repeat(main_type, 4)],
+            "main_type": np.r_[np.repeat(main_type, 3), np.repeat(main_type, 4)],
+            "same": np.r_[np.ravel([[True, bool(i % 3), True] for i in ids]), np.ones(4 * n, bool)],
         }
     ).to_csv(out / "interpret" / "node_r1.csv", index=False)
     facts = {
@@ -229,7 +239,14 @@ def test_run_end_to_end(tmp_path):
     cfg, y, eb, ed = _synthetic(tmp_path, np.random.default_rng(1))
     facts = U.run(cfg)
     out = Path(cfg["paths"]["outputs"]) / "usefulness"
-    assert {p.name for p in out.iterdir()} == {"facts.json", "rule_by_mo.csv", "mo_flags.csv"}
+    assert {p.name for p in out.iterdir()} == {
+        "facts.json",
+        "rule_by_mo.csv",
+        "mo_flags.csv",
+        "by_type.json",  # проверка usefulness.by_type_test — свои файлы
+        "by_type_runs.csv",
+        "by_type_by_mo.csv",
+    }
     r = facts["rule"]
     v = r["vs_D"]
     assert v["works"] == int((eb < ed).sum())
