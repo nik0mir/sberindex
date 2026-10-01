@@ -85,10 +85,12 @@ def test_numbers_come_from_facts_and_checks():
     s = ft["stood"]["text"]
     assert "0,55" in s and "1705" in s and "0,28 против 0,17" in s and "«уровень трат»" in s
     u = ft["use"]["text"]
-    assert "0,036 против 0,042" in u and "−0,005" in u and "от −0,009 до −0,003" in u and "1542" in u
+    assert "0,036 против 0,042" in u and "разность медиан −0,005" in u and "от −0,009 до −0,003" in u
+    assert "1542 муниципалитета" in u  # порция 6b: согласование числительного
     assert "10 ориентиров" in ft["use"]["chart"]
     b = ft["border"]["text"]
-    assert "46,9%" in b and "другое правило рёбер" in b and b.rstrip(".").endswith("плацебо")
+    assert "46,9% муниципалитетов с типом" in b and "другое правило связей между муниципалитетами" in b
+    assert b.rstrip(".").endswith("плацебо")
     # другие числа — другой текст (подставляет код)
     c = _checks()
     c["t7"]["median_error_abs"]["B"] = 0.0301

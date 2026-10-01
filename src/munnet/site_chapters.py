@@ -137,7 +137,17 @@ UI: dict[str, str] = {
     "flows_col_n": "Муниципалитетов",
     "flows_col_rel": "Из них обе половины года согласны",
     "placebo_title": "Смен типа за год, в которых обе половины года согласны: наблюдение и плацебо",
-    "placebo_final": "Итог: вариант расчёта с наименьшим вердиктом — {variant}",
+    "placebo_final": "Самый строгий вариант расчёта — {variant}",
+    # порция 6b (check-ux): итог под графиком плацебо словами; фразы — по вердиктам checks.t3, числа — там же
+    "placebo_sum_head": "Заголовок главы — по самому строгому варианту расчёта.",
+    "placebo_sum_final_not": (
+        "При варианте «{variant}» число смен не отличается от плацебо: {obs} при 95-м перцентиле "
+        "плацебо {p95}."
+    ),
+    "placebo_sum_main_up": (
+        "В основном расчёте смен больше, чем на плацебо ({obs} против медианы {med}), но этот результат "
+        "не устоял к вариантам расчёта."
+    ),
     "placebo_main": "Основной расчёт — {label}",
     "placebo_obs": "наблюдение {n}",
     "placebo_p95": "95-й перцентиль плацебо {n}",
@@ -162,7 +172,7 @@ UI: dict[str, str] = {
 
 VARIANT_WORDS = {
     "main": "основной расчёт",
-    "variant:graph_basket_cos": "другое правило рёбер",
+    "variant:graph_basket_cos": "другое правило связей между муниципалитетами",
     "variant:no_level": "без признака уровня трат",
     "variant:nodes_separate": "районы Москвы и Петербурга отдельно",
     "tracking:fixed_prototypes": "другой способ прослеживания типов",
@@ -317,6 +327,17 @@ def _shape_d(t: int, x: float, y: float, r: float, view: Mapping) -> str:
         q = r * 1.2
         return f"M{x:.1f} {y - q:.1f}l{q:.1f} {q:.1f}l{-q:.1f} {q:.1f}l{-q:.1f} {-q:.1f}z"
     return f"M{x - r:.1f} {y:.1f}a{r:.1f} {r:.1f} 0 1 0 {2 * r:.1f} 0a{r:.1f} {r:.1f} 0 1 0 {-2 * r:.1f} 0"
+
+
+def rel_key(story: Mapping, placebo: bool = True) -> str:
+    """Ключ грамматики надёжности (``palette_rule.reliability_grammar.key``, заморожен). Порция 6b (check-ux):
+    фраза о плацебо — только под графиками с плацебо; без них — первая фраза ключа (до «Плацебо»).
+    Слова ключа не меняются, меняется только то, какая его часть видна."""
+    key = str(story.get("reliability_key") or "")
+    if placebo:
+        return key
+    head, sep, _ = key.partition(" Плацебо")
+    return head.rstrip(".") if sep else key
 
 
 def _section(
@@ -662,6 +683,8 @@ def chapter_types(
     ch = story["chapters"]["types"]
     view = story["view"]
     text = f"<p>{esc(UI['types_read'])}</p>"
+    if ch.get("explain"):  # порция 6b: пересказ исхода T5 под заголовком (site.build.texts.types_explain)
+        text = f'<p class="explain">{esc(ch["explain"])}.</p>' + text
     if ch.get("text"):
         text += f'<details class="how"><summary>{esc(UI["how"])}</summary><p>{esc(ch["text"])}</p></details>'
     if ch.get("note"):
@@ -946,7 +969,7 @@ def chapter_order(story: Mapping, checks: Mapping, esc: Esc) -> str:
         f'<li><i class="k-dot"></i>{esc(UI["order_key_rivals"])}</li>'
         f'<li><i class="k-ring"></i>{esc(UI["order_key_random"])}</li></ul>'
         f'<p class="axis-note">{esc(UI["order_b_axis"])}</p>'
-        f'<p class="rel-key">{esc(story.get("reliability_key") or "")}</p>'
+        f'<p class="rel-key">{esc(rel_key(story, placebo=False))}</p>'
         f'<figcaption class="source">{esc(UI["src_rosstat"])}</figcaption>'
         + _table(["", "", UI["col_med_log"]], table, esc, UI["alt_turnover"])
         + _table(["", "", "ρ", UI["col_ci"]], brows, esc, UI["alt_rivals"])
@@ -1166,6 +1189,31 @@ def placebo_runs(story: Mapping, t3: Mapping | None) -> list[dict]:
     return out
 
 
+def placebo_summary(t3: Mapping | None) -> str:
+    """Итог под графиком плацебо словами (порция 6b): заголовок главы — по самому строгому варианту; при его
+    вердикте ``not`` — что число смен не отличается от плацебо; если основной расчёт прошёл, а итог ниже —
+    что основной расчёт не устоял к вариантам. Числа — ``checks.t3`` (те же, что на графике)."""
+    if not t3:
+        return ""
+    fin, main = t3.get("final") or {}, t3.get("main") or {}
+    out = []
+    if fin.get("run") and fin.get("run") != main.get("run"):
+        out.append(UI["placebo_sum_head"])
+        if t3.get("verdict_final") == "not" and fin.get("observed") is not None:
+            out.append(
+                UI["placebo_sum_final_not"].format(
+                    variant=VARIANT_WORDS.get(str(fin["run"]), str(fin["run"])),
+                    obs=_f(fin["observed"]),
+                    p95=_f(fin.get("p95") or 0, 1),
+                )
+            )
+        if t3.get("unstable") and main.get("passed") and main.get("observed") is not None:
+            out.append(
+                UI["placebo_sum_main_up"].format(obs=_f(main["observed"]), med=_f(main.get("median") or 0))
+            )
+    return " ".join(out)
+
+
 def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
     ch = story["chapters"]["dynamics"]
     view = story["view"]
@@ -1240,7 +1288,13 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
         '<div class="flow-mo" id="flow-mo" aria-live="polite" hidden></div></div>'
         + (
             f'<div class="dyn-placebo"><h3>{esc(UI["placebo_title"])}</h3>{psvg}'
-            f'<p class="note">{esc(UI["placebo_key"])}</p></div>'
+            f'<p class="note">{esc(UI["placebo_key"])}</p>'
+            + (
+                f'<p class="placebo-sum">{esc(placebo_summary(checks.get("t3")))}</p>'
+                if checks.get("t3")
+                else ""
+            )
+            + "</div>"
             if psvg
             else ""
         )

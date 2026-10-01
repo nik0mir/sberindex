@@ -175,7 +175,7 @@ const MAX_OPTS = 12;
     if (!q) { close(); status.textContent = ""; return; }
     list.innerHTML = items.length
       ? nbsp(items.map((r, i) => `<li role="option" id="opt-${i}" data-id="${r.id}" aria-selected="false" aria-label="${esc(optLabel(r))}">${fig(r.t)}<span class="opt-name">${esc(r.n)}</span><span class="opt-meta">${esc(r.r)} — ${esc(typeName(r.t))}</span></li>`).join(""))
-      : '<li class="empty" role="option" aria-disabled="true">Ничего не нашлось. Попробуйте начало названия без «район» или «округ»</li>';
+      : '<li class="empty" role="option" aria-disabled="true">Ничего не нашлось. Попробуйте начало названия без «район» или «округ»' + (S0.search_none ? `<small>${esc(S0.search_none)}.</small>` : "") + "</li>";
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
     const n = all.length;
@@ -369,15 +369,20 @@ function statusLine(r) {
   return h;
 }
 // устойчивость словами, одной строкой рядом с типом; варианты расчёта и повторы с другим seed — раздельно (§3.9)
+// порция 6b: флаг устойчивости типа (этап usefulness, mo_flags.csv) — словом перед счётом; знак разности
+// ошибок сверки у отдельного МО не показывается (usefulness.rule_share.per_mo: not_shown)
 function stabilityLine(nd) {
   const rr = (s) => (s ? s.split("/").map(Number) : null);
   const a = rr(nd.rob_rule), b = rr(nd.rob_seed);
   if (!a && !b) return "";
+  const flag = nd.fl ? (CARD.flag_words || {})[nd.fl] : "";
   const vars = (CARD.variants || {})[a ? String(a[1]) : ""] || "";
   const bits = [];
   if (a) bits.push(`тот же тип в ${a[0]} из ${a[1]} ${plural(a[1], "варианта", "вариантов", "вариантов")} расчёта${vars ? ` (${esc(vars)})` : ""}`);
   if (b) bits.push(`в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим начальным числом (seed)`);
-  return `<p class="rob-line"><b>${esc(CARD.stability || "Устойчивость типа")}:</b> ${bits.join("; ")}. <span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span></p>`;
+  const head = `<b>${esc(CARD.stability || "Устойчивость типа")}:</b> ` + (flag ? `<b class="flag-word flag-${esc(nd.fl[0])}">${esc(cap1(flag))}.</b> ` : "");
+  const body = flag ? cap1(bits.join("; ")) : bits.join("; ");
+  return `<p class="rob-line">${head}${body}. <span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span></p>`;
 }
 
 function renderCard(r) {
@@ -689,8 +694,9 @@ function renderExamples() {
 }
 
 // --- главы 1, 3, 4, 5: SVG и тексты вписаны при сборке (site_chapters.py); здесь только поведение ------------------
-// ссылки на муниципалитеты в главах: go() запоминает, откуда открыли карточку (фокус вернётся туда)
-for (const sec of doc.querySelectorAll(".chapter")) {
+// ссылки на муниципалитеты в главах и в блоке «Что устояло» (пример пользы, порция 6b): go() запоминает,
+// откуда открыли карточку (фокус вернётся туда)
+for (const sec of doc.querySelectorAll(".chapter, #findings")) {
   sec.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-go], button[data-go]");
     if (!a) return;

@@ -41,7 +41,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from munnet import site_chapters, site_chapters_tail, site_findings, site_hexgrid, site_scene, style
+from munnet import (
+    site_chapters,
+    site_chapters_tail,
+    site_findings,
+    site_hexgrid,
+    site_scene,
+    site_useful,
+    style,
+)
 from munnet.config import Config
 from munnet.contracts import MissingInputError, QCError
 from munnet.site_headlines import SLOT, HeadlineChecker, check_headlines, freeze_hash, norm
@@ -238,6 +246,8 @@ def site_numbers(cfg: Config) -> dict[str, str]:
         raise QCError(f"site: регионов без узлов {len(inc)} ≠ e1.n_all_incomplete_regions {n_inc_eda}")
     absent = ef.get("e1.n_absent_regions") or {}
     n_abs = int(absent.get("value") or 0)
+    n_out = int((ef.get("e1.n_missing_outside") or {}).get("value") or 0)
+    out_txt = str((ef.get("e1.missing_outside_regions") or {}).get("text") or "")
     regions = (
         {
             "n_incomplete": f"{len(inc)} {plural_ru(len(inc), 'регионе', 'регионах', 'регионах')}",
@@ -245,6 +255,15 @@ def site_numbers(cfg: Config) -> dict[str, str]:
             "n_absent": f"{n_abs} {plural_ru(n_abs, 'региона', 'регионов', 'регионов')}",
             "absent": str((ef.get("e1.absent_regions") or {}).get("text") or ""),
         }
+        | (
+            {
+                "n_missing_mo": f"{n_out} "
+                + plural_ru(n_out, "муниципалитет", "муниципалитета", "муниципалитетов"),
+                "missing_outside": out_txt,
+            }
+            if n_out and out_txt
+            else {}
+        )
         if inc and absent.get("value")
         else {}
     )
@@ -472,6 +491,10 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
     heads = []
     for k in ("point_1", "point_2", "point_3"):
         hs = [heads_by_test[t] for t in ta[k] if t not in on_top] or [heads_by_test[ta[k][0]]]
+        # порция 6b (check-ux): если в пункте остался только нейтральный вопрос (подзаголовок T2 без
+        # вердикта), рядом с ним — короткий заголовок исхода T3 (тот же, что подзаголовком выше)
+        if hs == [H["descriptive"]["dynamics_neutral"]] and "T3_reliable_placebo" in ta[k]:
+            hs = hs + [heads_by_test["T3_reliable_placebo"]]
         if "T7_utility" in ta[k]:
             hs.append(_headline(H, "T7_type_gain", v["T7_type_gain"], vd))
         heads.append(hs)
@@ -492,6 +515,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "labels": {k: TX.get(k) for k in ("question_label", "how_checked", "caveat_label") if TX.get(k)},
         "gloss": dict(TX.get("gloss") or {}),
         "regions_note": regions_note(TX.get("regions_note"), numbers),
+        "search_none": fill_if_all(TX.get("search_none"), numbers),
         "hero": hero_texts(cfg, TX.get("hero") or {}, scope, n_types),
     }
     flows = P["t3_flows"][t3]
@@ -510,6 +534,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "note": H["T4_basket_vs_place"]["describe"],
             "text": texts["T5_trivial"],
             "note_text": texts["T4_basket_vs_place"],
+            "explain": types_explain((TX.get("types_explain") or {}).get(t5), facts.get("t5") or {}),
         },
         "order": {
             "title": _headline(H, "T1_ladder_external", t1, vd),
@@ -527,6 +552,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "lead": _headline(H, "T7_type_gain", v["T7_type_gain"], vd),
             "text": texts["T7_utility"],
             "same_period": A["honesty"]["t7_same_period"],
+            "comp_link": comp_link(TX.get("comp_link"), facts.get("t7") or {}),
             "similar_caption": fill(
                 site["similar_caption"], {"n_shown": str(site["n_similar_shown"]), "n_set": str(n_set)}
             ),
@@ -611,6 +637,31 @@ def hero_texts(cfg: Config, tx: Mapping[str, str], scope: Mapping, n_types: int)
         "n_untyped": style.fmt_num(int(scope.get("n_untyped") or 0)),
     }
     return {k: fill(str(v), vals) for k, v in tx.items() if k != "island_note"}
+
+
+def fill_if_all(tpl: str | None, vals: Mapping[str, str]) -> str | None:
+    """Шаблон с полями из ``vals``; нет хотя бы одного значения — None (строка не показывается)."""
+    if not tpl or not all(vals.get(k) for k in _slots(tpl)):
+        return None
+    return fill(tpl, {k: vals[k] for k in _slots(tpl)})
+
+
+def types_explain(tpl: str | None, t5: Mapping) -> str | None:
+    """Пояснение под заголовком главы 3 (порция 6b): AMI с самым близким делением — ``facts.t5``."""
+    if not tpl or t5.get("max_ami") is None or not t5.get("max_label"):
+        return None
+    return fill(tpl, {"ami": style.fmt_num(float(t5["max_ami"]), 2), "max_label": str(t5["max_label"])})
+
+
+def comp_link(tpl: str | None, t7: Mapping) -> str | None:
+    """Связка главы 6 с блоком «Что с этим делать» (порция 6b): медианные ошибки соседей по региону (B)
+    и набора продукта в обеих целях — ``facts.t7``."""
+    p = t7.get("product")
+    rel, ab = t7.get("median_error") or {}, t7.get("median_error_abs") or {}
+    if not tpl or not p or any(x.get(k) is None for x in (rel, ab) for k in ("B", p)):
+        return None
+    f3 = lambda v: style.fmt_num(float(v), 3)  # noqa: E731
+    return fill(tpl, {"b_abs": f3(ab["B"]), "p_abs": f3(ab[p]), "b_rel": f3(rel["B"]), "p_rel": f3(rel[p])})
 
 
 def regions_note(tpl: str | None, numbers: Mapping[str, str]) -> str | None:
@@ -930,10 +981,9 @@ OKRUG_RU = {
 }
 STATUS_CODE = {"no_change": "n", "reliable": "r", "within_noise": "w"}
 # варианты R1 (interpret.robustness) словами для карточки; у узлов-городов — первые два (без третьего)
-R1_WORDS = {
-    "variant:graph_basket_cos": "другое правило рёбер",
-    "variant:no_level": "без признака уровня трат",
-    "variant:nodes_separate": "районы Москвы и Петербурга отдельно",
+R1_WORDS = {  # один словарь с главами (порция 6b: «другое правило связей между муниципалитетами»)
+    k: site_chapters.VARIANT_WORDS[k]
+    for k in ("variant:graph_basket_cos", "variant:no_level", "variant:nodes_separate")
 }
 N_WINDOWS = 13
 ICVI_BETTER = {
@@ -1285,7 +1335,6 @@ def callouts(d: SiteData, hm: HexMap, mo: pd.DataFrame, story: Mapping, taken: l
     if ex is None:
         return []
     ex = ex[(ex["kind"] == "typical") & (ex["rank"] == 1)].sort_values("type")
-    names = story["names"]["final"]
     rows = mo.set_index("id")
     g = hm.grid
     out = [
@@ -1299,7 +1348,10 @@ def callouts(d: SiteData, hm: HexMap, mo: pd.DataFrame, story: Mapping, taken: l
         r = rows.loc[tid]
         x, y = g.center([r["hq"]], [r["hr"]])
         cx, cy = float(x[0]), float(y[0])
-        lines = [f"{r['ns']} ({r['r']})", f"— {names.get(str(int(e['type'])), '')}"]
+        shape = str(story["view"]["shapes"].get(str(int(e["type"])), ""))
+        lines = [
+            f"{shape} {cap(str(r['ns']))}".strip()
+        ]  # порция 6b: было «Название (регион) — тип» в две строки
         w = CHAR_W * max(len(t) for t in lines)
         h = LINE_H * len(lines)
         cands = []
@@ -1549,12 +1601,46 @@ def node_tables(d: SiteData) -> dict[str, pd.Series]:
     return out
 
 
+def check_r1_shares(r1: Mapping, uf: Mapping) -> list[str]:
+    """Доли «тот же тип» по вариантам (``checks.r1.variants`` — среди муниципалитетов с типом) против
+    ``usefulness.type_flag.per_variant``: одно определение на странице и в отчёте (порция 6b)."""
+    want = {v["variant"]: v for v in ((uf.get("type_flag") or {}).get("per_variant") or [])}
+    bad = []
+    for v in r1.get("variants") or []:
+        w = want.get(v["variant"])
+        if w is None:
+            continue
+        if int(w["n"]) != int(v["n"]) or abs(float(w["same_share"]) - v["same"] / v["n"]) > 1e-9:
+            bad.append(f"{v['variant']}: {v['same']} из {v['n']} против {w['same_share']:.4f} из {w['n']}")
+    return bad
+
+
+def useful_texts(
+    cfg: Config, tx: Mapping, useful_in: Mapping | None, mo_rows: Mapping[int, Mapping]
+) -> dict | None:
+    """Строки 6b из выходов usefulness (``site_useful``): доля случаев, оговорка о наборе R, пример, флаг."""
+    if useful_in is None or not tx.get("useful"):
+        return None
+    uf = useful_in["facts"]
+    ux = tx["useful"]
+    border = (tx.get("findings") or {}).get("border") or {}
+    words = cfg["usefulness"]["rule_share"]["words"]
+    return {
+        "use": site_useful.use_texts(ux, uf, words),
+        "example": site_useful.example_texts(ux, uf, mo_rows),
+        "flag": site_useful.flag_summary(border.get("flag", ""), border.get("flag_most") or {}, uf)
+        if border.get("flag")
+        else None,
+        "flag_label": str(uf.get("label") or cfg["usefulness"]["type_flag"]["label"]),
+    }
+
+
 def mo_json(mo: pd.DataFrame) -> dict:
     """Колонки ``mo.json`` (массивы одинаковой длины)."""
     cols = [
         "id", "n", "ns", "r", "k", "role", "node", "why_null", "t", "t23", "t24", "win", "st", "rel",
         "hq", "hr", "nx", "ny", "pop", "wp", "ser", "b23", "b24", "why", "rh", "nb", "sim", "simb",
-        "rob_rule", "rob_seed",
+        "rob_rule", "rob_seed", "fl",
         "second", "var", "rival",
     ]  # fmt: skip
     ints = {"id", "node", "t", "t23", "t24", "hq", "hr", "nx", "ny", "pop", "second", "rival"}
@@ -1849,7 +1935,11 @@ def r1_variants(d: SiteData) -> list[dict] | None:
     vp = d.outputs("cluster/variants.csv")
     ari = pd.read_csv(vp).set_index("variant")["ari_same_candidate_vs_main"].to_dict() if vp.exists() else {}
     out = []
+    typed = set(int(i) for i in d.node_type.index)
     for v, g in nr[nr["kind"] == "variant"].groupby("variant", sort=True):
+        # порция 6b: знаменатель — муниципалитеты с типом основного расчёта (у варианта «районы отдельно» —
+        # без 242 районов столиц), как report.md §8 и usefulness.type_flag.per_variant
+        g = g[g["territory_id"].astype(int).isin(typed)]
         same = g["same"].astype(bool)
         a = ari.get(str(v).split(":", 1)[-1])
         out.append(
@@ -2229,6 +2319,7 @@ def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[
         f'<p class="h0-kicker" id="hero-kicker">{_t(hx.get("kicker", ""))}</p>'
         f'<h1 id="hero-title">{_t(hx.get("title") or s0["title"])}</h1>'
         f'<p class="h0-lede" id="hero-lede">{_t(hx.get("lede", ""))}</p>'
+        + (f'<p class="h0-why" id="hero-why">{_t(_dot(hx["why"]))}</p>' if hx.get("why") else "")
     )
     colors = story["view"]["type_colors"]
     names = story["names"]["final"]
@@ -2540,18 +2631,38 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     bad = check_controls(d)
     if bad:
         raise QCError("site: контрольные числа: " + "; ".join(bad[:10]))
+    # порция 6b: выходы этапа usefulness — необязательный вход (нет — блока пользы и флага нет;
+    # устарел — код 1)
+    useful_in = site_useful.load(cfg, mode)
     layout, nxy = similarity(cfg)
     story["chapters"]["similarity"]["layout_caption"] = layout.get("caption")
     story["view"]["similarity_layout"] = layout.get("chosen")
     hm = build_hexmap(d)
     values = clustering_values(cfg)
     mo = build_mo_frame(d, hm, nxy, values)
+    flag_codes: dict[int, str] = {}
+    if useful_in is not None:
+        codes, words = site_useful.flag_codes(useful_in["flags"])
+        nodes_mo = mo[mo["role"].isin(["territorial", "city"])].set_index("id")
+        rob = {c: nodes_mo[c] for c in ("rob_rule", "rob_seed") if c in nodes_mo.columns}
+        bad = site_useful.check_flags(useful_in["flags"], d.node_type, rob)
+        if bad:
+            raise QCError("site: флаг устойчивости типа: " + "; ".join(bad[:5]))
+        flag_codes = {int(k): str(v) for k, v in codes.items()}
+        mo["fl"] = mo["node"].map(lambda n: flag_codes.get(int(n)) if pd.notna(n) else None)
+        story["card"]["flag_words"] = words
     types = build_types(d, mo, story, values)
     checks = build_checks(d, mo, layout, hm)
+    if useful_in is not None:  # те же доли «тот же тип», что у usefulness.type_flag.per_variant (иначе код 3)
+        bad = check_r1_shares(checks.get("r1") or {}, useful_in["facts"])
+        if bad:
+            raise QCError("site: доли «тот же тип» не совпали с usefulness: " + "; ".join(bad))
     if checks["t1"]:
         story["view"]["line_by_turnover"] = {k: v["line"] for k, v in checks["t1"].items()}
     hexgrid = build_hexgrid_json(d, hm, mo.set_index("id")["t"])
     scene = build_scene(cfg, story, mo, hm, values)
+    if scene is not None and flag_codes:  # подсказка объёмной карты: флаг после типа (порция 6b)
+        scene["cells"]["f"] = [flag_codes.get(int(i)) for i in scene["cells"]["id"]]
     methods = build_methods(d)
     story["meta"]["pending"] = ["geo.json", "munnet_landing.pdf"]
     story["meta"]["type_source"] = d.type_source
@@ -2578,7 +2689,10 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     mo_rows = {int(r["id"]): r for r in rows_of(data["mo"])}
     # порция 5b: блок «Что устояло», строки карточки о сверке, паспорта типов (тексты — site.build.texts)
     tx = cfg["site"]["build"].get("texts") or {}
-    ft = site_findings.findings_texts(tx.get("findings") or {}, story, facts, checks)
+    useful = useful_texts(cfg, tx, useful_in, mo_rows)
+    ft = site_findings.findings_texts(tx.get("findings") or {}, story, facts, checks, useful)
+    if useful_in is not None and ft is None:
+        log.warning("site: блок «Что устояло» не собран — доля случаев и пример пользы не показаны")
     if tx.get("findings") and ft is None:
         log.warning(
             "site: блок «Что устояло» не показан — вердикты или числовые условия не те, "
@@ -2591,8 +2705,17 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         story,
         site_findings.strings(ft)
         + [str(v) for v in story["card"].values() if isinstance(v, str)]
-        + site_findings.passport_strings(types, ptx),
+        + list((story["card"].get("flag_words") or {}).values())
+        + site_findings.passport_strings(types, ptx)
+        + site_useful.strings(
+            (useful or {}).get("use"), (useful or {}).get("example"), (useful or {}).get("flag")
+        ),
     )
+    banned_h = list(cfg["site"]["forbidden_words"]["headlines_always"]) + list(
+        cfg["interpret"]["naming"]["banned"]
+    )
+    bad += [f"запрет в заголовке: «{w}» в «{h}»" for h in site_findings.titles(ft) for w in banned_h
+            if norm(w) in norm(h)]  # fmt: skip
     if bad:
         raise QCError("site: линт текстов порции 5b: " + "; ".join(bad[:10]))
     passports = site_findings.passports_html(types, story, mo_rows, ptx, _t)

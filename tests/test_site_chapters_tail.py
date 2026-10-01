@@ -181,7 +181,7 @@ def test_r1_maps_mark_exactly_changed_nodes():
     assert first.count("h0") == 2  # узлы 2 и 3
     assert re.search(r'<path d=""', maps[1])  # в варианте без уровня тип у всех тот же
     # доля — с одним знаком, как в блоке «Что устояло» (порция 6a)
-    assert "тот же тип у 50,0% (2 из 4)" in sec and "0,22" in sec
+    assert "тот же тип у 50,0% муниципалитетов с типом (2 из 4)" in sec and "0,22" in sec
     assert '<p class="kicker">Чего данные не показывают</p><h2' in sec
 
 
@@ -237,9 +237,11 @@ def test_tail_ui_has_no_forbidden_words_for_any_verdict():
 class _D:
     """Заглушка SiteData: только выгрузки этапа 5 и outputs."""
 
-    def __init__(self, tmp: Path, frames: dict[str, pd.DataFrame]):
+    def __init__(self, tmp: Path, frames: dict[str, pd.DataFrame], typed: list[int] | None = None):
         self.frames, self.tmp = frames, tmp
         self.cfg = CFG
+        ids = typed if typed is not None else [1, 2, 3]
+        self.node_type = pd.Series([1] * len(ids), index=ids)  # узлы с типом основного расчёта
 
     def opt(self, name: str) -> pd.DataFrame | None:
         return self.frames.get(name)
@@ -282,15 +284,16 @@ def test_t7_example_checked_against_facts(tmp_path):
 def test_r1_variants_counts_and_ari_from_cluster(tmp_path):
     nr = pd.DataFrame(
         {
-            "territory_id": [1, 2, 3, 1, 2, 3],
-            "variant": ["variant:a"] * 3 + ["seed:1"] * 3,
-            "kind": ["variant"] * 3 + ["seed"] * 3,
-            "same": [True, False, False, True, True, True],
+            "territory_id": [1, 2, 3, 1, 2, 3, 9],
+            "variant": ["variant:a"] * 3 + ["seed:1"] * 3 + ["variant:a"],
+            "kind": ["variant"] * 3 + ["seed"] * 3 + ["variant"],
+            "same": [True, False, False, True, True, True, False],
         }
-    )
+    )  # 9 — район столицы: в варианте «районы отдельно» он есть, но типа основного расчёта у него нет
     (tmp_path / "cluster").mkdir()
     pd.DataFrame({"variant": ["a"], "ari_same_candidate_vs_main": [0.25]}).to_csv(
         tmp_path / "cluster" / "variants.csv", index=False
     )
     out = landing.r1_variants(_D(tmp_path, {"node_r1.csv": nr}))
+    # порция 6b: доля — среди муниципалитетов с типом основного расчёта (район 9 не входит)
     assert out == [{"variant": "variant:a", "n": 3, "same": 1, "ari": 0.25, "diff_ids": [2, 3]}]

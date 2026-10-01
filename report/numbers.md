@@ -374,7 +374,7 @@
 | 8 | 578 из 1776 (32,5%); 1198 | `use.type_flag.stable`, `use.type_flag.n`, `use.type_flag.stable_share` (0,3255), `use.type_flag.depends` | флаг |
 | 8 | табл.: 100%; 99,8% (1773 из 1776); 57,3% (1016 из 1774); 46,9% (833 из 1776) | `use.type_flag.seeds_only_share` (1,0); `use.type_flag.per_variant` [no_level 0,9983 × 1776; nodes_separate 0,5727 × 1774; graph_basket_cos 0,4690 × 1776]; счёт — `csv:outputs/interpret/node_r1.csv` [kind = variant; same; узлы с типом] | разбивка |
 | 8 | 71,5% (1270 из 1776) | `use.type_flag.majority`, `use.type_flag.majority_share` (0,7151) | мягкое правило |
-| 8 | 54,1% (1091 из 2016); 242 района | `csv:outputs/interpret/node_r1.csv` [variant = nodes_separate: 2016 строк, same 1091]; 242 = 2016 − 1774: районы Москвы (144) и Петербурга (98), которых нет в основном расчёте (`data/processed/territories.parquet`, region_name) | знаменатель раздела 9 и сайта |
+| 8 | 54,1% (1091 из 2016); 242 района | `csv:outputs/interpret/node_r1.csv` [variant = nodes_separate: 2016 строк, same 1091]; 242 = 2016 − 1774: районы Москвы (144) и Петербурга (98), которых нет в основном расчёте (`data/processed/territories.parquet`, region_name) | второй знаменатель раздела 9 (сайт с порции 6b — 57,3%) |
 | 8 | по типам: 62,6% (296 из 473); 7,8% (63 из 806); 30,5% (120 из 394); 96,1% (99 из 103) | `use.type_flag.by_type` [type = 2, 1, 3, 4: stable, n, stable_share] | |
 
 ## Раздел 9. Ограничения

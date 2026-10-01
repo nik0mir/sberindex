@@ -67,7 +67,7 @@ async function main() {
     const nm = NAME.get(id) || { n: "№ " + id, r: "" };
     const ratio = C.h[i];
     return {
-      id, t: C.t[i], ratio, name: nm.n, region: nm.r,
+      id, t: C.t[i], ratio, name: nm.n, region: nm.r, fl: C.f ? C.f[i] : null,
       x: C.x[i] - W2, z: C.y[i] - H2, ix: C.ix[i] - W2, iz: C.iy[i] - H2,
       h: ratio == null ? 1.5 : UNIT * ratio,
     };
@@ -313,9 +313,12 @@ async function main() {
     mesh.setColorAt(i, c);
     mesh.instanceColor.needsUpdate = true;
   }
+  // флаг устойчивости типа (порция 6b, этап usefulness) — строкой после типа; слова — story.card.flag_words
+  const FLAG_WORDS = (story.card || {}).flag_words || {};
+  const flagText = (f) => (f && FLAG_WORDS[f] ? `<span class="fl">${esc(FLAG_WORDS[f])}</span>` : "");
   function showTip(i, ev) {
     const c = cells[i], r = stage.getBoundingClientRect();
-    tip.innerHTML = nbsp(`<b>${esc(cap1(c.name))}</b><span>${esc(c.region)}</span><span class="ty"><i class="hx${c.t ? "" : " hx0"}" style="--c:${PAL[c.t] || PAL[0]}"></i>${esc(typeName(c.t))}</span><span>${esc(ratioText(c.ratio))}</span>`);
+    tip.innerHTML = nbsp(`<b>${esc(cap1(c.name))}</b><span>${esc(c.region)}</span><span class="ty"><i class="hx${c.t ? "" : " hx0"}" style="--c:${PAL[c.t] || PAL[0]}"></i>${esc(typeName(c.t))}</span>${flagText(c.fl)}<span>${esc(ratioText(c.ratio))}</span>`);
     tip.hidden = false;
     const x = Math.min(ev.clientX - r.left + 16, r.width - tip.offsetWidth - 8), y = Math.min(ev.clientY - r.top + 16, r.height - tip.offsetHeight - 8);
     tip.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, y)}px)`;

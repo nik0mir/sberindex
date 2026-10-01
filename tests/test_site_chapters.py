@@ -226,11 +226,41 @@ def test_flows_keyboard_and_list():
 def test_placebo_rows_final_and_main():
     runs = SC.placebo_runs(story(), checks()["t3"])
     assert len(runs) == 2
-    assert "другое правило рёбер" in runs[0]["label"] + (runs[0]["sub"] or "")
+    assert "другое правило связей между муниципалитетами" in runs[0]["label"] + (runs[0]["sub"] or "")
+    assert runs[0]["label"].startswith(
+        "Самый строгий вариант расчёта"
+    )  # порция 6b: без «наименьшего вердикта»
     assert "неустойчиво" in runs[1]["label"] + (runs[1]["sub"] or "")
     svg = SC.placebo_svg(runs)
     assert "наблюдение 50" in svg and "наблюдение 40" in svg
     assert svg.count('stroke-dasharray="4 3"') == 2  # 95-й перцентиль у обоих
+
+
+def test_placebo_summary_by_verdicts():
+    """Итог под графиком плацебо (порция 6b): фразы — по вердиктам checks.t3, числа — с графика."""
+    t3 = checks()["t3"] | {"verdict_final": "not", "unstable": True}
+    t3["main"] = t3["main"] | {"passed": True, "median": 2.0}
+    s = SC.placebo_summary(t3)
+    assert s.startswith("Заголовок главы — по самому строгому варианту расчёта.")
+    assert "«другое правило связей между муниципалитетами» число смен не отличается от плацебо: 50" in s
+    assert "88,0" in s and "(40 против медианы 2)" in s and "не устоял" in s
+    # итог не «not» — фразы «не отличается» нет; основной расчёт не прошёл — фразы о нём нет
+    t3b = t3 | {"verdict_final": "partial", "main": t3["main"] | {"passed": False}}
+    s = SC.placebo_summary(t3b)
+    assert "не отличается" not in s and "основном расчёте" not in s
+    # итог — сам основной расчёт: строки нет
+    assert SC.placebo_summary(t3 | {"final": t3["main"]}) == ""
+    h = SC.chapter_dynamics(story(), checks() | {"t3": t3}, ESC)
+    assert 'class="placebo-sum"' in h
+
+
+def test_rel_key_placebo_only_with_placebo():
+    """Ключ надёжности: фраза о плацебо — только в главе с плацебо (5), в главе 4 — первая фраза ключа."""
+    st = story() | {"reliability_key": "Сплошная — пройдена, бледное — нет. Плацебо (псевдогоды) — то и это"}
+    assert SC.rel_key(st, placebo=False) == "Сплошная — пройдена, бледное — нет"
+    assert SC.rel_key(st) == st["reliability_key"]
+    o = SC.chapter_order(st, checks(), ESC)
+    assert "Плацебо (псевдогоды)" not in o and "Сплошная — пройдена" in o
 
 
 def test_t3_run_observed_not_in_cloud():

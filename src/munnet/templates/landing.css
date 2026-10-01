@@ -863,3 +863,39 @@ svg.vp { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .h0-cities { transition: none; } }
 .h0-picked-note { pointer-events: none; }
+
+/* === порция 6b: блок пользы, флаг устойчивости типа, правки текстов по check-ux ================================ */
+.h0-why { margin: -6px 0 16px; font-size: 14.5px; line-height: 1.45; max-width: 32em; color: var(--ink-2); }
+.fd-share { font-weight: 600; }
+.fd-flag { margin: 10px 0 0; font-size: 13.5px; line-height: 1.45; }
+.fd-flag .label-note, .roles .label-note, .pp-foot .label-note { display: block; width: fit-content; margin-top: 6px; }
+.fd-ex {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 36px; align-items: start;
+  grid-template-areas: "text fig" "rev fig";
+  margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--rule);
+}
+.fd-ex h3 { margin: 0 0 8px; font: 700 19px/1.25 var(--sans); }
+.fd-ex-text > p { margin: 0 0 10px; font-size: 15px; line-height: 1.5; }
+.fd-ex figure { margin: 6px 0 0; grid-area: fig; }
+.fd-ex-text { grid-area: text; }
+.fd-ex .fd-rev { grid-area: rev; margin: 4px 0 0; }
+.fd-ex .ex-svg { max-width: 520px; }
+.fd-svg .th { font-weight: 700; }
+.fd-rev { color: var(--ink-2); border-left: 3px solid var(--rule); padding-left: 8px; font-size: 14px !important; }
+.fd-ex .open-card {
+  font: 600 14px/1 var(--sans); min-height: 44px; padding: 0 16px; border: 1px solid var(--ink); border-radius: 999px;
+  background: var(--paper); color: var(--ink); cursor: pointer;
+}
+.pp-foot { margin: 12px 0 0; max-width: 46rem; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+.pp-naming { margin-top: -6px; font-size: 14px; }
+.combo-list li.empty small { display: block; margin-top: 4px; font-size: 13px; line-height: 1.4; }
+.placebo-sum { margin: 10px 0 0; font-size: 14px; line-height: 1.45; }
+.ch-text .explain { font-size: 15px; line-height: 1.5; color: var(--ink-2); border-left: 3px solid var(--rule); padding-left: 10px; }
+.ch-text .outcome { font-size: 16px; line-height: 1.5; }
+.comp-link { margin: 4px 0 10px; }
+.flag-word { font-weight: 700; }
+.h0-tip .fl { font-size: 12.5px; }
+.roles .label-note { margin-top: 6px; }
+@media (max-width: 700px) {
+  .fd-ex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "text" "fig" "rev"; gap: 10px; }
+}

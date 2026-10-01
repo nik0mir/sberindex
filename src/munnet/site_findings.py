@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from munnet import style
+from munnet.site_chapters import VARIANT_WORDS as _VW
 
 Esc = Callable[[str], str]
 NB = " "
@@ -23,12 +24,8 @@ INK = "#1d1d1d"
 INK2 = "#595959"
 GREY = "#8d96a1"
 RULE = "#d6d3cc"
-# варианты расчёта R1 (node_r1.csv) словами — как в главе 7 (site_chapters.VARIANT_WORDS)
-VARIANT_WORDS = {
-    "variant:graph_basket_cos": "другое правило рёбер",
-    "variant:no_level": "без признака уровня трат",
-    "variant:nodes_separate": "районы Москвы и Петербурга отдельно",
-}
+# варианты расчёта R1 (node_r1.csv) словами — один словарь с главой 7 (site_chapters.VARIANT_WORDS)
+VARIANT_WORDS = {k: v for k, v in _VW.items() if k.startswith("variant:")}
 PASSPORT_ROWS = ("clr_rel_cafe", "clr_rel_food", "clr_rel_marketplace", "clr_rel_transport", "log_level_rel")
 
 
@@ -105,6 +102,7 @@ def t7_numbers(checks: Mapping) -> dict[str, Any] | None:
         "lo": _f(lo, 3),
         "hi": _f(hi, 3),
         "n": _f(t7.get("n_common") or 0),
+        "n_int": int(t7.get("n_common") or 0),
         "k": int(t7.get("k") or 10),
         "raw": {"B": float(err["B"]), "P": float(err[p]), "product": p},
     }
@@ -149,9 +147,13 @@ def r1_shares(checks: Mapping) -> list[dict]:
     return sorted(out, key=lambda x: x["share"])
 
 
-def findings_texts(tx: Mapping, story: Mapping, facts: Mapping, checks: Mapping) -> dict[str, Any] | None:
+def findings_texts(
+    tx: Mapping, story: Mapping, facts: Mapping, checks: Mapping, useful: Mapping | None = None
+) -> dict[str, Any] | None:
     """Тексты блока с подставленными числами; None — блок не показывается (вердикты не те, что в
-    ``requires``, или числовое условие не выполнено)."""
+    ``requires``, или числовое условие не выполнено). ``useful`` (порция 6b, ``site_useful``) — доля случаев,
+    оговорка о наборе R, пример и строка флага; по словам доли текст колонки «Что с этим делать» меняется
+    по заранее записанным правкам ``usefulness.rule_share.edits``."""
     if not tx:
         return None
     v = story.get("verdicts") or {}
@@ -166,6 +168,26 @@ def findings_texts(tx: Mapping, story: Mapping, facts: Mapping, checks: Mapping)
     low = shares[0]  # вариант с наименьшей долей «тот же тип»; все варианты — на графике
     variants = _fill(tx["border"]["variant"], {"what": low["what"], "pct": style.fmt_pct(low["share"], 1)})
     t3_head = _dot(str((story.get("screen0") or {}).get("lead") or ""))
+    u = tx["use"]
+    ut = (useful or {}).get("use")
+    # правки по словам доли B против D (usefulness.rule_share.edits): more_often — текст как был
+    d_key = (ut or {}).get("d_key", "more_often")
+    text_key = {"about_half": "text_about_half", "less_often": "text_less_often"}.get(d_key, "text")
+    title = u["title"]
+    if d_key == "less_often":
+        title = u["title_less_often"]
+    elif ut and ut.get("r_key") != "more_often":  # edits.vs_R_not_more_often
+        title = u["title_region"]
+    nums = {k: t7[k] for k in ("err_b", "err_p", "diff", "lo", "hi")} | {"n_mo": _mo_count(t7["n_int"])}
+    use = {
+        **{k: u[k] for k in ("label", "note", "bar_b", "bar_p")},
+        "title": title,
+        "chart": _fill(u["chart"], {"k": _f(t7["k"])}),
+        "text": _fill(u[text_key], nums),
+    }
+    if ut:
+        use |= {"share": ut["share"], "r_line": ut["r_line"], "rules": ut["rules"]}
+    border_flag = (useful or {}).get("flag")
     return {
         "title": tx["title"],
         "intro": tx.get("intro", ""),
@@ -178,16 +200,23 @@ def findings_texts(tx: Mapping, story: Mapping, facts: Mapping, checks: Mapping)
         "border": {
             **{k: tx["border"][k] for k in ("label", "title", "chart")},
             "text": _fill(tx["border"]["text"], {"variants": variants, "t3_head": t3_head}),
+            **(
+                {"flag": border_flag, "flag_label": (useful or {}).get("flag_label", "")}
+                if border_flag
+                else {}
+            ),
         },
-        "use": {
-            **{k: tx["use"][k] for k in ("label", "title", "note", "bar_b", "bar_p")},
-            "chart": _fill(tx["use"]["chart"], {"k": _f(t7["k"])}),
-            "text": _fill(tx["use"]["text"], {k: t7[k] for k in ("err_b", "err_p", "diff", "lo", "hi", "n")}),
-        },
+        "use": use,
         "_t1": t1,
         "_t7": t7,
         "_shares": shares,
+        "_example": (useful or {}).get("example"),
     }
+
+
+def _mo_count(n: int) -> str:
+    """«1542 муниципалитета» (порция 6b: было «1542 муниципалитетов»)."""
+    return f"{_f(n)} {_plural(n)}"
 
 
 def strings(ft: Mapping | None) -> list[str]:
@@ -198,6 +227,13 @@ def strings(ft: Mapping | None) -> list[str]:
     for part in ("stood", "border", "use"):
         out += [str(x) for k, x in ft[part].items() if isinstance(x, str)]
     return out
+
+
+def titles(ft: Mapping | None) -> list[str]:
+    """Заголовки блока и колонок (h2, h3) — для запретов в заголовках (``headlines_always``)."""
+    if not ft:
+        return []
+    return [ft["title"]] + [str(ft[p]["title"]) for p in ("stood", "border", "use")]
 
 
 # --- графики блока --------------------------------------------------------------------------------
@@ -332,19 +368,31 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
             extra = f'<p class="fd-cap">{esc(_dot(p["chart"]))} {esc(_dot(p["chart_note"]))}</p>'
         elif key == "border":
             extra = f'<p class="fd-cap">{esc(_dot(p["chart"]))}</p>'
+            if p.get("flag"):  # порция 6b: флаг устойчивости типа (usefulness.type_flag)
+                extra += (
+                    f'<p class="fd-flag">{esc(_dot(p["flag"]))} '
+                    f'<span class="label-note">{esc(p.get("flag_label") or "")}</span></p>'
+                )
         else:
-            extra = (
-                f'<p class="fd-cap">{esc(_dot(p["chart"]))}</p><p class="fd-note">{esc(_dot(p["note"]))}</p>'
-            )
+            note = _dot(p["note"]) + (" " + _dot(p["rules"]) if p.get("rules") else "")
+            extra = f'<p class="fd-cap">{esc(_dot(p["chart"]))}</p><p class="fd-note">{esc(note)}</p>'
+        body = f"<p>{esc(_dot(p['text']))}</p>"
+        if key == "use" and p.get("share"):  # порция 6b: доля случаев и оговорка о своём регионе
+            body += f'<p class="fd-share">{esc(_dot(p["share"]))}</p><p>{esc(_dot(p["r_line"]))}</p>'
         cols.append(
-            f'<div class="fd fd-{key}"><p class="fd-lab">{esc(p["label"])}</p><h3>{esc(p["title"])}</h3>'
-            f"<p>{esc(_dot(p['text']))}</p><figure>{fig}{extra}</figure></div>"
+            f'<div class="fd fd-{key}" id="fd-{key}"><p class="fd-lab">{esc(p["label"])}</p>'
+            f"<h3>{esc(p['title'])}</h3>"
+            f"{body}<figure>{fig}{extra}</figure></div>"
         )
+    from munnet import site_useful
+    from munnet.site_chapters import phone_pair
+
+    example = site_useful.example_html(ft.get("_example"), esc, phone_pair, PHONE_W)
     return (
         '<section class="findings5" id="findings" aria-labelledby="findings-title">'
         f'<h2 id="findings-title">{esc(ft["title"])}</h2>'
         + (f'<p class="fd-intro">{esc(_dot(ft["intro"]))}</p>' if ft.get("intro") else "")
-        + f'<div class="fd-grid">{"".join(cols)}</div><p class="source">{esc(src)}</p></section>'
+        + f'<div class="fd-grid">{"".join(cols)}</div>{example}<p class="source">{esc(src)}</p></section>'
     )
 
 
@@ -433,7 +481,13 @@ def passports_html(
             + (f'<p class="pp-who">{esc(_dot(who))}</p>' if who else "")
             + f'<ul class="pp-rows">{"".join(lis)}</ul>{ex}</article>'
         )
-    return f'<p class="pp-intro">{esc(_dot(tx["intro"]))}</p><div class="passports">{"".join(cards)}</div>'
+    # порция 6b (check-ux): как собрано название и почему продукты и маркетплейсы у медиан почти равны
+    naming = f'<p class="pp-intro pp-naming">{esc(_dot(tx["naming"]))}</p>' if tx.get("naming") else ""
+    foot = f'<p class="pp-foot">{esc(_dot(tx["footnote"]))}</p>' if tx.get("footnote") else ""
+    return (
+        f'<p class="pp-intro">{esc(_dot(tx["intro"]))}</p>{naming}'
+        f'<div class="passports">{"".join(cards)}</div>{foot}'
+    )
 
 
 def _plural(n: int) -> str:
@@ -451,7 +505,8 @@ def passport_strings(types: Sequence[Mapping], tx: Mapping | None) -> list[str]:
     """Строки паспортов (подписи и слова «в 1,5 раза больше») — для линта."""
     if not tx:
         return []
-    out = [tx["intro"], tx["example"], tx.get("detail", ""), *tx["rows"].values()]
+    out = [tx["intro"], tx["example"], tx.get("detail", ""), tx.get("naming", ""), tx.get("footnote", "")]
+    out += list(tx["rows"].values())
     for ty in types:
         out += [rel_text(v) for _, _, v in passport_rows(ty, tx["rows"])]
         n = int(ty.get("size") or 0)

@@ -53,7 +53,7 @@ UI: dict[str, str] = {
     "short_B": "соседи по своему региону",
     "short_C": "случайные того же размера",
     "short_D": "похожие, без учёта типа",
-    "comp_title": "Медианная ошибка сверки, {n} муниципалитетов",
+    "comp_title": "Медианная ошибка сверки, {n}",
     "comp_axis": "медианная ошибка, логарифм оборота на жителя (0,05 ≈ 5%)",
     "comp_rel": "цель относительно своего региона",
     "comp_abs": "цель без поправки на регион",
@@ -94,7 +94,7 @@ UI: dict[str, str] = {
     # глава 7 (§3.10)
     "limits_kicker": "Чего данные не показывают",
     "r1_title": "Тип при других вариантах расчёта",
-    "r1_same": "тот же тип у {pct} ({same} из {n})",
+    "r1_same": "тот же тип у {pct} муниципалитетов с типом ({same} из {n})",
     "r1_ari": "ARI с основным расчётом — {ari}",
     "r1_key_same": "тот же тип, что в основном расчёте",
     "r1_key_diff": "другой тип",
@@ -129,7 +129,7 @@ UI: dict[str, str] = {
     ),
     "m_s4_h": "Типы",
     "m_s4": (
-        "{n_types}: {method}. Выбраны по правилу, записанному до расчётов, из {n_cand} сочетаний метода "
+        "{n_types} — {method}. Выбраны по правилу, записанному до расчётов, из {n_cand} сочетаний метода "
         "и числа типов; качество — шесть индексов (SW, CH, S_Dbw, AVI, AVU, MQ)."
     ),
     "m_s5_h": "Смены типа и проверки",
@@ -556,7 +556,8 @@ def chapter_comparable(
     n_common = t7.get("n_common")
     fig = (
         '<figure class="ch-fig comp-fig">'
-        f"<h3>{esc(UI['comp_title'].format(n=_f(n_common) if n_common else '—'))}</h3>{key}{svg}"
+        f"<h3>{esc(UI['comp_title'].format(n=_mo_n(n_common) if n_common else '—'))}</h3>{key}{svg}"
+        + (f'<p class="note comp-link">{esc(ch["comp_link"])}.</p>' if ch.get("comp_link") else "")
         + (f"<h3>{esc(UI['diff_title'])}</h3>{dsvg}" if dsvg else "")
     )
     r = mo.get(int(ex["territory_id"])) if ex.get("territory_id") is not None else None
@@ -641,6 +642,13 @@ def r1_maps(r1: Mapping, geo: Mapping | None, esc: Esc) -> tuple[str, list[list[
     return "".join(out), rows
 
 
+def _mo_n(n: int) -> str:
+    """«1542 муниципалитета» — число и слово по правилу числительного (порция 6b)."""
+    from munnet.site_findings import _plural
+
+    return f"{_f(n)} {_plural(int(n))}"
+
+
 def _pct0(x: float) -> str:
     """Доля «тот же тип» — с одним знаком, как в блоке «Что устояло» (порция 6a: было 47% против 46,9%)."""
     return mstyle.fmt_pct(x, 1)
@@ -648,13 +656,9 @@ def _pct0(x: float) -> str:
 
 def chapter_limits(story: Mapping, checks: Mapping, geo: Mapping | None, esc: Esc) -> str:
     ch = story["chapters"]["limits"]
-    text = ""
+    text = f'<p class="outcome">{esc(ch["text"])}</p>' if ch.get("text") else ""
     for x in ch.get("lead") or []:
         text += f'<p class="sub">{esc(x)}.</p>'
-    if ch.get("text"):
-        text += (
-            f'<details class="how"><summary>{esc(SC_UI["how"])}</summary><p>{esc(ch["text"])}</p></details>'
-        )
     items = [(UI[f"lim_{k}"], v) for k, v in (ch.get("items") or {}).items() if v and f"lim_{k}" in UI]
     if items:
         text += (
