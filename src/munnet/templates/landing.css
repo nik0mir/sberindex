@@ -1060,3 +1060,12 @@ html.has-3d.h0-flat .lede-flat { display: block; }
   .has-3d .h0-legend { gap: 4px; }
   .has-3d .h0-legend .h0-tlink { min-height: 36px; }
 }
+
+/* === порция 6f: два совета по размеру муниципалитета (#fd-use) и строка «крупный» в карточке ================= */
+.fd > p.fd-adv { margin: 0 0 10px; padding-left: 10px; border-left: 3px solid var(--rule); }
+.fd > p.fd-adv-large { border-left-color: var(--accent); }
+.fd > p.fd-bytype { margin: 12px 0 0; font-size: 14px; line-height: 1.45; }
+.fd-more { margin-top: 10px; }
+.fd-more > summary { display: block; min-height: 44px; padding: 11px 0; font-size: 14px; line-height: 1.4; }
+.fd-more > p { margin: 6px 0 10px; font-size: 14.5px; line-height: 1.5; }
+.sim-large { margin: 8px 0 4px; padding: 6px 10px; font-size: 14px; line-height: 1.4; border-left: 3px solid var(--accent); background: #fbf6f2; }

@@ -187,6 +187,8 @@ def findings_texts(
     }
     if ut:
         use |= {"share": ut["share"], "r_line": ut["r_line"], "rules": ut["rules"]}
+    if (useful or {}).get("size"):  # порция 6f: два совета по размеру МО (site_size)
+        use["size"] = useful["size"]
     border_flag = (useful or {}).get("flag")
     return {
         "title": tx["title"],
@@ -232,6 +234,9 @@ def strings(ft: Mapping | None) -> list[str]:
     out = [ft["title"], ft["intro"]]
     for part in ("stood", "border", "use"):
         out += [str(x) for k, x in ft[part].items() if isinstance(x, str)]
+    from munnet import site_size
+
+    out += site_size.strings(ft["use"].get("size"))
     return out
 
 
@@ -385,6 +390,11 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
         body = f"<p>{esc(_dot(p['text']))}</p>"
         if key == "use" and p.get("share"):  # порция 6b: доля случаев и оговорка о своём регионе
             body += f'<p class="fd-share">{esc(_dot(p["share"]))}</p><p>{esc(_dot(p["r_line"]))}</p>'
+        if key == "use" and p.get(
+            "size"
+        ):  # порция 6f: два совета по размеру; розница — под «Где нашли совет»
+            cols.append(_use_size_html(p, body, fig, extra, esc))
+            continue
         cols.append(
             f'<div class="fd fd-{key}" id="fd-{key}"><p class="fd-lab">{esc(p["label"])}</p>'
             f"<h3>{esc(p['title'])}</h3>"
@@ -399,6 +409,29 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
         f'<h2 id="findings-title">{esc(ft["title"])}</h2>'
         + (f'<p class="fd-intro">{esc(_dot(ft["intro"]))}</p>' if ft.get("intro") else "")
         + f'<div class="fd-grid">{"".join(cols)}</div>{example}<p class="source">{esc(src)}</p></section>'
+    )
+
+
+def _use_size_html(p: Mapping, body: str, fig: str, extra: str, esc: Esc) -> str:
+    """Колонка «Что с этим делать» с советами по размеру (порция 6f): два совета, график по группам населения
+    с подписью и пометкой «после вскрытия», строка исхода заранее записанной проверки по типам; прежний текст
+    о рознице, доля случаев, оговорка о случайных МО региона и график ошибок — в раскрывающемся блоке."""
+    from munnet import site_size
+
+    st = p["size"]
+    advice = "".join(
+        f'<p class="fd-adv fd-adv-{k}"><b>{esc(st["lead_" + k])}</b> {esc(_dot(st["advice_" + k]))}</p>'
+        for k in ("small", "large")
+    )
+    chart = _pair(lambda w: site_size.size_svg(st, w))
+    return (
+        f'<div class="fd fd-use" id="fd-use"><p class="fd-lab">{esc(p["label"])}</p>'
+        f"<h3>{esc(p['title'])}</h3>{advice}"
+        f'<figure>{chart}<p class="fd-cap">{esc(_dot(st["chart"]))}</p>'
+        f'<p class="fd-note">{esc(_dot(st["posthoc"]))}</p></figure>'
+        f'<p class="fd-bytype">{esc(_dot(st["by_type"]))}</p>'
+        f'<details class="more fd-more"><summary>{esc(st["more"])}</summary>'
+        f"{body}<figure>{fig}{extra}</figure></details></div>"
     )
 
 

@@ -47,6 +47,7 @@ from munnet import (
     site_findings,
     site_hexgrid,
     site_scene,
+    site_size,
     site_useful,
     style,
 )
@@ -76,7 +77,11 @@ TESTS = (
 LICENSES = [
     {"source": "СберИндекс", "license": "CC BY-SA 4.0"},
     {"source": "Росстат, БД ПМО в обработке «Если быть точным»", "license": "CC BY 4.0"},
-    {"source": "ФНС, 5-НДФЛ в обработке «Если быть точным»", "license": "CC BY 4.0"},
+    # порция 6f: на странице набора 5-НДФЛ лицензия не указана (проверено 02.10), как в report.md
+    {
+        "source": "ФНС, 5-НДФЛ в обработке «Если быть точным»",
+        "license": "лицензия на странице набора не указана, цитирование по форме «Если быть точным»",
+    },
 ]
 
 
@@ -1742,10 +1747,10 @@ def mo_json(mo: pd.DataFrame) -> dict:
     cols = [
         "id", "n", "ns", "r", "k", "role", "node", "why_null", "t", "t23", "t24", "win", "st", "rel",
         "hq", "hr", "nx", "ny", "pop", "wp", "ser", "b23", "b24", "why", "rh", "nb", "sim", "simb",
-        "rob_rule", "rob_seed", "fl",
+        "rob_rule", "rob_seed", "fl", "lg",
         "second", "var",
     ]  # fmt: skip
-    ints = {"id", "node", "t", "t23", "t24", "hq", "hr", "nx", "ny", "pop", "second"}
+    ints = {"id", "node", "t", "t23", "t24", "hq", "hr", "nx", "ny", "pop", "second", "lg"}
     out: dict[str, list] = {}
     for c in cols:
         s = mo[c] if c in mo.columns else pd.Series([None] * len(mo), index=mo.index)
@@ -2282,9 +2287,10 @@ def download_csvs(mo: pd.DataFrame, types: list[dict], checks: Mapping, story: M
         m[col] = pd.array(m[col].round() if col == "pop_avg" else m[col], dtype="Int64")
     enc = lambda df: df.to_csv(index=False).encode("utf-8-sig")  # noqa: E731
     readme = (
-        "Выгрузки лендинга munnet. Данные: СберИндекс (CC BY-SA 4.0), Росстат и ФНС в обработке "
-        "«Если быть точным» "
-        "(CC BY 4.0). Выгрузки распространяются на условиях CC BY-SA 4.0 с указанием источников.\n"
+        "Выгрузки лендинга munnet. Данные: СберИндекс (CC BY-SA 4.0); Росстат, БД ПМО в обработке "
+        "«Если быть точным» (CC BY 4.0); ФНС, 5-НДФЛ в обработке «Если быть точным» (лицензия на странице "
+        "набора не указана, цитирование по форме «Если быть точным»). Выгрузки распространяются на условиях "
+        "CC BY-SA 4.0 с указанием источников.\n"
         "mo.csv — все муниципалитеты и два узла-города (role = city); тип района Москвы или Петербурга — "
         "тип города; type_flag — устойчивость типа (тот же тип во всех вариантах расчёта и повторах "
         "или нет).\n"
@@ -2788,6 +2794,8 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     # порция 6b: выходы этапа usefulness — необязательный вход (нет — блока пользы и флага нет;
     # устарел — код 1)
     useful_in = site_useful.load(cfg, mode)
+    # порция 6f: исход by_type_test и разведка size_posthoc — необязательный вход (как 6b)
+    size_in = site_size.load(cfg, mode, useful_in)
     layout, nxy = similarity(cfg)
     story["chapters"]["similarity"]["layout_caption"] = layout.get("caption")
     story["view"]["similarity_layout"] = layout.get("chosen")
@@ -2805,6 +2813,12 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         flag_codes = {int(k): str(v) for k, v in codes.items()}
         mo["fl"] = mo["node"].map(lambda n: flag_codes.get(int(n)) if pd.notna(n) else None)
         story["card"]["flag_words"] = words
+    if size_in is not None:  # флаг «крупный» по узлу (у района столицы — узел-город, его в size_by_mo нет)
+        bad = site_size.check_large(size_in["by_mo"], size_in["size"])
+        if bad:
+            raise QCError("site: флаг «крупный»: " + "; ".join(bad))
+        large = site_size.large_ids(size_in["by_mo"])
+        mo["lg"] = mo["node"].map(lambda n: 1 if pd.notna(n) and int(n) in large else None)
     bad = check_var_counts(mo[mo["role"].isin(["territorial", "city"])])
     if bad:
         raise QCError(
@@ -2863,6 +2877,15 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     # порция 5b: блок «Что устояло», строки карточки о сверке, паспорта типов (тексты — site.build.texts)
     tx = cfg["site"]["build"].get("texts") or {}
     useful = useful_texts(cfg, tx, useful_in, mo_rows, ((checks.get("t7") or {}).get("example")))
+    size_t = None
+    if size_in is not None and useful is not None:  # порция 6f: два совета по размеру
+        size_t = site_size.size_texts(
+            tx.get("size") or {}, size_in["by_type"], size_in["size"], story["names"]["final"]
+        )
+        if size_t is not None:
+            site_size.check_rows(size_t)
+            useful["size"] = size_t
+            story["card"]["large_note"] = site_size.card_note(tx.get("size") or {}, size_t)
     ft = site_findings.findings_texts(tx.get("findings") or {}, story, facts, checks, useful)
     if useful_in is not None and ft is None:
         log.warning("site: блок «Что устояло» не собран — доля случаев и пример пользы не показаны")
@@ -2895,6 +2918,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         + site_useful.strings(
             (useful or {}).get("use"), (useful or {}).get("example"), (useful or {}).get("flag")
         )
+        + site_size.strings(size_t)
         + list(robust.values()),
     )
     banned_h = list(cfg["site"]["forbidden_words"]["headlines_always"]) + list(
@@ -2942,7 +2966,8 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         raise QCError("site: линт шаблона: " + "; ".join(bad[:10]))
     inline = bool(cfg["site"]["build"].get("inline_all", True))
     order = [int(x) for x in checks.get("t1_order") or facts["ladder"]["order"]]
-    findings = site_findings.findings_html(ft, story, order, _t, site_chapters.UI["src_rosstat"])
+    src_key = "src_rosstat_ndfl" if ft and ft["use"].get("size") else "src_rosstat"  # порция 6f
+    findings = site_findings.findings_html(ft, story, order, _t, site_chapters.UI[src_key])
     parts = screen0_html(story, meta, hexgrid, mo) | {
         "chapters_html": chapters,
         "sources_html": sources,

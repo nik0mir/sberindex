@@ -60,7 +60,7 @@ const PART_LABELS = story.part_labels || {
   health: "здоровье", cafe: "кафе и рестораны", other: "прочее",
 };
 const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-const SRC = "Источник: СберИндекс (CC BY-SA 4.0); Росстат и ФНС в обработке «Если быть точным» (CC BY 4.0); расчёт «Корзина и регион».";
+const SRC = "Источник: СберИндекс (CC BY-SA 4.0); Росстат, БД ПМО в обработке «Если быть точным» (CC BY 4.0); ФНС, 5-НДФЛ в обработке «Если быть точным» (лицензия на странице набора не указана); расчёт «Корзина и регион».";
 
 // палитра типов — из story.view (порядковая или номинальная по вердикту T1)
 for (const [t, c] of Object.entries(view.type_colors || {})) doc.documentElement.style.setProperty("--t" + t, c);
@@ -461,6 +461,9 @@ function renderCard(r) {
     if (nd.sim && nd.sim.length && CARD.sim_from) h += `<p class="sim-from">${esc(CARD.sim_from)}.</p>`;
     if (nd.sim && nd.sim.length) {
       h += simList(nd.sim, true);
+      // порция 6f: крупный муниципалитет (верхняя пятая часть по населению, usefulness.size_posthoc) — свой
+      // регион не единственный ориентир; знак разности ошибок у отдельного МО по-прежнему не показывается
+      if (nd.lg && CARD.large_note) h += `<p class="sim-large">${esc(CARD.large_note)}.</p>`;
       const cc = CARD.sim_caption || (CH.comparable || {}).similar_caption;
       h += `<p class="cap">${CARD.sim_note ? esc(CARD.sim_note) + ". " : ""}${esc(CARD.lines || "Сходство трат, не поездки и не потоки")}. ${esc(CARD.shifted || "")}.${cc ? " " + esc(cc) + "." : ""}</p>`;
     } else if (CARD.no_comparable) {
