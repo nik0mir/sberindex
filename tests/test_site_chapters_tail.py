@@ -297,3 +297,115 @@ def test_r1_variants_counts_and_ari_from_cluster(tmp_path):
     out = landing.r1_variants(_D(tmp_path, {"node_r1.csv": nr}))
     # порция 6b: доля — среди муниципалитетов с типом основного расчёта (район 9 не входит)
     assert out == [{"variant": "variant:a", "n": 3, "same": 1, "ari": 0.25, "diff_ids": [2, 3]}]
+
+
+# --- порция 6c: карта-соперник T5 ---------------------------------------------------------------------------
+
+
+def _rival(**kw) -> dict:
+    r = {
+        "partition": "sized:log_level_rel:+",
+        "label": "уровень трат, по возрастанию",
+        "ami": 0.3129,
+        "order": "+",
+        "groups": {1: 1, 2: 2, 3: 2, 4: 1},
+        "types": {1: 1, 2: 1, 3: 2, 4: 2},
+    }
+    return r | kw
+
+
+def test_rival_maps_two_maps_on_shared_layout_neutral_colors():
+    """Две карты на общем слое ячеек; группы соперника — серые по порядку, не цвета типов; AMI — с запятой;
+    таблица «тип × группа» — счёт тех же меток; при show_rival = false карты нет."""
+    st = story()
+    st["view"]["show_rival"] = True
+    h = T.rival_maps(_rival(), st, GEO, ESC)
+    assert h.count('<use href="#cells-base"') == 2 and h.count("<svg") == 2
+    ramp = T.rival_ramp(2)
+    assert all(c in h for c in ramp) and not set(ramp) & {
+        c.lower() for c in st["view"]["type_colors"].values()
+    }
+    assert "0,31" in h and "4 группы" not in h and "2 группы" in h
+    assert "1 — наименьшие значения, 2 — наибольшие" in h
+    alt = re.search(r'<details class="alt">.*?</details>', h, re.S).group(0)
+    assert [re.findall(r"<td>(\d+)</td>", tr) for tr in re.findall(r"<tr>(.*?)</tr>", alt)[1:]] == [
+        ["1", "1"],
+        ["1", "1"],
+    ]
+    st["view"]["show_rival"] = False
+    assert T.rival_maps(_rival(), st, GEO, ESC) == ""
+
+
+def test_rival_ramp_monotone_lightness():
+    """Последовательная шкала: каждая следующая группа темнее предыдущей (видно и в оттенках серого)."""
+
+    def lum(c: str) -> float:
+        r, g, b = (int(c[i : i + 2], 16) for i in (1, 3, 5))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    for k in (2, 4, 10):
+        ls = [lum(c) for c in T.rival_ramp(k)]
+        assert all(a > b for a, b in zip(ls, ls[1:], strict=False)), k
+    assert lum(T.RIVAL_BASE) > lum(T.rival_ramp(4)[0]) + 30  # ячейки без типа светлее первой группы
+
+
+def test_rival_partition_must_match_max_ami(tmp_path):
+    """Метки соперника берутся из node_rival.csv (T5:max_ami) только для того же деления, что первая строка
+    checks.t5.ami; другое деление — код 3; без файла — карты нет."""
+    from types import SimpleNamespace
+
+    rv = pd.DataFrame(
+        {
+            "territory_id": [1, 2, 1],
+            "partition": ["sized:log_level_rel:+", "sized:log_level_rel:+", "pop_decile"],
+            "partition_label": ["x", "x", "y"],
+            "sources": [
+                "T5:max_ami;T1:best_rival:retail",
+                "T5:max_ami;T1:best_rival:retail",
+                "T5:best_rival:retail",
+            ],
+            "best_partition_label": [2, 1, 7],
+        }
+    )
+    d = SimpleNamespace(opt=lambda name: rv if name == "node_rival.csv" else None)
+    mo = pd.DataFrame({"id": [1, 2, 3], "role": ["territorial", "city", "untyped"], "t": [1, 2, None]})
+    ck = {"t5": {"ami": [{"partition": "sized:log_level_rel:+", "label": "уровень трат", "ami": 0.31}]}}
+    r = landing.rival_partition(d, ck, mo)
+    assert (
+        r["groups"] == {1: 2, 2: 1} and r["types"] == {1: 1, 2: 2} and r["order"] == "+" and r["ami"] == 0.31
+    )
+    ck["t5"]["ami"][0]["partition"] = "pop_decile"
+    with pytest.raises(QCError, match="карты-соперника"):
+        landing.rival_partition(d, ck, mo)
+    d = SimpleNamespace(opt=lambda name: None)
+    assert landing.rival_partition(d, ck, mo) is None
+
+
+# --- порция 6c: таблица всех муниципалитетов --------------------------------------------------------------
+
+
+def test_all_mo_table_skeleton_accessible_and_csv_without_js():
+    """Каркас таблицы: caption, scope у заголовков, сортировка кнопками с aria-sort; фильтры скрыты до JS;
+    без JS — ссылка на mo.csv с размером; раздел стоит между главой 7 и «Как сделано»."""
+    h = T.chapter_all_mo({"mo.csv": 220_000}, ESC)
+    assert '<section class="chapter wide" id="all-mo"' in h and "<caption" in h
+    assert h.count('<th scope="col"') == 6 and h.count('class="sort"') == 6 and h.count("aria-sort=") == 1
+    assert 'id="mo-ctl" hidden' in h and 'id="mo-wrap" hidden' in h and 'id="mo-pager" hidden' in h
+    assert 'href="data/download/mo.csv"' in h and "215 КБ" in h and 'class="nojs"' in h
+    assert "<tbody></tbody>" in h  # строки рисует JS, не 2192 сразу
+    p = T.chapters_html(story(), checks(), MO, GEO, METHODS, META, ESC, {"mo.csv": 1000})
+    assert p.index('id="limits"') < p.index('id="all-mo"') < p.index('id="method"')
+
+
+def test_all_mo_js_pages_and_reads_only_mo_fields():
+    """JS таблицы: страница — 50 строк; читает только поля mo.json (иначе столбец молча пустеет); ссылка
+    «Таблица» есть в меню шаблона."""
+    tpl = Path(landing.__file__).parent / "templates"
+    js = (tpl / "landing.js").read_text(encoding="utf-8")
+    part = js[js.index("const ALL = ") : js.index("function initAll")]
+    assert "size: 50" in part and "slice(a, b)" in part
+    used = set(re.findall(r"\b(?:r|nd)\.([a-z][a-z0-9_]*)\b", part))
+    cols = set(landing.mo_json(pd.DataFrame({"id": []})))
+    assert used and not used - cols, used - cols
+    assert '<a href="#all-mo">' in (tpl / "landing.html").read_text(encoding="utf-8")
+    assert "rival" not in cols  # карта-соперник собирается при сборке, странице метки не нужны

@@ -679,6 +679,7 @@ def chapter_types(
     esc: Esc,
     passports: str = "",
     detail: str | None = None,
+    rival: str = "",
 ) -> str:
     ch = story["chapters"]["types"]
     view = story["view"]
@@ -785,6 +786,7 @@ def chapter_types(
         + (_table(["", "", UI["col_med"], UI["col_ci"], UI["col_iqr"]], trows, esc) if trows else "")
         + ami_html
         + "</figure>"
+        + rival
     )
     return _section("types", ch["title"], text, fig, esc, wide=True)
 
@@ -1329,13 +1331,15 @@ def chapters_html(
     esc: Esc,
     passports: str = "",
     detail: str | None = None,
+    rival: str = "",
 ) -> str:
     """Главы 1, 3, 4, 5 в порядке страницы (§2). ``esc`` — экранирование с типографикой ru-text;
-    ``passports`` — паспорта типов главы 3 (порция 5b, ``site_findings.passports_html``)."""
+    ``passports`` — паспорта типов главы 3 (порция 5b, ``site_findings.passports_html``); ``rival`` — карта-
+    соперник T5 (порция 6c, ``site_chapters_tail.rival_maps``)."""
     return "\n".join(
         [
             chapter_basket(story, types, mo, esc),
-            chapter_types(story, types, checks, ref, mo, esc, passports, detail),
+            chapter_types(story, types, checks, ref, mo, esc, passports, detail, rival),
             chapter_order(story, checks, esc),
             chapter_dynamics(story, checks, esc),
         ]

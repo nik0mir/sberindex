@@ -155,6 +155,7 @@ function searchExact(nq) {
   return out.map((x) => x[2]);
 }
 const MAX_OPTS = 12;
+let openSearch = () => {}; // поиск с готовым запросом (адрес ?mo=<название> с несколькими совпадениями)
 {
   const input = $("#search-input"), list = $("#search-list"), status = $("#search-status");
   let items = [], active = -1;
@@ -190,6 +191,12 @@ const MAX_OPTS = 12;
     close();
     go(r.id);
   }
+  openSearch = (q) => {
+    input.value = q;
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ block: "center" });
+    render();
+  };
   input.addEventListener("input", render);
   input.addEventListener("focus", () => { if (input.value) render(); });
   input.addEventListener("keydown", (e) => {
@@ -241,7 +248,24 @@ const cardBody = $("#card-body");
 // simb — соседи по своему региону (набор B T7), sim — похожие по тратам в других регионах (набор продукта T7):
 // объёмная карта рисует к соседям главные дуги, к похожим — второстепенные (порция 5b)
 function announce(id, sim = [], simb = []) { doc.dispatchEvent(new CustomEvent("munnet:select", { detail: { id, sim, simb } })); }
-window.munnet = { go: (id) => go(id), ready: () => MO.size > 0 };
+window.munnet = { go: (id) => go(id), ready: () => MO.size > 0, openParam: () => openParam() };
+// адрес ?mo=<номер или название> (порция 6c): номер — сразу карточка; название — как в поиске (начало названия
+// без «район», «округ»; «Кириши» -> «Киришский»): одно совпадение (или одно точное) — карточка, несколько —
+// открывается поиск с этим запросом, а не случайный муниципалитет. Срабатывает один раз, после загрузки данных.
+let paramDone = false;
+function openParam() {
+  if (paramDone || !MO.size) return null;
+  paramDone = true;
+  const v = (new URLSearchParams(location.search).get("mo") || "").trim();
+  if (!v || parseHash() != null) return null;
+  if (/^\d+$/.test(v) && MO.has(Number(v))) { go(Number(v)); return Number(v); }
+  const found = search(v), nq = norm(v);
+  const exact = found.filter((r) => r.nn === nq);
+  const one = exact.length === 1 ? exact[0] : found.length === 1 ? found[0] : null;
+  if (one) { go(one.id); return one.id; }
+  openSearch(v);
+  return null;
+}
 function closeCard() {
   card.hidden = true;
   announce(null);
@@ -377,11 +401,21 @@ function stabilityLine(nd) {
   if (!a && !b) return "";
   const flag = nd.fl ? (CARD.flag_words || {})[nd.fl] : "";
   const vars = (CARD.variants || {})[a ? String(a[1]) : ""] || "";
+  // порция 6c: какие варианты дали другой тип — по nd.var (типы в вариантах R1, порядок — CARD.var_words);
+  // все варианты дали тот же тип — перечисляются сами варианты отдельной фразой, а не в скобках у счёта
+  const vw = CARD.var_words || [];
+  const other = (nd.var || []).map((v, i) => [v, vw[i]]).filter(([v, w]) => v != null && w && v !== nd.t);
+  const list = (xs) => (xs.length > 1 ? xs.slice(0, -1).join(", ") + " и " + xs[xs.length - 1] : xs[0] || "");
   const bits = [];
-  if (a) bits.push(`тот же тип в ${a[0]} из ${a[1]} ${plural(a[1], "варианта", "вариантов", "вариантов")} расчёта${vars ? ` (${esc(vars)})` : ""}`);
-  if (b) bits.push(`в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим начальным числом (seed)`);
+  if (a) {
+    bits.push(`тот же тип — в ${a[0]} из ${a[1]} ${plural(a[1], "варианта", "вариантов", "вариантов")} расчёта`);
+    if (other.length && other.length === a[1] - a[0]) {
+      bits.push(`другой — ${other.length > 1 ? "в вариантах" : "в варианте"} ${list(other.map(([v, w]) => `«${esc(w)}» (тип «${esc(typeName(v))}»)`))}`);
+    } else if (vars) bits.push(`варианты: ${esc(vars)}`);
+  }
+  if (b) bits.push(`тот же тип — в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим начальным числом (seed)`);
   const head = `<b>${esc(CARD.stability || "Устойчивость типа")}:</b> ` + (flag ? `<b class="flag-word flag-${esc(nd.fl[0])}">${esc(cap1(flag))}.</b> ` : "");
-  const body = flag ? cap1(bits.join("; ")) : bits.join("; ");
+  const body = bits.map(cap1).join(". ");
   return `<p class="rob-line">${head}${body}. <span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span></p>`;
 }
 
@@ -446,7 +480,15 @@ function renderCard(r) {
     ty.why.forEach((w, i) => {
       h += `<div class="why-row"><span class="lab">${esc(w.label)}<small>${w.kind === "place" ? "признак места" : "часть корзины"}</small></span>${strip(w, nd.why[i])}</div>`;
     });
-    h += `</div><div class="axis-words" style="padding-left:calc(7.5em + 8px)"><span>← ниже</span><span>выше →</span></div></section>`;
+    h += `</div><div class="axis-words" style="padding-left:calc(9.5em + 8px)"><span>← ниже</span><span>выше →</span></div>`;
+    // порция 6c: полосы — признаки, которые выбрало правило названия (2 части корзины и 1 признак места);
+    // меньше полос — остальные отличаются слабее порога правила (|δ Клиффа|), их не дорисовываем
+    h += `<p class="cap">Признаки — по правилу названия типа: части корзины и признак места, которыми медиана типа сильнее всего отличается от остальных муниципалитетов.`;
+    if (ty.why_n && ty.why.length < ty.why_n && ty.why_cliff != null) {
+      const k = ty.why.length, W = { 1: "полоса одна", 2: "полосы две" };
+      h += ` Остальные у этого типа отличаются слабее порога правила (размер отличия — дельта Клиффа — меньше ${String(ty.why_cliff).replace(".", ",")} по модулю), поэтому ${W[k] || "полос " + nf.format(k)}, а не ${ty.why_n === 3 ? "три" : nf.format(ty.why_n)}.`;
+    }
+    h += `</p></section>`;
   }
   if (nd.t != null && nd.second != null) {
     h += `<p class="kv">Ближе к центру типа ${typeHTML(nd.second)}, чем к центру своего</p>`;
@@ -776,6 +818,92 @@ for (const table of doc.querySelectorAll("table.mtable")) {
   });
 }
 
+// --- таблица всех муниципалитетов (порция 6c): текстовая альтернатива карте --------------------------------------
+// Строки — из mo.json, страницами по 50 (2192 строки сразу в DOM не идут); фильтры по региону, типу и началу
+// названия (та же нормализация, что у поиска); сортировка по заголовку с aria-sort; название открывает карточку.
+const ALL = { rows: null, view: [], page: 0, col: 0, dir: 1, size: 50 };
+const FLAG_ORDER = { s: 0, d: 1 };
+function allRows() {
+  const order = view.legend_order || [...TYPES.keys()];
+  const rank = (t) => (t == null ? 99 : order.indexOf(t));
+  const out = [];
+  for (const r of MO.values()) {
+    const nd = nodeOf(r) || r;
+    const name = cap1(r.ns || r.n) + (r.role === "city" ? " (город целиком)" : "");
+    const nn = norm(r.n), ns = norm(r.ns || r.n);
+    out.push({
+      id: r.id, name, region: r.r || "", t: nd.t ?? null, fl: nd.fl || null, t23: nd.t23 ?? null, t24: nd.t24 ?? null,
+      inner: r.role === "inner", nn, ns, words: (nn + " " + ns).split(" "),
+      key: [name, r.r || "", rank(nd.t ?? null), nd.fl ? FLAG_ORDER[nd.fl] ?? 5 : 9, rank(nd.t23 ?? null), rank(nd.t24 ?? null)],
+    });
+  }
+  return out;
+}
+function allFilter() {
+  const q0 = norm($("#mo-q").value), reg = $("#mo-region").value, ty = $("#mo-type").value;
+  const pick = (q) => ALL.rows.filter((x) =>
+    (!reg || x.region === reg) &&
+    (ty === "" || (ty === "0" ? x.t == null : x.t === Number(ty))) &&
+    (!q || x.ns.startsWith(q) || x.nn.startsWith(q) || x.words.some((w) => w.startsWith(q))));
+  ALL.view = pick(q0);
+  // как в поиске: «Кириши» -> «Киришский» — без одной-двух последних букв, не короче 4
+  for (const cut of [1, 2]) if (!ALL.view.length && q0.length >= 5 && q0.length - cut >= 4) ALL.view = pick(q0.slice(0, -cut));
+  const c = ALL.col, s = ALL.dir;
+  ALL.view.sort((a, b) => {
+    const u = a.key[c], v = b.key[c];
+    const d = typeof u === "number" ? u - v : String(u).localeCompare(String(v), "ru");
+    return s * d || a.name.localeCompare(b.name, "ru") || a.region.localeCompare(b.region, "ru");
+  });
+  ALL.page = 0;
+  allRender();
+}
+function allRender() {
+  const n = ALL.view.length, a = ALL.page * ALL.size, b = Math.min(n, a + ALL.size);
+  const heads = [...$("#mo-table").tHead.rows[0].cells].map((th) => th.textContent.trim());
+  const yt = (t) => (t == null ? "—" : `${fig(t)}<span>${esc(typeName(t))}</span>`);
+  const fw = CARD.flag_words || {};
+  $("#mo-table").tBodies[0].innerHTML = nbsp(ALL.view.slice(a, b).map((x) =>
+    `<tr><th scope="row" data-l="${esc(heads[0])}"><button type="button" class="mo-open" data-go="${x.id}">${esc(x.name)}</button></th>` +
+    `<td data-l="${esc(heads[1])}">${esc(x.region)}</td>` +
+    `<td data-l="${esc(heads[2])}">${x.t == null ? fig(null) + "<span>нет типа</span>" : yt(x.t)}${x.inner ? "<small>тип города целиком</small>" : ""}</td>` +
+    `<td data-l="${esc(heads[3])}">${x.fl && fw[x.fl] ? esc(cap1(fw[x.fl])) : "—"}</td>` +
+    `<td data-l="${esc(heads[4])}">${yt(x.t23)}</td><td data-l="${esc(heads[5])}">${yt(x.t24)}</td></tr>`).join(""));
+  $("#mo-status").textContent = n
+    ? `Строки ${nf.format(a + 1)}–${nf.format(b)} из ${nf.format(n)}${n < ALL.rows.length ? ` (всего ${nf.format(ALL.rows.length)})` : ""}`
+    : "Ничего не нашлось: измените фильтр";
+  $("#mo-prev").disabled = ALL.page === 0;
+  $("#mo-next").disabled = b >= n;
+  $("#mo-pager").hidden = n <= ALL.size;
+}
+function initAll() {
+  const sec = $("#all-mo");
+  if (!sec || ALL.rows || !MO.size) return;
+  ALL.rows = allRows();
+  const regs = [...new Set(ALL.rows.map((x) => x.region))].filter(Boolean).sort((a, b) => a.localeCompare(b, "ru"));
+  $("#mo-region").insertAdjacentHTML("beforeend", regs.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join(""));
+  const order = view.legend_order || [...TYPES.keys()];
+  $("#mo-type").insertAdjacentHTML("beforeend", order.map((t) => `<option value="${t}">${SHAPES[t] || ""} ${esc(typeName(t))}</option>`).join("") + `<option value="0">Нет типа</option>`);
+  for (const id of ["mo-ctl", "mo-wrap"]) $("#" + id).hidden = false;
+  let tq = 0;
+  $("#mo-q").addEventListener("input", () => { clearTimeout(tq); tq = setTimeout(allFilter, 120); });
+  $("#mo-region").addEventListener("change", allFilter);
+  $("#mo-type").addEventListener("change", allFilter);
+  $("#mo-prev").addEventListener("click", () => { ALL.page = Math.max(0, ALL.page - 1); allRender(); $("#mo-table").scrollIntoView({ block: "start" }); });
+  $("#mo-next").addEventListener("click", () => { ALL.page += 1; allRender(); $("#mo-table").scrollIntoView({ block: "start" }); });
+  const table = $("#mo-table");
+  table.tHead.addEventListener("click", (e) => {
+    const b = e.target.closest("button.sort");
+    if (!b) return;
+    const th = b.parentElement, col = Number(b.dataset.col);
+    const dir = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+    for (const x of table.tHead.rows[0].cells) x.removeAttribute("aria-sort");
+    th.setAttribute("aria-sort", dir);
+    ALL.col = col; ALL.dir = dir === "ascending" ? 1 : -1;
+    allFilter();
+  });
+  // название открывает карточку: обработчик ссылок глав (.chapter, button[data-go]) выше
+  allFilter();
+}
 // --- загрузка ----------------------------------------------------------------------------------------------------
 (async () => {
   const [mo, types, hexgrid] = await Promise.all([loadData("mo"), loadData("types"), loadData("hexgrid")]);
@@ -789,6 +917,8 @@ for (const table of doc.querySelectorAll("table.mtable")) {
   if (HEX) for (const r of MO.values()) if (r.hq != null && r.role !== "inner") CELLS.set(r.hq + "," + r.hr, r);
   renderKey();
   renderExamples();
+  openParam();
+  initAll(); // строк в DOM — только страница из 50, индекс 2192 записей строится за миллисекунды
   if (!MO.size) {
     $("#search-hint").textContent += " Карточки недоступны: данные не загрузились.";
   }

@@ -531,7 +531,9 @@ async function main() {
   }
   setTimeout(() => {
     if (params.get("mode") === "islands") toIslands(false);
-    const id = moFromParam(params.get("mo"));
+    // ?mo= разбирает landing.js (window.munnet.openParam: как поиск; несколько совпадений — список поиска);
+    // свой разбор — только если landing.js нет
+    const id = window.munnet && window.munnet.openParam ? null : moFromParam(params.get("mo"));
     if (id != null) { if (window.munnet && window.munnet.go) window.munnet.go(id); else select(byId.get(id)); }
     else if (pending != null) onSelect(...pending);
   }, reduce ? 0 : 2300);

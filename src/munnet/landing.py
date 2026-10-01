@@ -32,7 +32,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -1510,8 +1510,10 @@ def build_mo_frame(d: SiteData, hm: HexMap, nxy: pd.DataFrame, values: pd.DataFr
     if values is not None and feats:
         mo["why"] = [
             [
-                _num(values.at[n, f], 3) if n in values.index and f in values.columns else None
+                _num(values.at[n, f], 3) if n in values.index else None
                 for f in feats[t]
+                if f
+                in values.columns  # тот же отбор, что у types.why: полосы и точки МО — по одним признакам
             ]
             if pd.notna(n) and pd.notna(t) and int(t) in feats
             else None
@@ -1594,11 +1596,64 @@ def node_tables(d: SiteData) -> dict[str, pd.Series]:
         out["var"] = pd.Series(
             [[_num(x, 0) for x in row] for row in piv.to_numpy()], index=piv.index, dtype=object
         )
-    rv = d.opt("node_rival.csv")
-    if rv is not None:
-        best = rv[rv["sources"].astype(str).str.contains("T5:max_ami", regex=False)]
-        out["rival"] = best.set_index("territory_id")["best_partition_label"]
     return out
+
+
+def rival_partition(d: SiteData, checks: Mapping, mo: pd.DataFrame) -> dict | None:
+    """Карта-соперник главы 3 (порция 6c): метки деления с наибольшим AMI (``node_rival.csv``, источник
+    ``T5:max_ami``) — то же деление и тот же AMI, что первая строка ``checks.t5.ami``; иначе код 3.
+    Только для SVG при сборке: в ``mo.json`` не идёт (странице не нужно)."""
+    rv = d.opt("node_rival.csv")
+    ami = ((checks.get("t5") or {}).get("ami")) or []
+    if rv is None or not ami:
+        return None
+    best = rv[rv["sources"].astype(str).str.contains("T5:max_ami", regex=False)]
+    if best.empty:
+        return None
+    parts = set(best["partition"].astype(str))
+    part = str(ami[0]["partition"])
+    if parts != {part}:
+        raise QCError(f"site: деление карты-соперника {sorted(parts)} ≠ наибольший AMI {part}")
+    num = pd.to_numeric(best["best_partition_label"], errors="coerce")
+    groups = {
+        int(i): (int(n) if pd.notna(n) and float(n).is_integer() else str(g))
+        for i, n, g in zip(best["territory_id"], num, best["best_partition_label"], strict=True)
+    }
+    nodes = mo[mo["role"].isin(["territorial", "city"]) & mo["t"].notna()]
+    return {
+        "partition": part,
+        "label": str(ami[0]["label"]),
+        "ami": float(ami[0]["ami"]),
+        "order": part.rsplit(":", 1)[-1] if part.startswith(("sized:", "composite:")) else None,
+        "groups": groups,
+        "types": {int(i): int(t) for i, t in zip(nodes["id"], nodes["t"], strict=True)},
+    }
+
+
+def var_words(d: SiteData) -> list[str] | None:
+    """Названия вариантов R1 в порядке столбца ``var`` в ``mo.json`` (``node_tables``: варианты по алфавиту) —
+    строка устойчивости карточки называет, в каких вариантах тип другой (порция 6c)."""
+    r1 = d.opt("node_r1.csv")
+    if r1 is None:
+        return None
+    vs = sorted(r1.loc[r1["kind"] == "variant", "variant"].unique())
+    return [site_chapters.VARIANT_WORDS.get(str(v), str(v)) for v in vs]
+
+
+def check_var_counts(mo: pd.DataFrame) -> list[str]:
+    """Счёт «тот же тип в N из M вариантов» (``rob_rule``, node_seed.csv) против типов в вариантах (``var``,
+    node_r1.csv): карточка говорит и то и другое — они обязаны совпасть (иначе код 3)."""
+    if "var" not in mo.columns or "rob_rule" not in mo.columns:
+        return []
+    bad = []
+    for i, t, v, rr in zip(mo["id"], mo["t"], mo["var"], mo["rob_rule"], strict=True):
+        if not isinstance(v, list) or not isinstance(rr, str) or pd.isna(t):
+            continue
+        a, b = (int(x) for x in rr.split("/"))
+        vv = [x for x in v if x is not None]
+        if sum(int(x) == int(t) for x in vv) != a or len(vv) != b:
+            bad.append(f"{int(i)}: {rr} против {v}")
+    return bad
 
 
 def check_r1_shares(r1: Mapping, uf: Mapping) -> list[str]:
@@ -1641,9 +1696,9 @@ def mo_json(mo: pd.DataFrame) -> dict:
         "id", "n", "ns", "r", "k", "role", "node", "why_null", "t", "t23", "t24", "win", "st", "rel",
         "hq", "hr", "nx", "ny", "pop", "wp", "ser", "b23", "b24", "why", "rh", "nb", "sim", "simb",
         "rob_rule", "rob_seed", "fl",
-        "second", "var", "rival",
+        "second", "var",
     ]  # fmt: skip
-    ints = {"id", "node", "t", "t23", "t24", "hq", "hr", "nx", "ny", "pop", "second", "rival"}
+    ints = {"id", "node", "t", "t23", "t24", "hq", "hr", "nx", "ny", "pop", "second"}
     out: dict[str, list] = {}
     for c in cols:
         s = mo[c] if c in mo.columns else pd.Series([None] * len(mo), index=mo.index)
@@ -1687,15 +1742,39 @@ def clustering_values(cfg: Config) -> pd.DataFrame | None:
     return vals
 
 
+def naming_place(prof: pd.DataFrame | None, t: int, feats: Sequence[str], min_cliff: float) -> str | None:
+    """Признак места, который выбрало правило названия ``interpret.naming`` (``place_features: 1``): из
+    признаков места с |дельтой Клиффа| не меньше ``min_abs_cliff`` — наибольшее |отклонение медианы|
+    (``profile.csv``: ``effect_mad``, ``cliff``; ничья — по имени). В ``facts.names`` он записан, только если
+    вошёл в название; если его заменило слово о поселении, правило его всё равно выбрало — повторяем отбор
+    по тем же строкам профиля (ничего не пересчитывается). Не прошёл ни один — None."""
+    if prof is None:
+        return None
+    p = prof[prof["type"] == t].set_index("feature")
+    cand = [str(f) for f in feats if f in p.index]
+    cand = [f for f in cand if np.isfinite(p.at[f, "cliff"]) and abs(p.at[f, "cliff"]) >= min_cliff]
+    cand.sort(key=lambda f: (-abs(float(p.at[f, "effect_mad"])), f))
+    return cand[0] if cand else None
+
+
 def why_features(d: SiteData) -> dict[int, list[str]]:
-    """Признаки полос «почему»: части корзины и признак места из названия типа (``facts.names``)."""
+    """Признаки полос «почему» (§3.9 п. 4, порция 6c): части корзины из названия типа (``facts.names``, до
+    ``naming.basket_parts``) и признак места по тому же правилу названия (``naming_place``). Частей меньше
+    двух или признака места нет — правило их не выбрало (порог |δ Клиффа|): полос меньше трёх."""
+    naming = d.cfg["interpret"]["naming"]
+    n_parts, n_place = int(naming["basket_parts"]), int(naming["place_features"])
+    place_feats = [str(f) for f in d.cfg["interpret"]["tests"]["T2_direction"]["place_tree"]["features"]]
+    prof = d.opt("profile.csv")
     out = {}
     for t, v in (d.facts.get("names") or {}).items():
         if not isinstance(v, Mapping):
             continue
-        feats = [str(p) for p in v.get("parts") or []][:2]
-        if v.get("place"):
-            feats.append(str(v["place"]))
+        feats = [str(p) for p in v.get("parts") or []][:n_parts]
+        place = v.get("place") or (
+            naming_place(prof, int(t), place_feats, float(naming["min_abs_cliff"])) if n_place else None
+        )
+        if place:
+            feats.append(str(place))
         if feats:
             out[int(t)] = feats
     return out
@@ -1795,6 +1874,10 @@ def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFr
                 for f in feats[t]
                 if f in values.columns
             ]
+            # полос меньше, чем частей корзины и признаков места в правиле названия: остальные не прошли порог
+            naming = d.cfg["interpret"]["naming"]
+            rec["why_n"] = int(naming["basket_parts"]) + int(naming["place_features"])
+            rec["why_cliff"] = float(naming["min_abs_cliff"])
         if ex is not None:
             e = ex[ex["type"] == t]
             for kind in ("typical", "borderline", "largest"):
@@ -2117,6 +2200,10 @@ def download_csvs(mo: pd.DataFrame, types: list[dict], checks: Mapping, story: M
             "type_2023": mo["t23"],
             "type_2024": mo["t24"],
             "reliable_change": mo["rel"],
+            # порция 6c: флаг устойчивости типа словами (этап usefulness; у района столицы — флаг города)
+            "type_flag": (mo["fl"] if "fl" in mo.columns else pd.Series(None, index=mo.index)).map(
+                story["card"].get("flag_words") or {}
+            ),
             "why_no_type": mo["why_null"],
             "pop_avg": mo["pop"],
         }
@@ -2150,7 +2237,8 @@ def download_csvs(mo: pd.DataFrame, types: list[dict], checks: Mapping, story: M
         "«Если быть точным» "
         "(CC BY 4.0). Выгрузки распространяются на условиях CC BY-SA 4.0 с указанием источников.\n"
         "mo.csv — все муниципалитеты и два узла-города (role = city); тип района Москвы или Петербурга — "
-        "тип города.\n"
+        "тип города; type_flag — устойчивость типа (тот же тип во всех вариантах расчёта и повторах "
+        "или нет).\n"
         "types.csv — типы; flows.csv — смены типа между окнами 2023 и 2024 годов.\n"
     )
     return {
@@ -2651,6 +2739,12 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         flag_codes = {int(k): str(v) for k, v in codes.items()}
         mo["fl"] = mo["node"].map(lambda n: flag_codes.get(int(n)) if pd.notna(n) else None)
         story["card"]["flag_words"] = words
+    bad = check_var_counts(mo[mo["role"].isin(["territorial", "city"])])
+    if bad:
+        raise QCError(
+            "site: устойчивость в карточке — счёт вариантов не равен типам в вариантах: " + "; ".join(bad[:5])
+        )
+    story["card"]["var_words"] = var_words(d)
     types = build_types(d, mo, story, values)
     checks = build_checks(d, mo, layout, hm)
     if useful_in is not None:  # те же доли «тот же тип», что у usefulness.type_flag.per_variant (иначе код 3)
@@ -2722,6 +2816,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     csvs = download_csvs(mo, types, checks, story)
     story["chapters"]["method"]["numbers"] = method_numbers(story, mo, checks, methods)
     geo = cells_geo(hm, mo)
+    rival = site_chapters_tail.rival_maps(rival_partition(d, checks, mo), story, geo, _t)
     chapters = "\n".join(
         [
             site_chapters.chapters_html(
@@ -2733,8 +2828,18 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
                 _t,
                 passports,
                 (ptx or {}).get("detail"),
+                rival,
             ),
-            site_chapters_tail.chapters_html(story, checks, mo_rows, geo, methods, meta, _t),
+            site_chapters_tail.chapters_html(
+                story,
+                checks,
+                mo_rows,
+                geo,
+                methods,
+                meta,
+                _t,
+                {k.rsplit("/", 1)[-1]: len(b) for k, b in csvs.items()},
+            ),
         ]
     )
     sources = site_chapters_tail.sources_html(

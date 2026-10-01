@@ -37,6 +37,7 @@ from munnet.site_chapters import UI as SC_UI
 
 INK = "#1d1d1d"
 BASE = "#cdc8bd"  # фон маленьких карт: все ячейки
+RIVAL_BASE = "#ebe7df"  # фон пары карт главы 3: ячейки без типа (светлее самой светлой группы соперника)
 
 UI: dict[str, str] = {
     # глава 6 (§3.8)
@@ -91,6 +92,29 @@ UI: dict[str, str] = {
         "Источник: СберИндекс (CC BY-SA 4.0); оборот розничной торговли — Росстат, БД ПМО в обработке "
         "«Если быть точным» (CC BY 4.0), без МСП; расчёт «Корзина и регион»."
     ),
+    # глава 3: карта-соперник T5 (порция 6c, §4.3: при T5 ≠ confirmed)
+    "rv_title": "Типы и самое близкое к ним деление без типов на одной раскладке",
+    "rv_types": "Типы",
+    "rv_rival": "Без типов: «{label}», {n}",
+    "rv_sized": (
+        "Муниципалитеты выстроены по признаку и нарезаны на группы тех же размеров, что типы: "
+        "1 — {lo}, {k} — {hi}."
+    ),
+    "rv_lo_up": "наименьшие значения",
+    "rv_hi_up": "наибольшие",
+    "rv_lo_down": "наибольшие значения",
+    "rv_hi_down": "наименьшие",
+    "rv_cap": (
+        "Чем ближе две карты, тем меньше типы добавляют к простому делению. Совпадение типов с этим "
+        "делением — AMI {ami} (0 — как у случайного деления, 1 — полное совпадение); это наибольший AMI "
+        "среди делений без типов. Цвет справа — номер группы, а не тип. Самые светлые ячейки — "
+        "муниципалитеты без типа."
+    ),
+    "rv_aria_types": "Карта типов: {items}",
+    "rv_aria_rival": "Карта деления «{label}»: {items}",
+    "rv_group": "группа {g}",
+    "rv_col_type": "Тип",
+    "alt_rv": "Сколько муниципалитетов каждого типа в каждой группе",
     # глава 7 (§3.10)
     "limits_kicker": "Чего данные не показывают",
     "r1_title": "Тип при других вариантах расчёта",
@@ -168,6 +192,37 @@ UI: dict[str, str] = {
     "src_downloads": "Выгрузки (CSV, UTF-8, CC BY-SA 4.0)",
     "src_code": "Код — лицензия MIT. Производные данные страницы и выгрузки — CC BY-SA 4.0.",
     "src_tools": "Программы и шрифты страницы",
+    # таблица всех муниципалитетов (порция 6c): текстовая альтернатива карте
+    "all_kicker": "Текстовая альтернатива карте",
+    "all_title": "Все муниципалитеты таблицей",
+    "all_read": (
+        "У каждого муниципалитета — регион, тип, устойчивость типа и тип по годам. Название открывает "
+        "карточку. "
+        "Одинаковые названия бывают в разных регионах: их различает регион."
+    ),
+    "all_note": (
+        "Устойчивость: «тип устойчив» — тот же тип во всех вариантах расчёта и повторах с другим начальным "
+        "числом. 2023 и 2024 — тип по каждому году отдельно. У районов Москвы и Петербурга тип и годы — "
+        "города целиком."
+    ),
+    "all_nojs": "Таблица строится в браузере. Без JavaScript её можно скачать одним файлом:",
+    "all_nojs_tail": "UTF-8, открывается в Excel.",
+    "all_caption": "Муниципалитеты: название, регион, тип, устойчивость типа, тип 2023 и 2024 годов",
+    "all_q": "Название",
+    "all_q_ph": "Начало названия",
+    "all_region": "Регион",
+    "all_type": "Тип",
+    "all_any_region": "Все регионы",
+    "all_any_type": "Все типы",
+    "all_no_type": "Нет типа",
+    "all_c_name": "Название",
+    "all_c_region": "Регион",
+    "all_c_type": "Тип",
+    "all_c_flag": "Устойчивость типа",
+    "all_c_23": "2023",
+    "all_c_24": "2024",
+    "all_prev": "← Назад",
+    "all_next": "Дальше →",
 }
 
 METHOD_WORDS = {
@@ -234,7 +289,11 @@ TOOLS = [
      "https://fontsource.org/fonts/unbounded"),
 ]  # fmt: skip
 DOWNLOADS = [
-    ("mo.csv", "все муниципалитеты: регион, тип, типы 2023 и 2024 годов, смена, причина, если типа нет"),
+    (
+        "mo.csv",
+        "все муниципалитеты: регион, тип, устойчивость типа, типы 2023 и 2024 годов, смена, причина, "
+        "если типа нет",
+    ),
     ("types.csv", "типы: название, число муниципалитетов, доля жителей"),
     ("flows.csv", "смены типа 2023 → 2024: всего и с согласием половин года"),
     ("README.txt", "описание выгрузок и лицензии"),
@@ -310,11 +369,109 @@ def _dots(pts: Any) -> str:
     return "".join(out)
 
 
-def _mini_map(geo: Mapping, layers: str, label: str, cls: str = "mini-map") -> str:
+def _mini_map(geo: Mapping, layers: str, label: str, cls: str = "mini-map", base: str = BASE) -> str:
     w, h = geo["w"], geo["h"]
-    use = f'<use href="#cells-base" stroke="{BASE}" stroke-width="8.5" stroke-linecap="round" fill="none"/>'
+    use = f'<use href="#cells-base" stroke="{base}" stroke-width="8.5" stroke-linecap="round" fill="none"/>'
     body = use + layers
     return _svg(w, h, body, label, f"ch-svg {cls}")
+
+
+# --- глава 3: карта-соперник T5 (порция 6c)
+
+# Нейтральная последовательная шкала групп соперника — серые одного тона от светлого к тёмному: не цвета
+# типов, чтобы группа не читалась как тип. Светлый конец заметно темнее фона ячеек без типа (BASE).
+RIVAL_LIGHT, RIVAL_DARK = "#878d93", "#1e2328"  # светлый конец — контраст ≥ 3 : 1 к бумаге
+
+
+def rival_ramp(k: int) -> list[str]:
+    """``k`` оттенков от RIVAL_LIGHT к RIVAL_DARK (равные шаги по каналам sRGB)."""
+    a = [int(RIVAL_LIGHT[i : i + 2], 16) for i in (1, 3, 5)]
+    b = [int(RIVAL_DARK[i : i + 2], 16) for i in (1, 3, 5)]
+    out = []
+    for j in range(k):
+        s = j / max(k - 1, 1)
+        out.append("#" + "".join(f"{round(x + (y - x) * s):02x}" for x, y in zip(a, b, strict=True)))
+    return out
+
+
+def _groups_word(n: int) -> str:
+    """«4 группы» — число и слово по правилу числительного."""
+    a, b = n % 100, n % 10
+    w = "групп" if 11 <= a <= 14 else "группа" if b == 1 else "группы" if 2 <= b <= 4 else "групп"
+    return f"{n} {w}"
+
+
+def rival_maps(rival: Mapping | None, story: Mapping, geo: Mapping | None, esc: Esc) -> str:
+    """Малое множество из двух карт ячеек на одной раскладке (общий слой ``#cells-base``): слева — типы,
+    справа — сильнейшее по AMI деление без типов (``rival``: ``label``, ``ami``, ``groups`` {id: группа},
+    ``order`` — «+»/«-» у делений по одному признаку). Только при ``view.show_rival``; ничего
+    не пересчитывает,
+    таблица «тип × группа» — счёт тех же меток."""
+    view = story["view"]
+    if not rival or not geo or not view.get("show_rival") or not rival.get("groups"):
+        return ""
+    xy = geo["xy"]
+    gr = {int(i): g for i, g in rival["groups"].items()}
+    types = {int(i): int(t) for i, t in (rival.get("types") or {}).items()}
+    order = [int(t) for t in view.get("legend_order") or sorted(set(types.values()))]
+    keys = sorted(set(gr.values()), key=lambda g: (str(type(g)), g))
+    ramp = dict(zip(keys, rival_ramp(len(keys)), strict=True))
+    lay_t, lay_r, items_t, items_r = [], [], [], []
+    for t in order:
+        pts = [xy[i] for i, tt in types.items() if tt == t and i in xy]
+        col = view["type_colors"].get(str(t), INK2)
+        lay_t.append(
+            f'<path d="{_dots(pts)}" stroke="{col}" stroke-width="8.5" stroke-linecap="round" fill="none"/>'
+        )
+        items_t.append(f"{SC._type_name(story, t)} — {_f(len(pts))}")
+    for g in keys:
+        pts = [xy[i] for i, gg in gr.items() if gg == g and i in xy]
+        lay_r.append(
+            f'<path d="{_dots(pts)}" stroke="{ramp[g]}" stroke-width="8.5" stroke-linecap="round" '
+            'fill="none"/>'
+        )
+        items_r.append(f"{UI['rv_group'].format(g=g)} — {_f(len(pts))}")
+    label = str(rival.get("label") or "")
+    head_r = UI["rv_rival"].format(label=label, n=_groups_word(len(keys)))
+    svg_t = _mini_map(geo, "".join(lay_t), UI["rv_aria_types"].format(items="; ".join(items_t)),
+                      "mini-map rv-map", RIVAL_BASE)  # fmt: skip
+    svg_r = _mini_map(geo, "".join(lay_r), UI["rv_aria_rival"].format(label=label, items="; ".join(items_r)),
+                      "mini-map rv-map", RIVAL_BASE)  # fmt: skip
+    key_t = (
+        '<ul class="rv-key">'
+        + "".join(f"<li>{_fig_mark(t, view)}{esc(SC._type_name(story, t))}</li>" for t in order)
+        + "</ul>"
+    )
+    key_r = (
+        '<ul class="rv-key rv-ramp">'
+        + "".join(f'<li><i class="sw" style="background:{ramp[g]}"></i>{esc(str(g))}</li>' for g in keys)
+        + "</ul>"
+    )
+    sized = ""
+    if rival.get("order") in ("+", "-") and len(keys) > 1:
+        lo, hi = UI["rv_lo_up"], UI["rv_hi_up"]
+        if rival["order"] == "-":
+            lo, hi = UI["rv_lo_down"], UI["rv_hi_down"]
+        sized = f'<p class="note">{esc(UI["rv_sized"].format(lo=lo, k=keys[-1], hi=hi))}</p>'
+    rows = []
+    for t in order:
+        ids = [i for i, tt in types.items() if tt == t and i in gr]
+        rows.append(
+            [f"{_fig_mark(t, view)}{esc(SC._type_name(story, t))}"]
+            + [_f(sum(1 for i in ids if gr[i] == g)) for g in keys]
+        )
+    return (
+        '<figure class="ch-fig rv-fig" id="rival">'
+        f"<h3>{esc(UI['rv_title'])}</h3>"
+        '<div class="rv-grid">'
+        f'<div class="rv-card"><h4>{esc(UI["rv_types"])}</h4>{svg_t}{key_t}</div>'
+        f'<div class="rv-card"><h4>{esc(head_r)}</h4>{svg_r}{key_r}{sized}</div>'
+        "</div>"
+        f'<p class="note rv-cap">{esc(UI["rv_cap"].format(ami=_f(float(rival["ami"]), 2)))}</p>'
+        f'<figcaption class="source">{esc(SC_UI["src_sber"])}</figcaption>'
+        + _table([UI["rv_col_type"], *[UI["rv_group"].format(g=g) for g in keys]], rows, esc, UI["alt_rv"])
+        + "</figure>"
+    )
 
 
 # --- глава 6: сопоставимые территории (§3.8)
@@ -904,6 +1061,56 @@ def chapter_method(story: Mapping, checks: Mapping, methods: Mapping | None, met
     return _section("method", ch["title"], text, fig, esc, wide=True)
 
 
+# --- таблица всех муниципалитетов (порция 6c)
+
+
+def chapter_all_mo(downloads: Mapping[str, int] | None, esc: Esc) -> str:
+    """Каркас таблицы всех муниципалитетов: подписи, фильтры и заголовки с сортировкой (``aria-sort``);
+    строки рисует landing.js по ``data/mo.json`` страницами (2192 строки сразу в DOM не идут). Без JS —
+    ссылка на ``mo.csv`` и подсказка."""
+    size = (downloads or {}).get("mo.csv")
+    kb = f" <small>({_f(max(1, round(size / 1024)))} КБ)</small>" if size else ""
+    cols = [("all_c_name", "text"), ("all_c_region", "text"), ("all_c_type", "num"), ("all_c_flag", "num"),
+            ("all_c_23", "num"), ("all_c_24", "num")]  # fmt: skip
+    th = "".join(
+        f'<th scope="col" data-kind="{kind}"'
+        + (' aria-sort="ascending"' if j == 0 else "")
+        + f'><button type="button" class="sort" data-col="{j}">{esc(UI[k])}</button></th>'
+        for j, (k, kind) in enumerate(cols)
+    )
+    text = (
+        f"<p>{esc(UI['all_read'])}</p>"
+        f'<p class="note">{esc(UI["all_note"])}</p>'
+        f'<p class="nojs">{esc(UI["all_nojs"])} <a href="data/download/mo.csv" download>mo.csv</a>{kb}. '
+        f"{esc(UI['all_nojs_tail'])}</p>"
+    )
+    ctl = (
+        '<div class="mo-ctl" id="mo-ctl" hidden>'
+        f'<label class="mo-f"><span>{esc(UI["all_q"])}</span><input id="mo-q" type="search" '
+        'autocomplete="off" '
+        f'spellcheck="false" placeholder="{_e(UI["all_q_ph"])}"></label>'
+        f'<label class="mo-f"><span>{esc(UI["all_region"])}</span><select id="mo-region">'
+        f'<option value="">{esc(UI["all_any_region"])}</option></select></label>'
+        f'<label class="mo-f"><span>{esc(UI["all_type"])}</span><select id="mo-type">'
+        f'<option value="">{esc(UI["all_any_type"])}</option></select></label>'
+        "</div>"
+    )
+    fig = (
+        '<div class="ch-fig mo-fig">'
+        + ctl
+        + '<p class="mo-status" id="mo-status" aria-live="polite"></p>'
+        + '<div class="mo-wrap" id="mo-wrap" hidden><table class="motable" id="mo-table">'
+        + f'<caption class="sr-only">{esc(UI["all_caption"])}</caption>'
+        + f"<thead><tr>{th}</tr></thead><tbody></tbody></table></div>"
+        + '<div class="mo-pager" id="mo-pager" hidden>'
+        f'<button type="button" class="tool tool-text" id="mo-prev">{esc(UI["all_prev"])}</button>'
+        f'<button type="button" class="tool tool-text" id="mo-next">{esc(UI["all_next"])}</button></div>'
+        + f'<p class="source">{esc(SC_UI["src_sber"])}</p>'
+        + "</div>"
+    )
+    return _section("all-mo", UI["all_title"], text, fig, esc, wide=True, kicker=UI["all_kicker"])
+
+
 # --- глава 10: источники и лицензии
 
 
@@ -947,13 +1154,16 @@ def chapters_html(
     methods: Mapping | None,
     meta: Mapping,
     esc: Esc,
+    downloads: Mapping[str, int] | None = None,
 ) -> str:
-    """Главы 6, 7, 9 в порядке страницы (§2) и общий слой ячеек для маленьких карт."""
+    """Главы 6, 7, таблица всех муниципалитетов (порция 6c), глава 9 в порядке страницы (§2) и общий слой
+    ячеек для маленьких карт."""
     return "\n".join(
         [
             cells_defs(geo),
             chapter_comparable(story, checks, mo, geo, esc),
             chapter_limits(story, checks, geo, esc),
+            chapter_all_mo(downloads, esc),
             chapter_method(story, checks, methods, meta, esc),
         ]
     )
