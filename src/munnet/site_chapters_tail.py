@@ -165,6 +165,7 @@ UI: dict[str, str] = {
     ),
     "m_steps_aria": "Пять шагов расчёта",
     "m_report": "отчёт, раздел {n}",
+    "m_report_many": "отчёт, разделы {n}",
     "m_repro_h": "Воспроизводимость",
     "m_repro": "Все этапы с загрузкой данных запускает одна команда:",
     "m_repro_meta": "seed {seed} · сборка из коммита {sha} · отпечаток результатов {facts}",
@@ -988,11 +989,11 @@ def chapter_method(story: Mapping, checks: Mapping, methods: Mapping | None, met
         ("m_s1", [("docs/eda.md", "docs/eda.md")], 2),
         ("m_s2", [("docs/features.md", "docs/features.md")], 3),
         ("m_s3", [("docs/network.md", "docs/network.md")], 4),
-        ("m_s4", [("docs/clustering.md", "docs/clustering.md"), ("docs/icvi.md", "docs/icvi.md")], 5),
+        ("m_s4", [("docs/clustering.md", "docs/clustering.md"), ("docs/icvi.md", "docs/icvi.md")], "5–6"),
         (
             "m_s5",
             [("docs/dynamics.md", "docs/dynamics.md"), ("docs/interpretation.md", "docs/interpretation.md")],
-            7,
+            "7–8",
         ),
     ]
     li = []
@@ -1004,7 +1005,7 @@ def chapter_method(story: Mapping, checks: Mapping, methods: Mapping | None, met
         )
         a = (
             " · ".join(
-                [_link(report, UI["m_report"].format(n=sec), esc)]
+                [_link(report, UI["m_report_many" if "–" in str(sec) else "m_report"].format(n=sec), esc)]
                 + [_link(blob(p), lab, esc) for p, lab in docs]
             )
             if repo
