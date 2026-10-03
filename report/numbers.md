@@ -194,11 +194,11 @@
 | в report.md нет — `docs/clustering.md` | 9; 30; 6 | `cl.syn_clear_cells`, `cl.syn_tie_cells`, `cl.syn_none_cells` | явный победитель, ничья, «нет» |
 | в report.md нет — `docs/clustering.md` | 16 из 16; явно — 6 | `cl.syn_both_won`, `cl.syn_both_cells`, `cl.syn_both_clear` | сигнал в обоих источниках |
 | в report.md нет — `docs/clustering.md` | во всех 16 — базовая линия | `docs/clustering.md`, раздел 4, второй пункт («16 из 16»); `cl.syn_both_hybrid_best` = 0 | |
-| 5 (часть чисел — только `docs/clustering.md`) | 0,91; 0,83; 0,44 | `cl.syn_strong_kmeans_joint`, `cl.syn_strong_hybrid`, `cl.syn_strong_shalileh_mirkin` | сильные сигналы |
+| 5 (0,44 — только `docs/clustering.md`) | 0,91; 0,83; 0,44 | `cl.syn_strong_kmeans_joint`, `cl.syn_strong_hybrid`, `cl.syn_strong_shalileh_mirkin` | сильные сигналы; 0,91 и 0,83 с 03.10.2026 и в таблице методов раздела 5, колонка «Когда применять» (базовая линия) |
 | в report.md нет — `docs/clustering.md` | во всех 4 ячейках | `cl.syn_f0_four_tie`, `cl.syn_f0_n` | ничья на kNN без сигнала в X |
-| в report.md нет — `docs/clustering.md` | одна ячейка; 0,3; 0,98 | `cl.syn_graph_only_clear_n`, `cl.syn_graph_only_clear_text`, `cl.sbm_low_leiden` | явная победа метода только по графу |
-| 5 (5 из 5 и «в 1»; 0,43, 0,34, 0,17 и «в 3» — `docs/clustering.md`) | 5 из 5; 0,43; 0,34; 0,17; в 1; в 3 | `cl.sbm_mid_hybrid_best`, `cl.sbm_mid_n`, `cl.sbm_mid_hybrid`, `cl.sbm_mid_spectral`, `cl.sbm_mid_leiden`, `cl.sbm_mid_hybrid_clear`, `cl.sbm_mid_tie_spectral` | блочный граф, доля 0,5 |
-| 5 (0,03 и 0,46; 2,0 и 0,39 — `docs/clustering.md`) | 2,0; 0,03; 0,46; 0,39 | `cl.syn_fmax`, `cl.syn_g0_hybrid`, `cl.syn_g0_kmeans`, `cl.syn_g0_shalileh_mirkin` | шумовой граф kNN |
+| 5 (одна ячейка — только `docs/clustering.md`) | одна ячейка; 0,3; 0,98 | `cl.syn_graph_only_clear_n`, `cl.syn_graph_only_clear_text`, `cl.sbm_low_leiden` | явная победа метода только по графу; 0,3 и 0,98 с 03.10.2026 и в таблице методов раздела 5, колонка «Когда применять» (Leiden) |
+| 5 (5 из 5, «в 1» и «в 3» — `docs/clustering.md`) | 5 из 5; 0,43; 0,34; 0,17; в 1; в 3 | `cl.sbm_mid_hybrid_best`, `cl.sbm_mid_n`, `cl.sbm_mid_hybrid`, `cl.sbm_mid_spectral`, `cl.sbm_mid_leiden`, `cl.sbm_mid_hybrid_clear`, `cl.sbm_mid_tie_spectral` | блочный граф, доля 0,5; 0,43, 0,34 и 0,17 с 03.10.2026 и в таблице методов раздела 5, колонка «Когда применять» (гибрид) |
+| 5 (2,0 — только `docs/clustering.md`) | 2,0; 0,03; 0,46; 0,39 | `cl.syn_fmax`, `cl.syn_g0_hybrid`, `cl.syn_g0_kmeans`, `cl.syn_g0_shalileh_mirkin` | шумовой граф kNN; 0,39 и 0,03 с 03.10.2026 и в таблице методов раздела 5, колонка «Когда применять» (KEFRiN) |
 | в report.md нет — `docs/clustering.md` | 0,7; 0,04; 0,43; 0,40 | `cl.sbm7_hybrid`, `cl.sbm7_kmeans`, `cl.sbm7_shalileh_mirkin` | блочный граф, доля 0,7, сигнал в X 2,0 |
 | в report.md нет — `docs/clustering.md` | во всех 9 ячейках; 9 из 9; 0,05 | `cl.syn_noisy_x_tie`, `cl.syn_noisy_live`, `cl.syn_min_ari` | шумовой граф (kNN без сигнала в графе и блочный граф с долей от 0,7), ячейки не «нет»: ничья K-means, гауссовой смеси и KEFRiN; то же — табл. 13 |
 | 9 | 28.09; `512cc67` | `git log --format='%h %ad' --date=short -S sbm_mixing -- configs/default.yaml` → `512cc67 2026-09-28`; предрегистрация `2ee1363` синтетику прямо исключает (комментарий блока `clustering` в `git show 2ee1363 -- configs/default.yaml`) | синтетика целиком не предрегистрирована; то же — `docs/clustering.md`, раздел 10 |
@@ -258,7 +258,7 @@
 | 5, 8 | от 0,006 до 0,026; в разделе 5 — 0,006, 0,026 и 0,010 | `cl.val_ip_per_1000_beyond_attributes` (0,006), `cl.val_orgs_per_1000_beyond_attributes` (0,026), `cl.val_nights_pc_beyond_attributes` (0,010) | прирост R² |
 | в report.md нет — `docs/clustering.md` | 0,85 | `cl.stab_median_kmeans` | медианная устойчивость K-means |
 | в report.md нет — `docs/clustering.md` | 2–34 | `cl.small_kmeans_min`, `cl.small_kmeans_max` | мелкий тип K-means |
-| в report.md нет — `docs/clustering.md` | 0,48 | `cl.syn_nograph_best_feat` | лучший метод по X без сигнала в графе |
+| 5 | 0,48 | `cl.syn_nograph_best_feat` | лучший метод по X без сигнала в графе; 0,48 с 03.10.2026 и в таблице методов раздела 5, колонка «Когда применять» (K-means) |
 | 5 | 0,53 | `cl.stab_median_ward` | медианная устойчивость Уорда |
 | 5 | K = 3; 0,09 | `cl.win_gmm_k`, `cl.ari_hybrid_gmm` | гауссова смесь |
 | в report.md нет — `docs/clustering.md` | от 5 до 400; 2 кластера | `cl.hdbscan_mcs_min`, `cl.hdbscan_mcs_max`, `cl.hdbscan_kmax` | HDBSCAN |
@@ -427,6 +427,7 @@
 | Г | −5,7; −5,2; −5,8 | `bt.runs.variant:graph_basket_cos.delta` (−0,05655), `bt.runs.variant:no_level.delta` (−0,05219), `bt.runs.variant:nodes_separate.delta` (−0,05833) | варианты расчёта типов |
 | 1, Г | повторы seed — те же типы и числа; «по сути четыре» | `bt.runs.seed:142…442` — все поля равны `bt.runs.main`; `yaml:usefulness.by_type_test.power.lowest_verdict` («повторы seed дают те же метки») | 1 основной + 3 варианта; «8 вариантов расчёта; четыре — повторы с другим seed, те же типы» (`bt.design.run_order`, `csv:outputs/usefulness/by_type_runs.csv`) |
 | 1, Г | 4,6 п. п.; 2,80; около 80% | `bt.main.mde` (0,04562); `yaml:usefulness.by_type_test.statistic.mde`; 80% — `yaml:usefulness.by_type_test.words.not` («с вероятностью около 80%») | порог обнаружения; на первой странице — «порог 4,6 п. п., который проверка могла заметить» |
+| 8 | разница больше порога на 0,7 п. п. | арифметика: −`bt.main.delta` − `bt.main.mde` = 0,05261 − 0,04562 = 0,00699 | вместо «лишь немного больше» (03.10.2026) |
 | Г | общепит −7,0 (от −12,8 до −0,3; 828); доход −2,0 (от −7,1 до 3,6; 1231); отгрузка −6,8 (от −12,2 до −1,4; 1541) | `bt.main.per_target.<цель>.delta`, `.delta_ci`, `.n`; тексты — `bt.main.descriptions` | описание, без вывода по цели |
 | Г | розница −8,8 п. п. (от −14,9 до −2,3) | `bt.main.per_target.retail.delta` (−0,08779), `.delta_ci` (−0,14925; −0,02297) | виденная цель |
 | 1, 8, Г | табл.: границы 11,7; 18,1; 28,1; 53,5 тыс. | `size.quintile_bounds` (11 725; 18 115,3; 28 096,2; 53 546,3) | квинтили по 1542 МО |
