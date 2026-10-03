@@ -1,0 +1,357 @@
+{
+ "outputs/panel": {
+  "counts": {
+   "всего": 5,
+   "побайтно": 5,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "outputs/eda": {
+  "counts": {
+   "всего": 89,
+   "побайтно": 80,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 9,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\eda\\_style_demo\\demo_lines.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_lines.svg": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_map_synth.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_map_synth.svg": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_points.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_points.svg": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\real_diverging_map.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\real_level_map.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\real_level_map.svg": {
+    "status": "нет в чистой копии"
+   }
+  }
+ },
+ "outputs/features": {
+  "counts": {
+   "всего": 6,
+   "побайтно": 6,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "outputs/network": {
+  "counts": {
+   "всего": 31,
+   "побайтно": 30,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 1,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\network\\timing.csv": {
+    "kind": "csv",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<таблица>: seconds: 10 ячеек, max|Δ|=0.154, напр. строка 0: np.float64(0.0829213) против np.float64(0.0795246)"
+    ]
+   }
+  }
+ },
+ "outputs/cluster": {
+  "counts": {
+   "всего": 57,
+   "побайтно": 55,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 2,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\cluster\\report_facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 6 мест",
+    "details": [
+     ".cl.time_bootstrap_min.text: \"3\" | \"4\"",
+     ".cl.time_bootstrap_min.value: 3.0417666666666667 | 3.948183333333333",
+     ".cl.time_total_min.text: \"47\" | \"69\"",
+     ".cl.time_total_min.value: 47.13583333333334 | 69.49283333333332",
+     ".cl.time_variants_min.text: \"9\" | \"13\"",
+     ".cl.time_variants_min.value: 8.963916666666668 | 12.700766666666668"
+    ]
+   },
+   "outputs\\cluster\\timing.csv": {
+    "kind": "csv",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<таблица>: seconds: 106 ячеек, max|Δ|=1.34e+03, напр. строка 0: np.float64(26.5659) против np.float64(32.0486)"
+    ]
+   }
+  }
+ },
+ "outputs/evaluate": {
+  "counts": {
+   "всего": 27,
+   "побайтно": 27,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "outputs/dynamics": {
+  "counts": {
+   "всего": 25,
+   "побайтно": 23,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 2,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\dynamics\\facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ".seconds: 38.7513471681159 | 33.30347215896472"
+    ]
+   },
+   "outputs\\dynamics\\periods.csv": {
+    "kind": "csv",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<таблица>: seconds: 18 ячеек, max|Δ|=0.361, напр. строка 0: np.float64(1.730853432090953) против np.float64(1.4488960891030729)"
+    ]
+   }
+  }
+ },
+ "outputs/interpret": {
+  "counts": {
+   "всего": 53,
+   "побайтно": 28,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 9,
+   "нет в чистой": 16,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\interpret\\cache\\0e1bf94703e59c8610cf.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\15a3412cbe58f926b46d.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\189e7c1ea0f2d32d9383.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\1a946bdfc8080337ca7a.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\20da23563655bf6dc1f8.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ": \"RunOut(name='seed:142', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., … | \"RunOut(name='seed:142', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., …"
+    ]
+   },
+   "outputs\\interpret\\cache\\296180a990671e2cb96c.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\2d935e230371d592abc9.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ": \"RunOut(name='variant:nodes_separate', kind='variant', n_nodes=2016, ids=array([   1,    … | \"RunOut(name='variant:nodes_separate', kind='variant', n_nodes=2016, ids=array([   1,    …"
+    ]
+   },
+   "outputs\\interpret\\cache\\2e920a9046b21b120fe1.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\37d507b4cb3e5a92ac74.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\50bcf90cd95f9dea2eaf.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ": \"RunOut(name='variant:graph_basket_cos', kind='variant', n_nodes=1776, ids=array([    1, … | \"RunOut(name='variant:graph_basket_cos', kind='variant', n_nodes=1776, ids=array([    1, …"
+    ]
+   },
+   "outputs\\interpret\\cache\\55e74fbe02b33a27cf4f.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\5cb40b2160ececb362c2.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 3 мест",
+    "details": [
+     "[0]: \"RunOut(name='main', kind='main', n_nodes=1776, ids=array([    1,     2,     3, ...,  301… | \"RunOut(name='main', kind='main', n_nodes=1776, ids=array([    1,     2,     3, ...,  301…",
+     "[1].evolutionary: \"RunOut(name='evolutionary', kind='tracking', n_nodes=1776, ids=array([    1,     2,     … | \"RunOut(name='evolutionary', kind='tracking', n_nodes=1776, ids=array([    1,     2,     …",
+     "[1].fixed_prototypes: \"RunOut(name='fixed_prototypes', kind='tracking', n_nodes=1776, ids=array([    1,     2, … | \"RunOut(name='fixed_prototypes', kind='tracking', n_nodes=1776, ids=array([    1,     2, …"
+    ]
+   },
+   "outputs\\interpret\\cache\\6510b40d43658109215b.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\65fd7c155926b3634840.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ": \"RunOut(name='variant:no_level', kind='variant', n_nodes=1776, ids=array([    1,     2,  … | \"RunOut(name='variant:no_level', kind='variant', n_nodes=1776, ids=array([    1,     2,  …"
+    ]
+   },
+   "outputs\\interpret\\cache\\6ddcbd3024e2a5839670.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ": \"RunOut(name='seed:442', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., … | \"RunOut(name='seed:442', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., …"
+    ]
+   },
+   "outputs\\interpret\\cache\\80b205b47fb058b2a98d.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\8f38a4a3b4d27853c46f.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\96208c550a4d3281c06b.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ": \"RunOut(name='seed:242', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., … | \"RunOut(name='seed:242', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., …"
+    ]
+   },
+   "outputs\\interpret\\cache\\a304bb023f7479bebcf8.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ": \"RunOut(name='seed:342', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., … | \"RunOut(name='seed:342', kind='seed', n_nodes=1776, ids=array([    1,     2,     3, ..., …"
+    ]
+   },
+   "outputs\\interpret\\cache\\c845637cee469db6c4c4.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\d211cb070f0afff125f3.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\de386b9f09b04a02fee1.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\e1f0228f0108a2609da7.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\e7b1ae9c06679f3677df.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 12 мест",
+    "details": [
+     ".qc.freshness.cluster_labels: 1791025634.3116415 | 1790715918.1935313",
+     ".qc.freshness.dynamics: 1791025767.918023 | 1790735556.6874344",
+     ".qc.freshness.evaluate: 1791025724.422872 | 1790735516.190534",
+     ".qc.inputs_sha256.dynamics_facts: \"cb71c3118dfee0d45d1b143f5e7a50b19f0d80915757379fb8dd387758d64872\" | \"1853d9f3c4b54bd12e6a3190089f2acd36627f595f15d2f65033f629dcb94be3\"",
+     ".seconds: 7333.798677974148 | 7885.761315613985",
+     ".timing.controls: 173.28725333791226 | 173.47901101899333",
+     ".timing.describe: 20.011461024172604 | 19.685476924991235",
+     ".timing.evidence: 17.546421052888036 | 17.851018775021657",
+     ".timing.placebo_main: 906.460322960047 | 957.8739040149376",
+     ".timing.robustness: 6120.864763957914 | 6627.516958998982",
+     ".timing.t1_t5_t4: 69.38444055011496 | 63.417586172930896",
+     ".timing.t6_t7: 17.514384859008715 | 17.002384171821177"
+    ]
+   }
+  }
+ },
+ "outputs/usefulness": {
+  "counts": {
+   "всего": 8,
+   "побайтно": 6,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 2,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\usefulness\\facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ".inputs_sha256.facts: \"e7ee23903a43acc4dbf8a8f43b81310d6ff3bf37094dce93c008172a04a1c6f6\" | \"cc4f54aa11856f5b09f877ef7f501731e3dd8e69d9dd530181be0a68e52a54d3\""
+    ]
+   },
+   "outputs\\usefulness\\size_check.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 2 мест",
+    "details": [
+     ".seconds: 6.3 | 7.0",
+     ".shared_members_bootstrap.seconds: 2.1 | 2.2"
+    ]
+   }
+  }
+ },
+ "data/interim": {
+  "counts": {
+   "всего": 3,
+   "побайтно": 3,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "data/processed": {
+  "counts": {
+   "всего": 22,
+   "побайтно": 22,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ }
+}
