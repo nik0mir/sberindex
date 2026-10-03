@@ -149,7 +149,11 @@
 | 4 («k от 5 до 20») | k = 5, 10, 15 и 20 | `csv:outputs/network/selection_by_k.csv [winner = basket_dist при всех k]` | чувствительность к k |
 | в report.md нет — `docs/network.md` | три набора критериев | `yaml:network.selection` | `priority`, `sets.plan`, `sets.extended`; Борда — `selection_sets.csv [borda]` |
 | 4, 9 | `cc6f265` | `git:cc6f265` | запись PLAN.md 25.09.2026 |
-| в report.md нет — `docs/network.md` | 20 из 20 | `net.boot_n_dist_better_reliability`, `net.n_boot` | парный бутстрап месяцев |
+| 4 | 20 из 20 | `net.boot_n_dist_better_reliability`, `net.n_boot` | парный бутстрап месяцев (в отчёте с 03.10.2026) |
+| 4 | 0,016 | `net.tol_reliability` | допуск ничьей по надёжности; правило — `yaml:network.selection.tie` |
+| 4 | «добавлен после первой проверки» | `yaml:network.selection.tie` (комментарий «добавлен 27.09 после замечания судьи»); `docs/network.md`, раздел 5 | допуск ничьей не предрегистрирован |
+| 4 | 25.09.2026 | `git log -1 --format=%ad cc6f265` → 2026-09-25 | дата записи набора PLAN.md |
+| 4 | по 3 из 6 порядков (с допуском); 4 из 6 (без допуска) | `net.set_plan_tie_winners` («Косинус корзин» — 3; «Расстояние корзин» — 3), `net.set_plan_raw_winners` («Расстояние корзин» — 4; «Косинус корзин» — 2); 6 = 3! порядков трёх критериев `yaml:network.selection.sets.plan` | набор PLAN.md |
 | 4 | 0,22 | `net.reliability_basket_dist_abs` | надёжность без вычета региона |
 | в report.md нет — `docs/network.md` | 0,28 | `net.check_log_ndfl_rel_basket_dist` | ассортативность по доходу 5-НДФЛ |
 | в report.md нет — `docs/network.md` | 0,011 | `net.check_log_ndfl_rel_resid_basket_dist` | то же сверх зарплаты |
@@ -235,16 +239,21 @@
 | в report.md нет — `docs/clustering.md` | 23 из 276 (seed 44–46); 28 из 368 (seed 44–47); 0 из 368; 0 из 368, 276 и 368 | сравнение `seed_runs.csv` трёх прогонов 30.09 по ключу (`check`, `scope`, `rule`, `seed`, `kind`), число строк с разным `winner`: `rule = tolerance` — пары прогонов 42–44, 43–44, 42–43; `rule = prereg` — 42–43, 42–44, 43–44. Все расхождения — на уровне всех семейств (`scope` = `all`, `all_level2` и проверка `all_eligible`) | наблюдение по трём прогонам, одной командой не воспроизводится; прогоны 43 и 44 — вне репозитория |
 | в report.md нет — `docs/clustering.md` | гибрид с K = 4 при seed 42 | `cl.all_winner`, `cl.seed` | победитель по z-оценкам среди всех семейств |
 | 5 | 0,94 | `cl.ari_hybrid_spectral` | ARI гибрида и спектральной |
+| 5 | 0,139; 0,183; 0,026; 0,003; 0,023; 0,014 | `csv:outputs/cluster/validation.csv [cand = spectral_k04]`: `check = difference`, `stat` — ИП 0,139123, организации 0,183152, ночёвки 0,0263739; `check = beyond_attributes`, `stat` — ИП 0,00318078, организации 0,0229629, ночёвки 0,014112; то же — `docs/clustering.md`, таблица 12 | внешняя проверка спектральной K = 4: ε² и прирост R² («почему гибрид, а не спектральная», с 03.10.2026) |
+| 5 | пороги 2% и 50% записаны до расчётов | `git show 2ee1363 -- configs/default.yaml`: `feasible.min_cluster_share: 0.02`, `max_cluster_share: 0.5` | пороги допустимости в предрегистрации |
+| 5 | 47; 6; 12 | `cl.imputed_urban_share_rel`, `cl.imputed_age_old_share_rel`, `cl.imputed_market_access_rel`; то же — `outputs/cluster/facts.json`, ключ `imputed`; `docs/clustering.md`, раздел 1 | пропуски X, заполненные медианой группы региона (подготовка X, с 03.10.2026) |
+| 5 | 1,4826 | `munnet.clustering.inputs:MAD_SCALE`; `yaml:clustering.inputs.scale` (комментарий «(x − медиана) / (MAD × 1,4826)»); у всех 11 признаков масштаб — MAD (`outputs/cluster/facts.json`, ключ `scale_used`) | масштаб X |
+| 5 | `place_center: median`; `region_center: mean`; `scale: robust`; `impute: region_median` | `yaml:features.place_center`, `yaml:features.region_center`, `yaml:clustering.inputs` | центр группы региона и подготовка X |
 | 5 (0,22; 0,28 и K = 3 — `docs/clustering.md`) | 0,22; 0,28; K = 3 | `cl.var_graph_basket_cos_ari_same`, `cl.var_graph_basket_cos_ari`, `cl.var_graph_basket_cos_k` | сеть косинуса |
 | в report.md нет — `docs/clustering.md` | 0,32; 0,40; K = 4 | `cl.var_nodes_separate_ari_same`, `cl.var_nodes_separate_ari`, `cl.var_nodes_separate_k` | районы отдельными узлами |
 | в report.md нет — `docs/clustering.md` | 1,00 | `cl.var_no_level_ari_same` | без уровня трат |
 | в report.md нет — `docs/clustering.md` | KEFRiN, K = 4; 0,15; 0,97 | `cl.var_x_clipped_winner`, `cl.var_x_clipped_k`, `cl.var_x_clipped_ari`, `cl.var_x_clipped_ari_same` | усечённые хвосты |
 | в report.md нет — `docs/clustering.md` | 1000 перестановок | `cl.val_perms` | внешняя проверка |
 | в report.md нет — `docs/clustering.md` | 10 проверок | `cl.val_n_sig`, `cl.val_n_tests` | значимы все |
-| 8 (часть чисел — только `docs/clustering.md`) | 0,152; 0,194; 0,024 | `cl.val_ip_per_1000_difference`, `cl.val_orgs_per_1000_difference`, `cl.val_nights_pc_difference` | ε² |
+| 5, 8 (0,024 — в разделе 8 только `docs/clustering.md`) | 0,152; 0,194; 0,024 | `cl.val_ip_per_1000_difference`, `cl.val_orgs_per_1000_difference`, `cl.val_nights_pc_difference` | ε² |
 | 8 (0,002; 0,003 — `docs/clustering.md`) | 0,002–0,003 | `cl.val_ip_per_1000_difference_null` (0,002), `cl.val_orgs_per_1000_difference_null` (0,002), `cl.val_nights_pc_difference_null` (0,003) | ε² на перестановках |
 | в report.md нет — `docs/clustering.md` | 4 из 4 | `cl.val_signs_ok`, `cl.val_signs_n` | знаки |
-| 8 | от 0,006 до 0,026 | `cl.val_ip_per_1000_beyond_attributes` (0,006), `cl.val_orgs_per_1000_beyond_attributes` (0,026), `cl.val_nights_pc_beyond_attributes` (0,010) | прирост R² |
+| 5, 8 | от 0,006 до 0,026; в разделе 5 — 0,006, 0,026 и 0,010 | `cl.val_ip_per_1000_beyond_attributes` (0,006), `cl.val_orgs_per_1000_beyond_attributes` (0,026), `cl.val_nights_pc_beyond_attributes` (0,010) | прирост R² |
 | в report.md нет — `docs/clustering.md` | 0,85 | `cl.stab_median_kmeans` | медианная устойчивость K-means |
 | в report.md нет — `docs/clustering.md` | 2–34 | `cl.small_kmeans_min`, `cl.small_kmeans_max` | мелкий тип K-means |
 | в report.md нет — `docs/clustering.md` | 0,48 | `cl.syn_nograph_best_feat` | лучший метод по X без сигнала в графе |
@@ -271,7 +280,8 @@
 | в report.md нет — `docs/icvi.md` | 2,0 | `icvi.ci_scale` | множитель отклонений |
 | в report.md нет — `docs/icvi.md` | 95% | `icvi.ci_level` | |
 | 6 (18 ячеек: итог, спектральная, Leiden; остальные — `docs/icvi.md`, раздел 3) | таблица «кандидат × индекс» (30 ячеек) | `csv:outputs/evaluate/icvi_long.csv [candidate ∈ {hybrid_k04, spectral_k04, leiden_k03, louvain_k06, gmm_k03}; value, ci_low, ci_high, z]` | итог: `icvi.final_sw`, `icvi.final_sw_lo`, `icvi.final_sw_hi`, `icvi.final_z_sw` и т. д. для ch, s_dbw, avi, avu, mq |
-| 6 | 91,3% | `icvi.final_avi` (0,913) | AVI итога в процентах |
+| 6 | в среднем по типам 91,3% | `icvi.final_avi` (0,913) | AVI итога в процентах; AVI — невзвешенное среднее изолируемостей типов (`munnet.icvi:avi`), поэтому «в среднем по типам» (с 03.10.2026) |
+| 6 | z −6,5; −85,6 | `icvi.final_z_s_dbw` (−6,4956), `icvi.final_z_avu` (−85,571) | итог хуже случайных меток по S_Dbw и AVU; те же числа — в таблице раздела 6 и `docs/icvi.md`, раздел 3 |
 | 6 | 178,0 | `icvi.final_z_avi` | |
 | 6 | 2/3; 9 кандидатов | `icvi.avu_k3_maxdev` (0,000), `icvi.n_k3` | AVU при K = 3 |
 | 6 | 26 | `icvi.avu_z_neg`, `icvi.avu_z_finite` | z AVU < 0 |
@@ -467,7 +477,7 @@
 | В | 42 с | `git:aacfaf6` (README той версии: «весь этап `eda` — 42 секунды», замер 26.09.2026) | раньше источником был нынешний README — круговая ссылка |
 | В | 16 с | замер: `features` во временной папке | |
 | В | 431 с (около 7 мин) | замер: `network` во временной папке | |
-| 10, В | 69 мин; 4 мин; 13 мин; 6 процессов | `cl.time_total_min`, `cl.time_bootstrap_min`, `cl.time_variants_min`, `cl.workers` | прогон 30.09 с seed 42 |
+| 10, В, README | 69 мин; 4 мин; 13 мин; 6 процессов | `cl.time_total_min`, `cl.time_bootstrap_min`, `cl.time_variants_min`, `cl.workers` | прогон 30.09 с seed 42; однократный замер (с 03.10.2026 подписан так) |
 | В | 104 с | замер: `evaluate` во временной папке | |
 | В | 33 с | `outputs/dynamics/facts.json`, ключ `seconds` (33,3) | |
 | 10, В | 16 ГБ | `yaml:clustering.impl.workers` (комментарий) | |
@@ -476,13 +486,18 @@
 | 8, 10, В, Г | 30.09.2026; seed 43 и 44; 1776 узлах; ARI 1,00 | сравнение `data/processed/cluster_final.parquet` с `cluster_final.parquet` прогонов с `seed: 43` и `seed: 44` во временных папках: `sklearn.metrics.adjusted_rand_score` = 1.0, доля совпавших меток 1.0 на 1776 общих узлах | проверено при подготовке отчёта 30.09 |
 | В | спектральная с K = 4 при seed 43 | `cl.all_winner` в `report_facts.json` прогона с `seed: 43` | |
 | в report.md нет — заменено строкой «7886 с» (прогон 02.10.2026); прил. В | 7241 с, около 2 ч; 6 процессов; 101 мин | `int.seconds` (7240,5), `int.workers` (6), `int.timing.robustness` (6057,8 с) | время этапа `interpret`, полный перерасчёт 30.09.2026 (утренний прогон — 7374 с) |
-| В | 41 с по журналу этапа; 28 с; 6 с; 1,2 МБ | замер 02.10.2026: `usefulness` с временным конфигом (выходы во временную папку, копия `outputs/interpret`): журнал 01:14:34,3 → 01:15:15,4; проверка по типам — 01:14:41,9 → 01:15:09,5; разведка по размеру — `size.seconds` (5,8 в повторе, 5,9 в репозитории); `du -sh` выходов → 1,2M | время и место этапа; полное время процесса с запуском `uv` не замерено |
+| В | 41 с по журналу этапа; 28 с; около 7 с; 1,2 МБ | замер 02.10.2026: `usefulness` с временным конфигом (выходы во временную папку, копия `outputs/interpret`): журнал 01:14:34,3 → 01:15:15,4; проверка по типам — 01:14:41,9 → 01:15:09,5; разведка по размеру — `size.seconds`: 7,0 в репозитории (после повтора 02.10.2026 21:36, строка «`usefulness` после пересчёта» ниже), 5,9 и 5,8 — прогон и повтор 02.10.2026 ночью, 6,3 — прогон с нуля 03.10.2026; до 03.10.2026 в тексте было «6 с»; `du -sh` выходов → 1,2M | время и место этапа; полное время процесса с запуском `uv` не замерено |
 | 10, В | побайтно (sha256) | повторный прогон 01.10.2026: sha256 `facts.json` 892c5209…, `rule_by_mo.csv` 660936db…, `mo_flags.csv` 1a56bb12… совпали с файлами `outputs/usefulness/` | воспроизведение этапа |
 | В | 02.10.2026: семь файлов побайтно; `size_check.json` — только `seconds` | повтор `usefulness` 02.10.2026 во временную папку: `sha256sum -c` — OK для `by_type.json` (24924f93…), `by_type_by_mo.csv` (c7bfffbc…), `by_type_runs.csv` (2d2cb3d1…), `facts.json` (892c5209…), `mo_flags.csv` (1a56bb12…), `rule_by_mo.csv` (660936db…), `size_by_mo.csv` (93828183…); `size_check.json` (eb5f5d7f…) отличается только полем `seconds` (5,9 → 5,8; поэлементное сравнение JSON) | воспроизведение проверки по типам и разведки по размеру |
 | 10, В | 7886 с (2 ч 11 мин); 110 мин — прогоны устойчивости | `int.seconds` (7885,8), `int.timing.robustness` (6627,5 с = 110,5 мин); журнал прогона (вне репозитория): «interpret: готово за 7887 с» | время `interpret`, полный пересчёт 02.10.2026 (заменяет 7241 с и 101 мин прогона 30.09) |
 | 10, В | все 24 CSV и `facts.json` совпали побайтно, кроме полей времени | команда 02.10.2026: `cmp` 24 файлов `outputs/interpret/*.csv` и `naming_test.json` с копией выходов прогона 30.09, снятой до пересчёта, — совпали все; поэлементное сравнение `facts.json` — отличаются только `seconds` (7240,5 → 7885,8) и 7 полей `timing` | пересчёт `interpret` 02.10.2026 |
-| 10, В | `usefulness` после пересчёта: пять CSV и `by_type.json` побайтно; `facts.json` — только отпечаток входа; `size_check.json` — только время | прогон 02.10.2026 21:36 (время записи файлов); сравнение с копией до прогона: `cmp` и поэлементно JSON — `inputs_sha256.facts` (560b3e79… → cc4f54aa…), `seconds` (6,3 → 7,0), `shared_members_bootstrap.seconds` (2,0 → 2,2); `ls outputs/usefulness/*.csv` → 5 | |
-| 10 | около 3,5 ч | арифметика по таблице времени приложения В: 68 + 42 + 16 + 431 + 4170 (`cluster`, `outputs/cluster/timing.csv`, `total_before_report`) + 104 + 33 + 7886 + 41 = 12 791 с ≈ 3 ч 33 мин | полный расчёт без скачивания |
+| 10, В | `usefulness` после пересчёта: пять CSV и `by_type.json` побайтно; `facts.json` — только отпечаток входа; `size_check.json` — только время | прогон 02.10.2026 21:36 (время записи файлов); сравнение с копией до прогона: `cmp` и поэлементно JSON — `inputs_sha256.facts` (560b3e79… → cc4f54aa…), `seconds` (6,3 → 7,0), `shared_members_bootstrap.seconds` (2,0 → 2,2); `ls outputs/usefulness/*.csv` → 5 | `seconds` 7,0 — источник «около 7 с» в таблице времени приложения В; в прогоне с нуля 03.10.2026 — 6,3 |
+| 10, В, README | около 3,5 ч (сумма однократных замеров); «от 3 до 3,5 ч» — между прогоном 03.10.2026 и этой суммой | арифметика по таблице времени приложения В: 68 + 42 + 16 + 431 + 4170 (`cluster`, `outputs/cluster/timing.csv`, `total_before_report`) + 104 + 33 + 7886 + 41 = 12 791 с ≈ 3 ч 33 мин | полный расчёт без скачивания |
+| 10, В, README | 03.10.2026; `5a2ea8b`; код 0; 3 ч 1 мин 35 с (3 ч 2 мин); Windows 10 | журнал прогона с нуля (вне репозитория, `run.log` в рабочей папке прогона): первая строка `Sat Oct  3 13:11:07`, последние — `EXIT=0` и `Sat Oct  3 16:12:42`; чистая копия — `git clone` коммита `5a2ea8b`, `uv sync --frozen`; копия конфига отличается от `configs/default.yaml` одной строкой (`paths.raw`) | прогон с нуля в чистой копии; этап `data` не запускался |
+| В, README | 57 с; 52 с; 9 с; 6 мин 53 с; 47 мин 23 с; 1 мин 20 с; 45 с; 2 ч 2 мин 15 с; 41 с; 12 с | журнал прогона 03.10.2026: разность времени строк «Этап <имя>:» соседних этапов — panel 13:11:15, eda 13:12:12, features 13:13:04, network 13:13:13, cluster 13:20:06, evaluate 14:07:29, dynamics 14:08:49, interpret 14:09:34, usefulness 16:11:49, site 16:12:30, конец 16:12:42 | колонка «Прогон с нуля 03.10.2026» таблицы времени |
+| 10, README | `cluster` 47 мин 23 с; `interpret` 2 ч 2 мин | журнал: «cluster: выходы … всего 2843 с»; `seconds` в `outputs/interpret/facts.json` чистой копии — 7333,8 с (2 ч 2 мин 14 с; по строкам журнала — 2 ч 2 мин 15 с) | |
+| В | бутстрап 3 мин; пересчёт на других входах 9 мин | `cl.time_bootstrap_min` (3,04), `cl.time_variants_min` (8,96) в `outputs/cluster/report_facts.json` чистой копии (`cl.time_total_min` — 47,1) | `cluster` 03.10.2026 |
+| 10, В, README | все таблицы, json, parquet и рисунки побайтно, кроме замеров времени и производных отпечатков | сравнение sha256 всех файлов `outputs/`, `data/interim/`, `data/processed/`, `docs/img/**` и сайта чистой копии с основным репозиторием (сайт — с `outputs/site_5a`); при расхождении — поэлементный разбор json, csv, parquet с допуском 1e-9 (скрипт и итог — вне репозитория). Отличаются только `seconds`, `timing`, `cl.time_*`, `qc.freshness`, `inputs_sha256`, `facts_sha256` и строка коммита сборки сайта; `docs/clustering.md` — три числа времени | прогон с нуля 03.10.2026 |
 
 ## Приложение А
 

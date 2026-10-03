@@ -82,9 +82,11 @@ uv run --frozen python -m munnet --help                   # список эта�
 
 ## Этапы
 
-Полный прогон без скачивания данных — около 3,5 ч на ноутбуке с Windows 10 и 16 ГБ памяти (сумма замеров
-ниже), из них почти всё время — `cluster` и `interpret`. Тяжёлые шаги идут в 6 процессов
-(`clustering.impl.workers`), чтобы уложиться в 16 ГБ; результат от числа процессов не зависит.
+Полный прогон без скачивания данных занимает от 3 до 3,5 ч на ноутбуке с Windows 10 и 16 ГБ памяти, почти
+всё время — `cluster` и `interpret`. Время в таблице — однократные замеры, от прогона к прогону оно меняется:
+прогон с нуля 03.10.2026 одной командой занял 3 ч 1 мин 35 с, из них `cluster` — 47 мин 23 с, `interpret` —
+2 ч 2 мин. Тяжёлые шаги идут в 6 процессов (`clustering.impl.workers`), чтобы уложиться в 16 ГБ;
+результат от числа процессов не зависит.
 
 | Этап | Что делает | Главный выход | Время |
 |---|---|---|---|
@@ -93,17 +95,18 @@ uv run --frozen python -m munnet --help                   # список эта�
 | `eda` | Разведка данных и выбор сюжета | [docs/eda.md](docs/eda.md), `outputs/eda/facts.json` | 42 с |
 | `features` | Узлы сети (Москва и Петербург — по одному узлу) и признаки относительно своего региона | [docs/features.md](docs/features.md), `data/processed/features_*.parquet` | 16 с |
 | `network` | Правила рёбер: сравнение кандидатов, выбор, сети по скользящим 12-месячным окнам | [docs/network.md](docs/network.md), `data/processed/network_edges.parquet` | 431 с |
-| `cluster` | Десять методов трёх семейств и базовая линия, синтетика, выбор по правилу, записанному до расчётов | [docs/clustering.md](docs/clustering.md), `outputs/cluster/final.json` | около 69 мин |
+| `cluster` | Десять методов трёх семейств и базовая линия, синтетика, выбор по правилу, записанному до расчётов | [docs/clustering.md](docs/clustering.md), `outputs/cluster/final.json` | 69 мин (03.10 — 47 мин) |
 | `evaluate` | Индексы качества SW, CH, S_Dbw, AVI, AVU, MQ для всех кандидатов со случайным базисом | [docs/icvi.md](docs/icvi.md), `outputs/evaluate/icvi_long.csv` | 104 с |
 | `dynamics` | Типы в 13 окнах по 12 месяцев, переходы МО между типами против шума | [docs/dynamics.md](docs/dynamics.md), `outputs/dynamics/transitions.csv` | 33 с |
-| `interpret` | Проверки смысла типов, названия, профили, примеры, прогоны устойчивости | [docs/interpretation.md](docs/interpretation.md), `outputs/interpret/facts.json` | около 2 ч |
+| `interpret` | Проверки смысла типов, названия, профили, примеры, прогоны устойчивости | [docs/interpretation.md](docs/interpretation.md), `outputs/interpret/facts.json` | 2 ч 11 мин (03.10 — 2 ч 2 мин) |
 | `usefulness` | Разведка после вскрытия: польза сверки со своим регионом, флаг устойчивости типа МО; проверка «польза и тип МО» и разведка по размеру | `outputs/usefulness/facts.json`, `mo_flags.csv`, `by_type.json`, `size_check.json` | около 40 с |
 | `site` | Лендинг: данные, тексты по вердиктам проверок, страница | `site/index.html` | 15 с |
 
-Откуда время: `panel`, `features`, `network`, `evaluate` — замеры 28.09.2026, `eda` — 26.09.2026, `usefulness` —
-02.10.2026 ([отчёт, приложение В](report/report.md)); `cluster` — `outputs/cluster/timing.csv` (`total_before_report`,
-4170 с); `dynamics` и `interpret` — ключ `seconds` в `outputs/dynamics/facts.json` и `outputs/interpret/facts.json`
-(7886 с, пересчёт 02.10.2026); `site` — замер 02.10.2026.
+Откуда время (однократные замеры): `panel`, `features`, `network`, `evaluate` — замеры 28.09.2026,
+`eda` — 26.09.2026, `usefulness` — 02.10.2026 ([отчёт, приложение В](report/report.md)); `cluster` —
+`outputs/cluster/timing.csv` (`total_before_report`, 4170 с); `dynamics` и `interpret` — ключ `seconds`
+в `outputs/dynamics/facts.json` и `outputs/interpret/facts.json` (7886 с, пересчёт 02.10.2026); `site` — замер
+02.10.2026. Время прогона с нуля 03.10.2026 по этапам — [отчёт, приложение В](report/report.md).
 
 Разделы разведки пересчитываются по одному и пишут только свои файлы: `uv run --frozen python -m munnet eda --only e3`
 (несколько — `--only e3,e4`); сводку и `docs/eda.md` пересобирает `--only syn`.
@@ -114,8 +117,15 @@ uv run --frozen python -m munnet --help                   # список эта�
 - **Данные** — версии закреплены sha256 в `sources.*.sha256` конфига и сверяются при скачивании. Таблица
   версий — [отчёт, приложение В](report/report.md).
 - **Случайность** — только от `seed: 42` в [configs/default.yaml](configs/default.yaml). Повторный прогон даёт
-  те же метки и числа; меняются лишь замеры времени (`timing.csv`). Что сверено побайтно и на каких seed
-  проверен выбор метода — отчёт, раздел 10 и приложение В.
+  те же метки и числа; меняются лишь замеры времени и то, что из них выведено. Время записано в колонке
+  `seconds` таблиц (`timing.csv` и других), в ключах `seconds` и `timing` файлов `facts.json`, в фактах
+  `cl.time_*` этапа `cluster` и во времени изменения файлов (`qc.freshness` этапа `interpret`); от них
+  меняются и отпечатки файлов (`inputs_sha256`, `facts_sha256`).
+  Что сверено побайтно и на каких seed проверен выбор метода — отчёт, раздел 10 и приложение В.
+- **Прогон с нуля 03.10.2026** в чистой копии (`git clone` коммита `5a2ea8b`, `uv sync --frozen`, Windows 10,
+  от уже скачанных сырых данных; этап `data` не повторяли): код 0, 3 ч 2 мин; все таблицы, json, parquet
+  и рисунки совпали побайтно с основным репозиторием, кроме замеров времени и производных от них отпечатков
+  файлов. Linux, macOS и скачивание данных этим прогоном не проверены.
 - **Числа в текстах** выводит код из файлов результатов: отчёты этапов в `docs/` собираются из шаблонов и руками
   не правятся, числа методологического отчёта прослежены до ключей в [report/numbers.md](report/numbers.md).
 - **Предрегистрация.** Правила выбора, проверки и тексты выводов на каждый исход записаны в репозиторий
