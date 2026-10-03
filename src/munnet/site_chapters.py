@@ -62,7 +62,7 @@ UI: dict[str, str] = {
         "обычно в регионе, влево — меньше."
     ),
     "basket_p2": (
-        "Так муниципалитет сравнивается с соседями по своему региону, а не со средним по всей выборке. "
+        "Так муниципалитет сравнивается с соседями по своему региону. "
         "Тип учитывает эту корзину и экономику места — зарплату, население, занятость, тоже относительно "
         "своего региона."
     ),
@@ -120,7 +120,7 @@ UI: dict[str, str] = {
     "признакам места",
     "order_key_random": "случайные метки",
     "order_line_solid": "сплошная линия — проверка пройдена",
-    "order_line_dashed": "пунктир — пройдена только в целом, без учёта размера и доли горожан",
+    "order_line_dashed": "пунктир — пройдена в целом; при том же размере и доле горожан — нет",
     "order_line_none": "без линии — не пройдена",
     "catering": "общепит",
     "retail": "розница",
@@ -837,8 +837,15 @@ def order_svgs(story: Mapping, checks: Mapping, W: float = 360) -> tuple[str, st
     cy_of = lambda j: top + j * row + 28  # noqa: E731
     g = []
     labs = []  # подписи строк — поверх линий (с подложкой цвета бумаги, CSS .order-a .lab)
+    holes = []  # порция 6i: прямоугольники подписей — в маске линии медиан (линия не пересекает текст)
     for j, t in enumerate(rows_top):
         labs += _type_label(story, t, 0, top + j * row + 12)
+        yb = top + j * row + 12
+        holes.append(
+            f'<rect x="-2" y="{yb - 12}" width="{14 + _text_w(_type_name(story, t), 11) + 8:.1f}" '
+            f'height="17" fill="#000"/>'
+        )
+    mask_id = f"order-a-mask-{int(W)}"  # у широкого и телефонного вариантов на странице — разные id
     table = []
     for i, k in enumerate(names):
         x0 = i * pw + 10
@@ -858,7 +865,10 @@ def order_svgs(story: Mapping, checks: Mapping, W: float = 360) -> tuple[str, st
         if line in ("solid", "dashed") and layout != "columns_by_size" and len(pts) > 1:
             d = "M" + "L".join(f"{x:.1f},{y:.1f}" for x, y in pts)
             dash = ' stroke-dasharray="4 3"' if line == "dashed" else ""
-            g.append(f'<path d="{d}" fill="none" stroke="{INK2}" stroke-width="1.5"{dash}/>')
+            # порция 6i (judge-c6 № 5): линия прерывается под подписями типов, а не идёт сквозь текст
+            g.append(
+                f'<path d="{d}" fill="none" stroke="{INK2}" stroke-width="1.5"{dash} mask="url(#{mask_id})"/>'
+            )
         op = "" if line in ("solid", "dashed") else ' opacity="0.45"'
         for j, t in enumerate(rows_top):
             if med.get(t) is None:
@@ -878,7 +888,11 @@ def order_svgs(story: Mapping, checks: Mapping, W: float = 360) -> tuple[str, st
             if med.get(t) is not None:
                 table.append([_e(UI[k]), _e(_type_name(story, t)), _f(med[t], 2)])
     aria_a = UI["order_aria_a"].format(turnover=" и ".join(UI[k] for k in names))
-    svg_a = _svg(W, H, "".join(g + labs), aria_a, "ch-svg order-a")
+    mask = (
+        f'<defs><mask id="{mask_id}" maskUnits="userSpaceOnUse" x="0" y="0" width="{W:g}" height="{H:g}">'
+        f'<rect x="0" y="0" width="{W:g}" height="{H:g}" fill="#fff"/>{"".join(holes)}</mask></defs>'
+    )
+    svg_a = _svg(W, H, mask + "".join(g + labs), aria_a, "ch-svg order-a")
     # панель B
     rivals = checks.get("t1_rivals") or []
     W2, lab2, row2, top2 = W, 64, 80, 8

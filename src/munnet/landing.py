@@ -2466,6 +2466,12 @@ def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[
         f'<p class="h0-kicker" id="hero-kicker">{_t(hx.get("kicker", ""))}</p>'
         f'<h1 id="hero-title">{_t(hx.get("title") or s0["title"])}</h1>'
         + (f'<p class="h0-why" id="hero-why">{_t(_dot(hx["why"]))}</p>' if hx.get("why") else "")
+        # порция 6i (judge-c6 № 3): на телефоне поиск ниже карты — заметная ссылка к нему сразу под «зачем»
+        + (
+            f'<a class="h0-findlink" id="hero-find" href="#find">{_t(hx["find_link"])}</a>'
+            if hx.get("find_link")
+            else ""
+        )
         + f'<p class="h0-lede{" lede-3d" if lede_flat else ""}" id="hero-lede">{_t(hx.get("lede", ""))}</p>'
         + (f'<p class="h0-lede lede-flat" id="hero-lede-flat">{_t(lede_flat)}</p>' if lede_flat else "")
         + (

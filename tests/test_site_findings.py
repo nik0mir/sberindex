@@ -211,7 +211,8 @@ def test_passports_flag_and_middle_note():
     }
     fw = {"d": "тип зависит от варианта расчёта", "s": "тип устойчив"}
     h = site_findings.passports_html(types, _story(), mo, TX["passports"], ESC, flag_words=fw)
-    assert "Орловская область <span" in h and h.count("тип зависит от варианта расчёта") == 1
+    assert 'Орловская область<span class="pp-flag">Тип зависит от варианта расчёта</span>' in h
+    assert h.count("ип зависит от варианта расчёта") == 1
     assert "тип устойчив" not in h
     assert h.count('class="pp-mid"') == 1
     mid = site_findings.middle_note(types[0], TX["passports"], site_findings.middle_type(types))

@@ -301,6 +301,9 @@ async function main() {
   const ray = new THREE.Raycaster();
   const ptr = new THREE.Vector2();
   const tip = $("#h0-tip");
+  // порция 6i (judge-c6 № 2): на узком экране по умолчанию — плоская карта: вся страна в кадре, жесты не спорят
+  // с прокруткой страницы; объёмная — по кнопке «Объёмная карта». ?solid=1 — сразу объёмная (снимки, проверка)
+  if (matchMedia("(max-width: 599px)").matches && params.get("solid") !== "1") setFlat(true, false);
   let hover = -1, selected = -1;
   function pick(ev) {
     const r = canvas.getBoundingClientRect();

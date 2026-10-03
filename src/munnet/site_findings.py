@@ -300,16 +300,29 @@ def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str, W:
         g.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{top}" y2="{top + row * len(rows_top)}" {stroke}/>')
         g.append(_text(x, top + row * len(rows_top) + 15, s, "axis", "middle"))
     pts = []
+    holes = []  # порция 6i: на телефоне подпись типа над точкой — линия медиан под подписью прерывается
     for j, t in enumerate(rows_top):
         y = top + j * row + row / 2
-        g.append(_text(0, y + 4 - dy, str(names.get(str(t)) or f"Тип {t}"), "lab"))
+        nm = str(names.get(str(t)) or f"Тип {t}")
+        g.append(_text(0, y + 4 - dy, nm, "lab"))
+        lw = len(nm) * 12 * 0.58 + 6  # оценка ширины подписи (≈ 0,58 кегля на знак) с запасом
+        holes.append(f'<rect x="-2" y="{y + 4 - dy - 12:.1f}" width="{lw:.1f}" height="16" fill="#000"/>')
         if med.get(t) is not None:
             pts.append((sx(med[t]), y + dy, t))
     line = (view.get("line_by_turnover") or {}).get("retail") or t1.get("line", "none")
     if line in ("solid", "dashed") and layout != "columns_by_size" and len(pts) > 1:
         d = "M" + "L".join(f"{x:.1f},{y:.1f}" for x, y, _ in pts)
         dash = ' stroke-dasharray="4 3"' if line == "dashed" else ""
-        g.append(f'<path d="{d}" fill="none" stroke="{INK2}" stroke-width="1.4"{dash}/>')
+        mask = ""
+        if stacked:
+            mid = f"fd-retail-mask-{int(W)}"
+            g.insert(
+                0,
+                f'<defs><mask id="{mid}" maskUnits="userSpaceOnUse" x="0" y="0" width="{W:g}" height="{H:g}">'
+                f'<rect x="0" y="0" width="{W:g}" height="{H:g}" fill="#fff"/>{"".join(holes)}</mask></defs>',
+            )
+            mask = f' mask="url(#{mid})"'
+        g.append(f'<path d="{d}" fill="none" stroke="{INK2}" stroke-width="1.4"{dash}{mask}/>')
     for x, y, t in pts:
         g.append(_shape(t, x, y, 5.5, view["type_colors"].get(str(t), INK2), view["shapes"]))
         g.append(_text(W, y + 4, "×" + _f(math.exp(med[t]), 2), "val", "end"))  # значения — столбцом справа
@@ -593,7 +606,7 @@ def passports_html(
                     f'<p class="pp-ex">{esc(tx["example"])}: '
                     f'<button type="button" data-go="{int(i)}" data-map="1">'
                     f"{esc(nm)}</button>, {esc(r.get('r', ''))}"
-                    + (f' <span class="pp-flag">({esc(fl)})</span>' if fl else "")
+                    + (f'<span class="pp-flag">{esc(fl[:1].upper() + fl[1:])}</span>' if fl else "")
                     + "</p>"
                 )
         mid = middle_note(ty, tx, middle_t)

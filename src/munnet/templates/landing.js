@@ -506,7 +506,7 @@ function renderCard(r) {
     h += `<p class="cap">Признаки — по правилу названия типа: части корзины и признак места, которыми медиана типа сильнее всего отличается от остальных муниципалитетов.`;
     if (ty.why_n && ty.why.length < ty.why_n && ty.why_cliff != null) {
       const k = ty.why.length, W = { 1: "полоса одна", 2: "полосы две" };
-      h += ` Остальные у этого типа отличаются слабее порога правила (размер отличия — дельта Клиффа — меньше ${String(ty.why_cliff).replace(".", ",")} по модулю), поэтому ${W[k] || "полос " + nf.format(k)}, а не ${ty.why_n === 3 ? "три" : nf.format(ty.why_n)}.`;
+      h += ` Остальные у этого типа отличаются слабее порога правила (размер отличия — дельта Клиффа — меньше ${String(ty.why_cliff).replace(".", ",")} по модулю), поэтому ${W[k] || "полос " + nf.format(k)} из ${ty.why_n === 3 ? "трёх" : nf.format(ty.why_n)}.`;
     }
     h += `</p></section>`;
   }
@@ -520,7 +520,7 @@ function renderCard(r) {
   }
   const flags = [];
   if (r.role === "city") flags.push(`Узел-город: ${nf.format(CITY_N.get(r.id) || 0)} районов считаются одним муниципалитетом`);
-  if (r.wp) flags.push("Зарплаты и НДФЛ — по месту работы, а не по месту жительства");
+  if (r.wp) flags.push("Зарплаты и НДФЛ считаются по месту работы");
   if (r.ser && r.ser !== "full" && nd.t != null) flags.push("Ряд трат неполный");
   if (flags.length) h += `<section class="row" aria-labelledby="c-fl"><h3 id="c-fl">Пометки</h3><ul class="flags">${flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></section>`;
   h = h.length === moreHead ? h.slice(0, moreAt) : h + "</details>";
@@ -753,6 +753,17 @@ function renderKey() {
 }
 
 // кнопки-примеры: story.screen0.examples (правило examples в landing.py) или первый типичный пример типа
+// порция 6i: ссылка «Найти свой муниципалитет» на телефоне — прокрутка к поиску и фокус в поле
+function bindFindLink() {
+  const a = $("#hero-find"), inp = $("#search-input");
+  if (!a || !inp) return;
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    inp.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    inp.focus({ preventScroll: true });
+  });
+}
+
 function renderExamples() {
   const box = $("#examples");
   if (box.children.length) { box.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) { e.preventDefault(); go(Number(b.dataset.go)); } }); return; }
@@ -952,6 +963,7 @@ function initAll() {
   if (HEX) for (const r of MO.values()) if (r.hq != null && r.role !== "inner") CELLS.set(r.hq + "," + r.hr, r);
   renderKey();
   renderExamples();
+  bindFindLink();
   openParam();
   initAll(); // строк в DOM — только страница из 50, индекс 2192 записей строится за миллисекунды
   if (!MO.size) {
