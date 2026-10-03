@@ -733,7 +733,9 @@ def render(template: str, facts: Mapping[str, Fact], out: Path, figs: list[Figur
         if f is None:
             return ""
         n = int(f.fid[1:])
+        # Якорь «fig-N» с тем же N, что в подписи: на него ведут ссылки «рис. N» из текста.
         return (
+            f"{eda_report.anchor_tag(eda_report.fig_anchor(f.fid))}"
             f"![{f.alt}]({img_rel}/{f.png.name})\n\n*Рисунок {n}. {f.title}. {f.subtitle}. Источник: "
             f"{style.SOURCE_SBER}.* Данные: `outputs/evaluate/figures/{f.data_csv.name}`."
         )
