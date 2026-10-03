@@ -463,7 +463,7 @@ $$\tilde r_i(t) = r_i\bigl((t - s_i) \bmod 24\bigr),\qquad p_{ij} = \bigl(1 + \#
 
 | Файл | Строка | Колонки |
 |---|---|---|
-| `data/processed/network_edges.parquet` | ребро правила при разрежении | `rule`, `sparsify`, `k`, `source` < `target` (`territory_id`), `weight` = $S_{ij}$ (у гравитации — $\ln S_{ij}$), `lag` (лаговое правило: $\ell^*$ от `source` к `target`), `q_value` (правила по рядам), `same_region`, `dist_km`, `is_main` |
+| `data/processed/network_edges.parquet` | ребро правила при разрежении | `rule`, `sparsify`, `k`, `source` < `target` (`territory_id`), `weight` = $S_{ij}$ (у гравитации — $\ln S_{ij}$), `lag` (лаговое правило: $\ell^*$ от `source` к `target`), `q_value` (правила по рядам), `same_region`, `dist_km` (длина ребра по прямой, км: дуга большого круга на сфере среднего радиуса Земли между точками узлов; точка МО — `representative_point()` полигона в проекции Альберса, всегда внутри МО; у узлов-городов — средние широта и долгота точек районов с весами населения первого года панели; дороги в расчёт не входят), `is_main` |
 | `data/processed/network_windows.parquet` | ребро выбранного правила в окне | `rule`, `window_kind` (`quarter`, `half`, `rolling`), `window`, `n_months`, `source`, `target`, `weight`, `is_main_kind` |
 | `data/processed/network_window_nodes.parquet` | узел в окне | `window_kind`, `window`, `territory_id`, `n_months`, `first_date`, `last_date`, `clr_rel_*` — корзина относительно группы региона |
 | `data/processed/network_nodes.parquet` | узел × правило | `degree`, `kocc`, `community` (зонд Leiden), `is_city_node` |
