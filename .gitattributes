@@ -1,1 +1,2 @@
 src/munnet/templates/vendor/** -text
+site/** -text
