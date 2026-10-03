@@ -707,24 +707,27 @@ def chapter_types(
             f"<p>{esc(ch['note_text'])}</p></details>"
         )
     wide, panels = types_svgs(story, types, ref)
+    flag_words = (story.get("card") or {}).get("flag_words") or {}
     cards = []
     for ty, panel in zip(types, panels or [""] * len(types), strict=False):
         t = int(ty["t"])
 
-        def links(ids: Sequence[int]) -> str:
+        def links(ids: Sequence[int], flag: bool = False) -> str:
             out = []
             for i in ids or []:
                 r = mo.get(int(i))
                 if r:
+                    # 03.10 (совет судей): у типичных примеров — флаг «тип зависит от варианта расчёта»
+                    fl = str(flag_words.get("d") or "") if flag and r.get("fl") == "d" else ""
                     out.append(
                         f'<a href="#mo={int(i)}" data-go="{int(i)}">{esc(r.get("ns") or r.get("n"))}</a>'
-                        f" <small>{esc(r.get('r', ''))}</small>"
+                        f" <small>{esc(r.get('r', ''))}{f' ({esc(fl)})' if fl else ''}</small>"
                     )
             return ", ".join(out)
 
         ex = ty.get("examples") or {}
         exs = "".join(
-            f"<p><b>{esc(UI[k])}:</b> {links(ex.get(key) or [])}</p>"
+            f"<p><b>{esc(UI[k])}:</b> {links(ex.get(key) or [], key == 'typical')}</p>"
             for k, key in (
                 ("types_typical", "typical"),
                 ("types_border", "borderline"),
@@ -1223,6 +1226,53 @@ def placebo_summary(t3: Mapping | None) -> str:
     return " ".join(out)
 
 
+def dynamics_texts(tx: Mapping | None, t3: Mapping | None) -> dict[str, str] | None:
+    """Заголовок главы 5, её итог и короткая строка для первого экрана (совет судей 03.10,
+    ``site.build.texts.dynamics``): как в отчёте — в основном расчёте смен больше, чем на плацебо, при другом
+    правиле связей столько же, по правилу ``robustness.main_text`` смена типа не подтверждена.
+
+    Тексты написаны под один исход: итоговый вердикт T3 — ``not``, основной расчёт прошёл (наблюдение выше
+    95-го перцентиля плацебо), итог дал прогон ``tx["final_run"]``. Иначе None — остаётся заголовок словаря
+    ``site.headlines``. Числа — ``checks.t3`` (те же, что на графике плацебо)."""
+    if not tx or not t3:
+        return None
+    fin, main = t3.get("final") or {}, t3.get("main") or {}
+    ok = (
+        t3.get("verdict_final") == "not"
+        and t3.get("verdict_main") in ("confirmed", "partial")
+        and fin.get("run") == tx.get("final_run")
+        and main.get("passed")
+        and None not in (main.get("observed"), main.get("p95"), fin.get("observed"), fin.get("p95"))
+    )
+    if not ok or not float(main["observed"]) > float(main["p95"]):
+        return None
+    vals = {
+        "main_obs": _f(main["observed"]),
+        "main_p95": _f(main["p95"]),
+        "fin_obs": _f(fin["observed"]),
+        "fin_p95": _f(fin["p95"]),
+    }
+    out = {k: str(tx[k]) for k in ("title", "short", "lead")}
+    lead = out["lead"].format(**vals).rstrip()
+    out["lead"] = lead if lead.endswith((".", "!", "?", "…")) else lead + "."  # абзац — с точкой
+    return out
+
+
+def apply_dynamics(story: dict, dt: Mapping[str, str] | None, old_head: str) -> None:
+    """Подставляет тексты ``dynamics_texts`` вместо заголовка T3 словаря: заголовок главы 5, итог главы,
+    подзаголовок «Что проверяли» и пункт первого экрана, строка «Где граница» (берёт ``screen0.lead``)."""
+    if not dt:
+        return
+    ch = story["chapters"]["dynamics"]
+    ch["title"], ch["verdict"] = dt["title"], dt["lead"]
+    s0 = story["screen0"]
+    if s0.get("lead") == old_head:
+        s0["lead"] = dt["short"]
+    s0["point_heads"] = [
+        [dt["short"] if h == old_head else h for h in hs] for hs in s0.get("point_heads") or []
+    ]
+
+
 def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
     ch = story["chapters"]["dynamics"]
     view = story["view"]
@@ -1231,6 +1281,8 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
     if ch.get("lead"):
         text += f'<p class="sub">{esc(ch["lead"])}</p>'
     text += f"<p>{esc(UI['dyn_read'])}</p>"
+    if ch.get("verdict"):  # 03.10 (совет судей): итог главы с числами обоих расчётов, как в отчёте
+        text += f'<p class="dyn-verdict">{esc(ch["verdict"])}</p>'
     if texts:
         body = "".join(f"<p>{esc(x)}</p>" for x in texts)
         text += f'<details class="how"><summary>{esc(UI["how"])}</summary>{body}</details>'

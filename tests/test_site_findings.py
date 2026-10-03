@@ -188,6 +188,40 @@ def test_passports_from_profile_and_settlement():
     )
 
 
+def test_passports_flag_and_middle_note():
+    """03.10 (совет судей): у примера с флагом «зависит» — слова флага рядом с названием, у устойчивого — нет;
+    сноска «середина» — только у типа с медианой кафе ближе всего к региону и только если каждая часть корзины
+    отличается от региона не больше чем на middle_max_pct; процент части из названия — из profile.csv."""
+    prof = lambda cafe, tr: [  # noqa: E731
+        {"feature": "clr_rel_cafe", "median": cafe},
+        {"feature": "clr_rel_food", "median": 0.0324},
+        {"feature": "clr_rel_marketplace", "median": 0.027},
+        {"feature": "clr_rel_transport", "median": tr},
+        {"feature": "log_level_rel", "median": -0.04},
+    ]
+    types = [
+        {"t": 1, "name": "Города, меньше транспорта", "color": "#589BA6", "size": 806, "pop_share": 0.21,
+         "profile": prof(-0.0318, -0.0173), "examples": {"typical": [5]}},
+        {"t": 2, "name": "Сельские, меньше общепита", "color": "#846D1E", "size": 473, "pop_share": 0.06,
+         "profile": prof(-0.43, 0.08), "examples": {"typical": [7]}},
+    ]  # fmt: skip
+    mo = {
+        5: {"ns": "верховский", "r": "Орловская область", "fl": "d"},
+        7: {"ns": "большеберезниковский", "r": "Республика Мордовия", "fl": "s"},
+    }
+    fw = {"d": "тип зависит от варианта расчёта", "s": "тип устойчив"}
+    h = site_findings.passports_html(types, _story(), mo, TX["passports"], ESC, flag_words=fw)
+    assert "Орловская область <span" in h and h.count("тип зависит от варианта расчёта") == 1
+    assert "тип устойчив" not in h
+    assert h.count('class="pp-mid"') == 1
+    mid = site_findings.middle_note(types[0], TX["passports"], site_findings.middle_type(types))
+    assert "не больше чем на 3%" in mid and "«Меньше транспорта» в названии — около 2% в медиане" in mid
+    assert site_findings.middle_note(types[1], TX["passports"], 1) == ""
+    # корзина далеко от региона — сноски нет
+    far = dict(types[0], profile=prof(-0.0318, -0.2))
+    assert site_findings.middle_note(far, TX["passports"], 1) == ""
+
+
 def test_fonts_vendored_with_sha256():
     """Шрифты — из templates/vendor/fonts со сверкой sha256 по README; @font-face переписан на vendor/fonts/…;
     внешних адресов (Google Fonts) в шаблоне нет."""

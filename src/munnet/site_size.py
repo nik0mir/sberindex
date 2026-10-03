@@ -148,9 +148,12 @@ def mo_count(n: int) -> str:
     return _mc(n)
 
 
-def size_texts(tx: Mapping, bt: Mapping, sc: Mapping, names: Mapping[str, str]) -> dict[str, Any] | None:
+def size_texts(
+    tx: Mapping, bt: Mapping, sc: Mapping, names: Mapping[str, str], k: int = 10
+) -> dict[str, Any] | None:
     """Два совета, подписи графика, строка исхода проверки по типам. None — нет текстов или исход основного
-    прогона не «confirmed» (тексты написаны под этот исход)."""
+    прогона не «confirmed» (тексты написаны под этот исход). ``k`` — размер набора «свой регион» (ближайшие
+    муниципалитеты того же региона, ``interpret.tests.T7_utility.k``)."""
     if not tx:
         return None
     qs = sorted(sc["quintiles"], key=lambda q: int(q["quintile"]))
@@ -185,6 +188,7 @@ def size_texts(tx: Mapping, bt: Mapping, sc: Mapping, names: Mapping[str, str]) 
         "share": style.fmt_pct(big["share"], 1),
         "large_lo": style.fmt_num(100 * blo, 1) + wj,
         "large_hi": wj + style.fmt_pct(bhi, 1),
+        "k": style.fmt_num(k),
     }
     # оговорка о пороге «самые крупные»: интервал разности «верхняя группа − остальные» при общих соседях
     lv = ((sc.get("shared_members_bootstrap") or {}).get("large_vs_rest") or {}).get("delta_ci")
@@ -233,6 +237,12 @@ def size_texts(tx: Mapping, bt: Mapping, sc: Mapping, names: Mapping[str, str]) 
             "large_hi": style.fmt_pct(int(ct.get("types_hi_large", 0)) / n_large, 0),
         },
     )
+    # 03.10 (совет судей): крупные МО и типы 3–4 не разводятся — число из crosstab_types_large, без слов
+    # «разницу объясняет размер»
+    types_size = _fill(
+        tx["types_size"],
+        {"n_hi_large": style.fmt_num(int(ct.get("types_hi_large", 0))), "n_large": style.fmt_num(n_large)},
+    )
     return {
         "advice_small": _fill(tx["advice_small"], vals),
         "advice_large": _fill(tx["advice_large"], vals),
@@ -242,7 +252,7 @@ def size_texts(tx: Mapping, bt: Mapping, sc: Mapping, names: Mapping[str, str]) 
         "chart": _fill(
             tx["chart"], {"n_mo": mo_count(int(sc.get("n_base") or sum(int(q["n_base"]) for q in qs)))}
         ),
-        "posthoc": tx["posthoc"],
+        "types_size": types_size,
         "by_type": by_type,
         "more": tx["more"],
         "aria": _fill(tx["aria"], {"vals": "; ".join(f"{r['label']} — {r['text']}" for r in rows)}),
@@ -264,7 +274,7 @@ def strings(st: Mapping | None, card: str = "") -> list[str]:
     out = [card]
     if st:
         keys = ("advice_small", "advice_large", "large_caveat", "lead_small", "lead_large", "chart",
-                "posthoc", "by_type", "more", "aria", "ref")  # fmt: skip
+                "types_size", "by_type", "more", "aria", "ref")  # fmt: skip
         out += [str(st[k]) for k in keys] + [r["label"] for r in st["rows"]]
     return [s for s in out if s]
 

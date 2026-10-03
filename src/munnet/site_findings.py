@@ -425,15 +425,18 @@ def _use_size_html(p: Mapping, body: str, fig: str, extra: str, esc: Esc) -> str
         f'<p class="fd-adv fd-adv-{k}"><b>{esc(st["lead_" + k])}</b> {esc(_dot(st["advice_" + k]))}</p>'
         for k in ("small", "large")
     )
-    if st.get("large_caveat"):  # порция 6g: порог выбран после черновых чисел; интервал при общих соседях
+    if st.get(
+        "large_caveat"
+    ):  # выигрыш небольшой, граница выбрана после первых результатов, интервал разности
         advice += f'<p class="fd-note fd-adv-note">{esc(_dot(st["large_caveat"]))}</p>'
     chart = _pair(lambda w: site_size.size_svg(st, w))
+    # 03.10 (совет судей): исход проверки по типам и то, что крупные МО — почти те же типы 3–4, одним абзацем
+    bytype = _dot(st["by_type"]) + (" " + _dot(st["types_size"]) if st.get("types_size") else "")
     return (
         f'<div class="fd fd-use" id="fd-use"><p class="fd-lab">{esc(p["label"])}</p>'
         f"<h3>{esc(p['title'])}</h3>{advice}"
-        f'<figure>{chart}<p class="fd-cap">{esc(_dot(st["chart"]))}</p>'
-        f'<p class="fd-note">{esc(_dot(st["posthoc"]))}</p></figure>'
-        f'<p class="fd-bytype">{esc(_dot(st["by_type"]))}</p>'
+        f'<figure>{chart}<p class="fd-cap">{esc(_dot(st["chart"]))}</p></figure>'
+        f'<p class="fd-bytype">{esc(bytype)}</p>'
         f'<details class="more fd-more"><summary>{esc(st["more"])}</summary>'
         f"{body}<figure>{fig}{extra}</figure></details></div>"
     )
@@ -472,13 +475,77 @@ def passport_rows(ty: Mapping, rows: Mapping[str, str]) -> list[tuple[str, str, 
     return [(f, rows[f], med.get(f)) for f in PASSPORT_ROWS if f in rows]
 
 
+def example_flag(r: Mapping, flag_words: Mapping[str, str] | None) -> str:
+    """Слова флага «тип зависит от варианта расчёта» у примера (поле ``fl`` в ``mo.json`` = ``d``);
+    у устойчивого типа и без флага — пусто."""
+    return str((flag_words or {}).get("d") or "") if r.get("fl") == "d" else ""
+
+
+def middle_type(types: Sequence[Mapping]) -> int | None:
+    """Тип с медианой доли кафе и ресторанов ближе всего к своему региону
+    (|медиана ``clr_rel_cafe``| — наименьшая)."""
+    best = None
+    for ty in types:
+        med = {p["feature"]: p.get("median") for p in ty.get("profile") or []}
+        v = med.get("clr_rel_cafe")
+        if v is not None and math.isfinite(v) and (best is None or abs(v) < best[0]):
+            best = (abs(v), int(ty["t"]))
+    return best[1] if best else None
+
+
+def _pct_rel(v: float) -> int:
+    """|exp(v) − 1| в процентах, округлено, как в ``rel_text``."""
+    return abs(round((math.exp(v) - 1) * 100))
+
+
+def middle_note(ty: Mapping, tx: Mapping, middle_t: int | None) -> str:
+    """Сноска к середине оси (совет судей 03.10, ``passports.middle``): только у типа ``middle_type`` и только
+    если медиана каждой части корзины в паспорте отличается от региона не больше чем на ``middle_max_pct``;
+    часть корзины из названия типа (после запятой) — её медиана в процентах. Иначе пусто."""
+    tpl = tx.get("middle")
+    if not tpl or middle_t is None or int(ty["t"]) != middle_t:
+        return ""
+    rows = [
+        (f, lab, v)
+        for f, lab, v in passport_rows(ty, tx["rows"])
+        if f.startswith("clr_rel_") and v is not None
+    ]
+    if not rows:
+        return ""
+    mx = max(_pct_rel(v) for _, _, v in rows)
+    if mx > int(tx.get("middle_max_pct", 5)):
+        return ""
+    name = str(ty.get("name") or "")
+    part = name.split(",", 1)[1].strip() if "," in name else ""
+    hit = [(lab, v) for _, lab, v in rows if part and norm_stem(lab) in part.lower()]
+    if not hit:
+        return ""
+    return _fill(
+        tpl,
+        {"max_pct": f"{mx}%", "part": part[:1].upper() + part[1:], "part_pct": f"{_pct_rel(hit[0][1])}%"},
+    )
+
+
+def norm_stem(label: str) -> str:
+    """Основа подписи части корзины для поиска в названии типа: первые 6 букв без регистра."""
+    return label.lower().replace("ё", "е")[:6]
+
+
 def passports_html(
-    types: Sequence[Mapping], story: Mapping, mo: Mapping[int, Mapping], tx: Mapping | None, esc: Esc
+    types: Sequence[Mapping],
+    story: Mapping,
+    mo: Mapping[int, Mapping],
+    tx: Mapping | None,
+    esc: Esc,
+    flag_words: Mapping[str, str] | None = None,
 ) -> str:
     """Паспорта типов: крупное число МО цветом типа, значок и название, «кто обычно», пять строк относительно
-    региона (полоса от нуля на общей шкале и словами), пример — кнопка, открывающая карточку и карту."""
+    региона (полоса от нуля на общей шкале и словами), пример — кнопка, открывающая карточку и карту; рядом
+    с примером — флаг «тип зависит от варианта расчёта» (``flag_words`` — ``story.card.flag_words``);
+    у середины оси — сноска ``middle_note``."""
     if not tx or not types:
         return ""
+    middle_t = middle_type(types)
     view = story["view"]
     rows_cfg = tx["rows"]
     vals = [abs(v) for ty in types for _, _, v in passport_rows(ty, rows_cfg) if v is not None]
@@ -520,11 +587,16 @@ def passports_html(
             if r:
                 nm = str(r.get("ns") or r.get("n") or "")
                 nm = nm[:1].upper() + nm[1:]
+                # 03.10 (совет судей): тип примера зависит от варианта расчёта — флаг usefulness.type_flag
+                fl = example_flag(r, flag_words)
                 ex = (
                     f'<p class="pp-ex">{esc(tx["example"])}: '
                     f'<button type="button" data-go="{int(i)}" data-map="1">'
-                    f"{esc(nm)}</button>, {esc(r.get('r', ''))}</p>"
+                    f"{esc(nm)}</button>, {esc(r.get('r', ''))}"
+                    + (f' <span class="pp-flag">({esc(fl)})</span>' if fl else "")
+                    + "</p>"
                 )
+        mid = middle_note(ty, tx, middle_t)
         shape = _e(view["shapes"].get(str(t), ""))
         cards.append(
             f'<article class="pp" style="--c:{_e(col)}"><p class="pp-num">{_f(n)}</p>'
@@ -532,7 +604,9 @@ def passports_html(
             f'<h3><i class="fig fig-t{t}" aria-hidden="true">{shape}</i>'
             f"{esc(ty.get('name') or f'Тип {t}')}</h3>"
             + (f'<p class="pp-who">{esc(_dot(who))}</p>' if who else "")
-            + f'<ul class="pp-rows">{"".join(lis)}</ul>{ex}</article>'
+            + f'<ul class="pp-rows">{"".join(lis)}</ul>'
+            + (f'<p class="pp-mid">{esc(_dot(mid))}</p>' if mid else "")
+            + f"{ex}</article>"
         )
     # порция 6b (check-ux): как собрано название и почему продукты и маркетплейсы у медиан почти равны
     naming = f'<p class="pp-intro pp-naming">{esc(_dot(tx["naming"]))}</p>' if tx.get("naming") else ""
@@ -560,6 +634,8 @@ def passport_strings(types: Sequence[Mapping], tx: Mapping | None) -> list[str]:
         return []
     out = [tx["intro"], tx["example"], tx.get("detail", ""), tx.get("naming", ""), tx.get("footnote", "")]
     out += list(tx["rows"].values())
+    mt = middle_type(types)
+    out += [middle_note(ty, tx, mt) for ty in types]
     for ty in types:
         out += [rel_text(v) for _, _, v in passport_rows(ty, tx["rows"])]
         n = int(ty.get("size") or 0)

@@ -2840,6 +2840,12 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
             checks["t3"]["unstable_label"] = robust["unstable_label"]
     if robust.get("circularity"):
         checks["r1"]["circularity"] = robust["circularity"]
+    # 03.10 (совет судей, docs/landing_spec.md §4.3): глава 5 и строка T3 первого экрана — как в отчёте;
+    # заголовок словаря site.headlines не меняется и остаётся, если исход не тот, под который написан текст
+    dyn_t = site_chapters.dynamics_texts(
+        (cfg["site"]["build"].get("texts") or {}).get("dynamics"), checks.get("t3")
+    )
+    site_chapters.apply_dynamics(story, dyn_t, story["chapters"]["dynamics"]["title"])
     if useful_in is not None:  # те же доли «тот же тип», что у usefulness.type_flag.per_variant (иначе код 3)
         bad = check_r1_shares(checks.get("r1") or {}, useful_in["facts"])
         if bad:
@@ -2880,7 +2886,11 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     size_t = None
     if size_in is not None and useful is not None:  # порция 6f: два совета по размеру
         size_t = site_size.size_texts(
-            tx.get("size") or {}, size_in["by_type"], size_in["size"], story["names"]["final"]
+            tx.get("size") or {},
+            size_in["by_type"],
+            size_in["size"],
+            story["names"]["final"],
+            k=int(cfg["interpret"]["tests"]["T7_utility"]["k"]),
         )
         if size_t is not None:
             site_size.check_rows(size_t)
@@ -2919,16 +2929,20 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
             (useful or {}).get("use"), (useful or {}).get("example"), (useful or {}).get("flag")
         )
         + site_size.strings(size_t)
-        + list(robust.values()),
+        + list(robust.values())
+        + list((dyn_t or {}).values()),
     )
     banned_h = list(cfg["site"]["forbidden_words"]["headlines_always"]) + list(
         cfg["interpret"]["naming"]["banned"]
     )
-    bad += [f"запрет в заголовке: «{w}» в «{h}»" for h in site_findings.titles(ft) for w in banned_h
-            if norm(w) in norm(h)]  # fmt: skip
+    dyn_heads = [dyn_t["title"], dyn_t["short"]] if dyn_t else []
+    bad += [f"запрет в заголовке: «{w}» в «{h}»" for h in site_findings.titles(ft) + dyn_heads
+            for w in banned_h if norm(w) in norm(h)]  # fmt: skip
     if bad:
         raise QCError("site: линт текстов порции 5b: " + "; ".join(bad[:10]))
-    passports = site_findings.passports_html(types, story, mo_rows, ptx, _t)
+    passports = site_findings.passports_html(
+        types, story, mo_rows, ptx, _t, flag_words=story["card"].get("flag_words")
+    )
     csvs = download_csvs(mo, types, checks, story)
     story["chapters"]["method"]["numbers"] = method_numbers(story, mo, checks, methods)
     geo = cells_geo(hm, mo)

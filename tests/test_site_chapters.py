@@ -254,6 +254,43 @@ def test_placebo_summary_by_verdicts():
     assert 'class="placebo-sum"' in h
 
 
+def test_dynamics_texts_as_in_report():
+    """03.10 (совет судей): заголовок главы 5 и строка первого экрана — как в отчёте; числа обоих расчётов —
+    из checks.t3; при другом исходе — None (остаётся заголовок словаря site.headlines)."""
+    tx = CFG["site"]["build"]["texts"]["dynamics"]
+    t3 = checks()["t3"] | {"verdict_final": "not", "verdict_main": "confirmed", "unstable": True}
+    t3["main"] = t3["main"] | {"passed": True}
+    dt = SC.dynamics_texts(tx, t3)
+    assert dt["title"] == "Смена типа за год не подтверждена"
+    assert "40 против 3 на 95-м перцентиле" in dt["lead"] and "50 при 95-м перцентиле 88" in dt["lead"]
+    assert dt["lead"].endswith("не подтверждена.") and "{" not in dt["lead"]
+    assert "при другом — столько же" in dt["short"]
+    # другой исход — текстов нет
+    assert SC.dynamics_texts(tx, t3 | {"verdict_final": "partial"}) is None
+    assert SC.dynamics_texts(tx, t3 | {"verdict_main": "not"}) is None
+    assert SC.dynamics_texts(tx, t3 | {"final": t3["final"] | {"run": "variant:no_level"}}) is None
+    assert SC.dynamics_texts(tx, t3 | {"main": t3["main"] | {"observed": 2}}) is None
+    # подстановка: глава, итог, «Что проверяли» и пункт первого экрана; лишнее не трогается
+    st = {
+        "chapters": {"dynamics": {"title": "Старый"}},
+        "screen0": {"lead": "Старый", "point_heads": [["А"], ["Б", "Старый"]]},
+    }
+    SC.apply_dynamics(st, dt, "Старый")
+    assert st["chapters"]["dynamics"]["title"] == dt["title"]
+    assert st["chapters"]["dynamics"]["verdict"] == dt["lead"]
+    assert st["screen0"]["lead"] == dt["short"] and st["screen0"]["point_heads"] == [
+        ["А"],
+        ["Б", dt["short"]],
+    ]
+    s2 = story()
+    s2["chapters"]["dynamics"] = s2["chapters"]["dynamics"] | {"verdict": dt["lead"]}
+    h = SC.chapter_dynamics(s2, checks() | {"t3": t3}, ESC)
+    assert 'class="dyn-verdict"' in h and "40 против 3" in h
+    hc = HeadlineChecker(CFG.data)
+    v = {"T3_reliable_placebo": "not", "T1_ladder_external": "partial_overall", "one_in_ten": False}
+    assert hc.text_violations(list(dt.values()), v) == []
+
+
 def test_rel_key_placebo_only_with_placebo():
     """Ключ надёжности: фраза о плацебо — только в главе с плацебо (5), в главе 4 — первая фраза ключа."""
     st = story() | {"reliability_key": "Сплошная — пройдена, бледное — нет. Плацебо (псевдогоды) — то и это"}

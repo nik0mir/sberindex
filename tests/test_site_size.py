@@ -76,18 +76,25 @@ def test_size_texts_numbers_from_files():
     st = site_size.size_texts(SX, _bt(), _sc(), NAMES)
     assert st is not None
     small = st["advice_small"].replace("⁠", "")
-    assert "в 56,3% случаев (95% интервал 53,5–59,3%)" in small and "до 53,5 тыс. жителей" in small
+    assert "в 56,3% случаев (95% интервал 53,5–59,3%)" in small and "меньше 53,5 тыс. жителей" in small
+    assert "10 ближайших муниципалитетов того же региона" in small
     assert "в каждой группе" not in small and "55–58" not in small
     large = st["advice_large"].replace("⁠", "")
-    assert "(50,7%, 95% интервал 46,0–54,2%)" in large and "от 53,5 тыс." in large
+    assert "в 50,7% случаев (95% интервал 46,0–54,2%)" in large and "от 53,5 тыс." in large
+    # 03.10 (совет судей): «почти равны — смотрите на оба ориентира», без «поэтому сверять … и с похожими»
+    assert "почти равны" in large and "данные не показывают" in large and "поэтому" not in large
     cav = st["large_caveat"]
-    assert "после того, как увидели черновые числа" in cav and "доходит до нуля" in cav
+    assert "уже видя первые результаты" in cav and "доходит до нуля" in cav and "Выигрыш небольшой" in cav
     assert "от −10,4 до +0,1 процентного пункта" in cav
-    assert "ничего не добавля" not in st["posthoc"] and "не видно, чтобы тип" in st["posthoc"]
+    assert "posthoc" not in st and st["types_size"].startswith("Самые крупные")
+    assert "235 из 309" in st["types_size"] and "нельзя отделить" in st["types_size"]
     bt = st["by_type"]
     assert "во всех 3 прогонах" in bt and "51,3%" in bt and "56,6%" in bt and "5,3 процентного пункта" in bt
-    assert "от 1,9 до 8,4" in bt and "76%" in bt and "«Тип три» и «Тип четыре»" in bt
-    assert "рознице" not in bt and "{" not in bt
+    assert "от 1,9 до 8,4" in bt and "«Тип три» и «Тип четыре»" in bt
+    assert "рознице" not in bt and "{" not in bt and "совпадает с размером" not in bt
+    shown = " ".join(site_size.strings(st)).lower()
+    for bad in ("только примета", "объясняет размер", "поэтому сверять"):
+        assert bad not in shown
     assert [r["label"] for r in st["rows"]][0] == "до 11,7 тыс. жителей"
     assert [r["large"] for r in st["rows"]] == [False] * 4 + [True]
     assert "похожие лучше" not in " ".join(site_size.strings(st)).lower()
