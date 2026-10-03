@@ -1094,3 +1094,25 @@ html.has-3d.h0-flat .lede-flat { display: block; }
 /* плоская карта по умолчанию на телефоне: у неё свой список типов с числом муниципалитетов — легенда первого
    экрана (на телефоне без чисел) его не повторяет; ссылка к таблице остаётся */
 @media (max-width: 599px) { .has-3d.h0-flat .h0-legend .h0-types { display: none; } }
+
+/* === порция 6j: замечания check-ux ================================================================================ */
+/* телефон: что такое тип и почему верить — сразу под «Зачем» */
+.h0-brief { display: none; }
+@media (max-width: 599px) {
+  .h0-brief { display: block; margin: 0 16px 10px; font-size: 14px; line-height: 1.45; color: var(--ink); }
+  .has-3d .h0-brief { order: 3; }
+  .has-3d .h0-findlink { order: 3; }
+}
+/* плоская карта на телефоне: подписи округов и мелкие подписи городов (≈ 4 px) скрыты, 5–6 крупных городов —
+   на плашке 13 px; при увеличении карты — прежние подписи */
+.hexmap .cities-ph { display: none; }
+.hexmap .cities-ph rect { fill: #fff; stroke: #8d96a1; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.hexmap .cities-ph text { font-family: var(--sans); font-weight: 600; fill: var(--ink); }
+@media (max-width: 599px) {
+  .hexmap:not(.zoomed) .cities-ph { display: inline; }
+  .hexmap:not(.zoomed) .labels { display: none; }
+  .hexmap .labels .okrug { display: none; }
+  .hexmap.has-ego .cities-ph { display: none; }
+}
+/* порция 6k: на широком экране определение типа — в пояснении карты (hero.lede), «почему верить» и совет —
+   в hero.why_trust; hero.brief с советом и оговоркой «нашли, уже видя результаты» — только на телефоне */

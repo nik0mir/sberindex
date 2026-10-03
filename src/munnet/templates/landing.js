@@ -422,10 +422,11 @@ function stabilityLine(nd) {
       bits.push(`другой — ${other.length > 1 ? "в вариантах" : "в варианте"} ${list(other.map(([v, w]) => `«${esc(w)}» (тип «${esc(typeName(v))}»)`))}`);
     } else if (vars) bits.push(`варианты: ${esc(vars)}`);
   }
-  if (b) bits.push(`тот же тип — в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим начальным числом (seed)`);
-  const head = `<b>${esc(CARD.stability || "Устойчивость типа")}:</b> ` + (flag ? `<b class="flag-word flag-${esc(nd.fl[0])}">${esc(cap1(flag))}.</b> ` : "");
+  if (b) bits.push(`тот же тип — в ${b[0]} из ${b[1]} ${plural(b[1], "повтора", "повторов", "повторов")} с другим случайным начальным значением`);
+  // порция 6j: «Устойчивость типа: Тип устойчив.» — повтор; при флаге — только он
+  const head = flag ? `<b class="flag-word flag-${esc(nd.fl[0])}">${esc(cap1(flag))}.</b> ` : `<b>${esc(CARD.stability || "Устойчивость типа")}:</b> `;
   const body = bits.map(cap1).join(". ");
-  return `<p class="rob-line">${head}${body}. <span class="label-note">${esc(story.stability_label || "описание, не проверка")}</span></p>`;
+  return `<p class="rob-line">${head}${body}. <span class="label-note">${esc(story.stability_label || "описание: заранее не проверяли")}</span></p>`;
 }
 
 function renderCard(r) {
@@ -453,7 +454,10 @@ function renderCard(r) {
   // 2. С кем сверять изменения: соседи по своему региону (набор B T7), затем похожие по тратам в других регионах
   if (nd.simb && nd.simb.length) {
     h += `<section class="row sim-b" aria-labelledby="c-simb"><h3 id="c-simb">${esc(CARD.simb_title || "Соседи по своему региону")}</h3>${simList(nd.simb, false)}`;
-    if (CARD.simb_note) h += `<p class="sim-note">${esc(CARD.simb_note)}.</p>`;
+    // порция 6j: строка — как совет по размеру: у крупных (флаг lg; вне базы — по населению) своя
+    const big = nd.lg != null ? nd.lg === 1 : (nd.pop || r.pop || 0) >= (CARD.large_pop || Infinity);
+    const sn = (big && CARD.simb_note_large) || CARD.simb_note;
+    if (sn) h += `<p class="sim-note">${esc(sn)}.</p>`;
     h += `</section>`;
   }
   if (nd.t != null) {
@@ -465,7 +469,7 @@ function renderCard(r) {
       // регион не единственный ориентир; знак разности ошибок у отдельного МО по-прежнему не показывается
       if (nd.lg && CARD.large_note) h += `<p class="sim-large">${esc(CARD.large_note)}.</p>`;
       const cc = CARD.sim_caption || (CH.comparable || {}).similar_caption;
-      h += `<p class="cap">${CARD.sim_note ? esc(CARD.sim_note) + ". " : ""}${esc(CARD.lines || "Сходство трат, не поездки и не потоки")}. ${esc(CARD.shifted || "")}.${cc ? " " + esc(cc) + "." : ""}</p>`;
+      h += `<p class="cap">${CARD.sim_note ? esc(CARD.sim_note) + ". " : ""}${esc(CARD.lines || "Сходство корзин трат; поездки и потоки здесь не учитываются")}. ${esc(CARD.shifted || "")}.${cc ? " " + esc(cc) + "." : ""}</p>`;
     } else if (CARD.no_comparable) {
       h += `<p class="kv">${esc(CARD.no_comparable)}.</p>`;
     }
@@ -759,7 +763,10 @@ function bindFindLink() {
   if (!a || !inp) return;
   a.addEventListener("click", (e) => {
     e.preventDefault();
-    inp.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    // порция 6j: поле — у верха экрана (под шапкой), чтобы его не закрыла клавиатура
+    const head = $(".masthead"), off = (head ? head.getBoundingClientRect().height : 56) + 12;
+    const lab = $("#find") || inp;
+    window.scrollTo({ top: lab.getBoundingClientRect().top + window.scrollY - off, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     inp.focus({ preventScroll: true });
   });
 }

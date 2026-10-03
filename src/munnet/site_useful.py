@@ -328,7 +328,15 @@ def _e(s: Any) -> str:
 def _text(x: float, y: float, s: str, cls: str = "", anchor: str = "start") -> str:
     c = f' class="{cls}"' if cls else ""
     a = f' text-anchor="{anchor}"' if anchor != "start" else ""
-    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}>{_e(s)}</text>'
+    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}>{_e(_nb(s))}</text>'
+
+
+def _nb(s: str) -> str:
+    """Типографика ru-text в подписях SVG (порция 6j): неразрывный пробел после однобуквенных слов и перед
+    тире — та же функция, что для HTML (``landing.nbsp``)."""
+    from munnet.landing import nbsp
+
+    return nbsp(str(s)) if s else s
 
 
 def example_svg(ex: Mapping, W: float = 440) -> str:

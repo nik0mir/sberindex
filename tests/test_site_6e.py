@@ -62,10 +62,11 @@ def test_card_texts_net_and_similar_caption():
     out = site_findings.card_texts(TX["card"], checks, k_net=5, sim_fields={"n_shown": "5", "n_set": "10"})
     assert out["net_note"].startswith("До 5 муниципалитетов") and "не «похожие по тратам" in out["net_note"]
     assert (
-        out["sim_caption"].startswith("5 самых похожих по тратам из 10")
-        and "км — расстояние" in out["sim_caption"]
+        out["sim_caption"].startswith("Показаны 5 из 10, на которых проверяли точность сверки")
+        and "первый — самый похожий" in out["sim_caption"]
+        and "км" not in out["sim_caption"]
     )
-    assert out["sim_from"].startswith("Откуда список: сопоставимые территории главы 6")
+    assert out["sim_from"].startswith("Муниципалитеты других регионов с самой похожей корзиной трат")
     assert out["net_title"] == "Соседи по сети корзин" and out["arcs_net"] and out["arcs_default"]
     # без числа соседей подписи сети нет (пустого поля на странице не бывает)
     assert "net_note" not in site_findings.card_texts(TX["card"], checks)

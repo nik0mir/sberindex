@@ -84,7 +84,11 @@ def test_size_texts_numbers_from_files():
     # 03.10 (совет судей): «почти равны — смотрите на оба ориентира», без «поэтому сверять … и с похожими»
     assert "почти равны" in large and "данные не показывают" in large and "поэтому" not in large
     cav = st["large_caveat"]
-    assert "уже видя первые результаты" in cav and "доходит до нуля" in cav and "Выигрыш небольшой" in cav
+    assert (
+        "уже видя первые результаты" in cav
+        and "доходит до нуля" in cav
+        and "56,3% случаев против 50% при равной точности" in cav
+    )
     assert "от −10,4 до +0,1 процентного пункта" in cav
     assert "posthoc" not in st and st["types_size"].startswith("Самые крупные")
     assert "235 из 309" in st["types_size"] and "нельзя отделить" in st["types_size"]
@@ -163,9 +167,13 @@ def test_findings_use_column_with_size():
     v = {"T1_ladder_external": "partial_overall", "T2_direction": "partial", "T3_reliable_placebo": "not",
          "T7_utility": "not", "T7_type_gain": "neutral", "one_in_ten": False, "caveat": True}  # fmt: skip
     cfg = landing.Config(CFG.data, Path("x"))
-    card = site_size.card_note(SX, ft["use"]["size"])
-    assert landing.lint_texts(cfg, {"verdicts": v}, texts + [card]) == []
-    assert "53,5 тыс." in card
+    cards = site_size.card_notes(SX, ft["use"]["size"])
+    card = [cards["simb_note"], cards["simb_note_large"]]
+    assert landing.lint_texts(cfg, {"verdicts": v}, texts + card) == []
+    # порция 6j: строки «С кем сверять» — как совет: 56,3% для небольших и средних, 50,7% для крупных
+    assert "меньше 53,5 тыс." in cards["simb_note"] and "56,3%" in cards["simb_note"]
+    assert "почти одинаково" in cards["simb_note_large"] and "50,7%" in cards["simb_note_large"]
+    assert cards["sim_note"] == "" and cards["large_note"] == "" and cards["large_pop"] > 53000
 
 
 def test_ndfl_license_not_cc_by():
@@ -216,8 +224,10 @@ def test_site_large_flag_in_mo_and_card(tmp_path):
     story = landing.run(cfg)
     rows = _mo(tmp_path)
     assert rows[big]["lg"] == 1
-    assert all(r["lg"] is None for i, r in rows.items() if i != big)  # и город, и его районы — без флага
-    assert "53,5 тыс." in story["card"]["large_note"]
+    # порция 6j: 0 — узел базы, не крупный; узла-города (и его районов) в size_by_mo нет — без флага
+    assert all(r["lg"] == 0 for j, r in rows.items() if j not in (big, CITY) and r.get("node") == j)
+    assert rows[CITY]["lg"] is None
+    assert "50,7%" in story["card"]["simb_note_large"] and story["card"]["large_note"] == ""
     html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     assert '"works"' not in html and "rule_by_mo" not in html
 

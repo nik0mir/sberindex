@@ -224,10 +224,11 @@ async function main() {
     // карты с запасом — 560 единиц, ряд островов — 700) при горизонтальном угле обзора этой камеры
     const tanH = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
     const phone = w < 700;
-    VIEWS.map.target.x = phone ? -210 : narrow ? 0 : -230;
+    VIEWS.map.target.x = narrow ? 0 : -230;  // порция 6j: и на телефоне карта в центре кадра
     VIEWS.map.dir.set(0, phone ? 0.86 : 0.7, phone ? 0.51 : 0.71);  // на телефоне — круче сверху: карта выше в кадре
     // телефон (порция 5b): камера ближе — по ширине кадра около половины карты, европейская часть в центре; остальное — жестом
-    VIEWS.map.dist = phone ? Math.max(1100, 290 / tanH) : narrow ? Math.max(2300, 560 / tanH) : 2080;
+    // порция 6j (check-ux): на телефоне в кадре вся страна, как на узком экране (восток не обрезан)
+    VIEWS.map.dist = phone ? Math.max(1100, 560 / tanH) : narrow ? Math.max(2300, 560 / tanH) : 2080;
     VIEWS.islands.target.x = narrow ? 0 : -390;
     VIEWS.islands.dist = narrow ? Math.max(3600, 720 / tanH) : 2750;
     camera.updateProjectionMatrix();
@@ -295,7 +296,16 @@ async function main() {
     tip.hidden = true;
     if (focus) btnFlat.focus({ preventScroll: true });
   }
-  btnFlat.addEventListener("click", () => setFlat(!flat, true));
+  btnFlat.addEventListener("click", () => {
+    setFlat(!flat, true);
+    // порция 6j: на телефоне после переключения высота первого экрана меняется — карта остаётся в кадре
+    if (matchMedia("(max-width: 599px)").matches) {
+      requestAnimationFrame(() => {
+        const head = doc.querySelector(".masthead"), off = (head ? head.getBoundingClientRect().height : 56) + 8;
+        window.scrollTo({ top: Math.max(0, stage.getBoundingClientRect().top + window.scrollY - off), behavior: "auto" });
+      });
+    }
+  });
 
   // ------------------------------------------------------------------ наведение, выбор
   const ray = new THREE.Raycaster();
@@ -508,7 +518,8 @@ async function main() {
       if (!show) cityEls.forEach((el) => { el.style.visibility = "hidden"; });
     }
     if (!show) return;
-    if (!cityW) cityW = cityEls.map((el) => [el.offsetWidth, el.offsetHeight]);
+    // порция 6j: на телефоне карта сначала плоская — размеры подписей, снятые со скрытого холста, нулевые
+    if (!cityW || cityW.some(([bw]) => !bw)) cityW = cityEls.map((el) => [el.offsetWidth, el.offsetHeight]);
     const w = stage.clientWidth, h = stage.clientHeight, taken = [];
     CITIES.forEach((c, j) => {  // по убыванию населения: крупный город важнее
       const s = cur[c.i];

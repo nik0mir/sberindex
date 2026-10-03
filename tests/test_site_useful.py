@@ -411,7 +411,7 @@ def test_hero_why_and_stood_title():
     assert hero["why"].startswith("Зачем:") and "с кем его сравнивать" in hero["why"]
     trust = hero["why_trust"]
     assert trust.startswith("Проверки смысла типов записаны до расчётов") and "уже видя результаты" in trust
-    assert "Высота" not in hero["lede_flat"] and "на этой карте нет" in hero["lede_flat"]
+    assert "Высота" not in hero["lede_flat"] and "карточке муниципалитета" in hero["lede_flat"]
     f = TX["findings"]
     assert f["stood"]["title"] == "Тот же порядок виден в обороте Росстата"
     assert f["stood"]["text"].count("ранговая корреляция Спирмена") == 1 and "вскрыт" not in f["use"]["note"]

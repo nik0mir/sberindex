@@ -243,7 +243,7 @@ def test_placebo_summary_by_verdicts():
     s = SC.placebo_summary(t3)
     assert s.startswith("Заголовок главы — по самому строгому варианту расчёта.")
     assert "«другое правило связей между муниципалитетами» число смен не отличается от плацебо: 50" in s
-    assert "88,0" in s and "(40 против медианы 2)" in s and "не устоял" in s
+    assert "плацебо 88." in s and "(40 против медианы 2)" in s and "не устоял" in s
     # итог не «not» — фразы «не отличается» нет; основной расчёт не прошёл — фразы о нём нет
     t3b = t3 | {"verdict_final": "partial", "main": t3["main"] | {"passed": False}}
     s = SC.placebo_summary(t3b)

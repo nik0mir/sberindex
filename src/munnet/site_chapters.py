@@ -99,7 +99,7 @@ UI: dict[str, str] = {
     "types_border": "На границе с другим типом",
     "types_largest": "Крупнейший",
     "types_aria": "{name}: медианы признаков типа относительно типичного муниципалитета",
-    "types_note_label": "Описание, не проверка",
+    "types_note_label": "Описание: заранее не проверяли",
     "ami_title": "С каким делением без типов типы совпадают сильнее всего",
     "ami_cap": (
         "AMI — совпадение типов с делением муниципалитетов по одному признаку: 0 — как у случайного деления, "
@@ -120,7 +120,7 @@ UI: dict[str, str] = {
     "признакам места",
     "order_key_random": "случайные метки",
     "order_line_solid": "сплошная линия — проверка пройдена",
-    "order_line_dashed": "пунктир — пройдена в целом; при том же размере и доле горожан — нет",
+    "order_line_dashed": "пунктир — проверка пройдена в целом; при том же размере и доле горожан — нет",
     "order_line_none": "без линии — не пройдена",
     "catering": "общепит",
     "retail": "розница",
@@ -128,7 +128,7 @@ UI: dict[str, str] = {
     "order_aria_b": "Сила порядка {turnover} внутри страт у типов и у делений без типов",
     "order_best": "сильнейшее: {label}",
     "order_types": "типы {rho}",
-    "order_proxies": "Описание, не проверка",
+    "order_proxies": "Описание: заранее не проверяли",
     # глава 5
     "flows_a": "Тип в 2023 году",
     "flows_b": "Тип в 2024 году",
@@ -136,6 +136,11 @@ UI: dict[str, str] = {
     "flows_rel": "смена типа, обе половины года согласны",
     "flows_noise": "смена типа в пределах шума",
     "flows_hint": "Нажмите на поток или строку ниже — появится список его муниципалитетов.",
+    # порция 6k (check-ux): размеры типов в потоках и в легенде карты различаются — почему
+    "flows_sizes": (
+        "Числа у типов здесь — тип по каждому году отдельно; в легенде карты и в паспортах типов — тип по "
+        "всем 24 месяцам сразу, поэтому числа не совпадают."
+    ),
     "flows_aria": "Потоки муниципалитетов между типами 2023 и 2024 годов",
     "flows_item": "{a} → {b}: {n}",
     "flows_changes": "Смены типа",
@@ -260,7 +265,15 @@ def phone_pair(wide: str, phone: str) -> str:
 def _text(x: float, y: float, s: str, cls: str = "", anchor: str = "start", extra: str = "") -> str:
     c = f' class="{cls}"' if cls else ""
     a = f' text-anchor="{anchor}"' if anchor != "start" else ""
-    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}{extra}>{_e(s)}</text>'
+    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}{extra}>{_e(_nb(s))}</text>'
+
+
+def _nb(s: str) -> str:
+    """Типографика ru-text в подписях SVG (порция 6j): неразрывный пробел после однобуквенных слов и перед
+    тире — та же функция, что для HTML (``landing.nbsp``)."""
+    from munnet.landing import nbsp
+
+    return nbsp(str(s)) if s else s
 
 
 def _wrap(s: str, n: int) -> list[str]:
@@ -658,23 +671,30 @@ def ami_svg(ami: Sequence[Mapping], n: int = 8, W: float = 360) -> str:
     vmax = max(0.5, max(float(r["ami"] or 0) for r in rows)) * 1.05
     x0, x1 = (0 if stacked else lab_w + 6), W - 34
     g = []
+    y_extra = 0  # порция 6j: добавка высоты от подписей в две строки
     for i, r in enumerate(rows):
-        y = 4 + i * row
+        y = 4 + i * row + y_extra
         a = float(r["ami"] or 0)
         w = max(1.0, a / vmax * (x1 - x0))
         lab = str(r["label"])
         yb = y + (14 if stacked else 4)
-        if stacked:
-            n_ch = int(W / (11 * 0.56))
-            lab = lab if len(lab) <= n_ch else lab[: n_ch - 1] + "…"
-            g.append(_text(0, y + 10, lab, "lab"))
+        if stacked:  # порция 6j: длинная подпись — в две строки (было обрезано многоточием)
+            n_ch = int(W / (11 * 0.6))
+            lines = _wrap(lab, n_ch)
+            if len(lines) > 2:
+                lines = [lines[0], " ".join(lines[1:])]
+                lines[1] = lines[1] if len(lines[1]) <= n_ch else lines[1][: n_ch - 1] + "…"
+            for k, ln in enumerate(lines):
+                g.append(_text(0, y + 10 + 13 * k, ln, "lab"))
+            yb += 13 * (len(lines) - 1)
+            y_extra += 13 * (len(lines) - 1)
         else:
             lab = lab if len(lab) <= 34 else lab[:33] + "…"
             g.append(_text(lab_w, y + 14, lab, "lab", "end"))
         g.append(f'<rect x="{x0}" y="{yb}" width="{w:.1f}" height="12" fill="{ACCENT if i == 0 else INK2}"/>')
         g.append(_text(x0 + w + 4, yb + 10, _f(a, 2), "val"))
-    g.append(f'<line class="zero" x1="{x0}" x2="{x0}" y1="2" y2="{4 + len(rows) * row}"/>')
-    return _svg(W, 8 + len(rows) * row, "".join(g), UI["ami_aria"], "ch-svg ami")
+    g.append(f'<line class="zero" x1="{x0}" x2="{x0}" y1="2" y2="{4 + len(rows) * row + y_extra}"/>')
+    return _svg(W, 8 + len(rows) * row + y_extra, "".join(g), UI["ami_aria"], "ch-svg ami")
 
 
 def chapter_types(
@@ -1172,9 +1192,7 @@ def placebo_svg(runs: Sequence[Mapping], W: float = 360) -> str:
         g.append(_text(sx(v), y + 8, _f(v), "axis", "middle"))
     g.append(_text(x1, y + 22, UI["placebo_axis"], "axis", "end"))
     lab = "; ".join(
-        UI["placebo_aria"].format(
-            label=r["label"], obs=_f(r.get("observed") or 0), p95=_f(r.get("p95") or 0, 1)
-        )
+        UI["placebo_aria"].format(label=r["label"], obs=_f(r.get("observed") or 0), p95=_f(r.get("p95") or 0))
         for r in runs
     )
     return _svg(W, y + 28, "".join(g), lab, "ch-svg placebo")
@@ -1230,7 +1248,7 @@ def placebo_summary(t3: Mapping | None) -> str:
                 UI["placebo_sum_final_not"].format(
                     variant=VARIANT_WORDS.get(str(fin["run"]), str(fin["run"])),
                     obs=_f(fin["observed"]),
-                    p95=_f(fin.get("p95") or 0, 1),
+                    p95=_f(fin.get("p95") or 0),
                 )
             )
         if t3.get("unstable") and main.get("passed") and main.get("observed") is not None:
@@ -1267,6 +1285,7 @@ def dynamics_texts(tx: Mapping | None, t3: Mapping | None) -> dict[str, str] | N
         "fin_p95": _f(fin["p95"]),
     }
     out = {k: str(tx[k]) for k in ("title", "short", "lead")}
+    out |= {k: str(tx[k]) for k in ("sub", "limits_context") if tx.get(k)}
     lead = out["lead"].format(**vals).rstrip()
     out["lead"] = lead if lead.endswith((".", "!", "?", "…")) else lead + "."  # абзац — с точкой
     return out
@@ -1279,12 +1298,21 @@ def apply_dynamics(story: dict, dt: Mapping[str, str] | None, old_head: str) -> 
         return
     ch = story["chapters"]["dynamics"]
     ch["title"], ch["verdict"] = dt["title"], dt["lead"]
+    old_sub = ch.get("lead")
+    if dt.get("sub"):  # порция 6j: подзаголовок «Куда шли смены типа» читался как «смены были»
+        ch["lead"] = dt["sub"]
+    if dt.get("limits_context") and "limits" in story["chapters"]:  # строка перед дословным исходом T6
+        story["chapters"]["limits"]["context"] = dt["limits_context"]
     s0 = story["screen0"]
     if s0.get("lead") == old_head:
         s0["lead"] = dt["short"]
-    s0["point_heads"] = [
-        [dt["short"] if h == old_head else h for h in hs] for hs in s0.get("point_heads") or []
-    ]
+    heads = []
+    for hs in s0.get("point_heads") or []:
+        hs = [dt["short"] if h == old_head else h for h in hs]
+        if dt["short"] in hs:  # порция 6j: рядом с итогом нейтральный «Куда шли смены типа» не нужен
+            hs = [h for h in hs if h != old_sub] or hs
+        heads.append(hs)
+    s0["point_heads"] = heads
 
 
 def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
@@ -1349,7 +1377,7 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
             esc(r["label"] + (" — " + r["sub"] if r.get("sub") else "")),
             _f(r.get("observed") or 0),
             _f(r.get("median") or 0, 1),
-            _f(r.get("p95") or 0, 1),
+            _f(r.get("p95") or 0),
         ]
         for r in runs
     ]
@@ -1357,6 +1385,7 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
         '<figure class="ch-fig dyn-fig"><div class="dyn-grid">'
         f'<div class="dyn-flows">{svg}<ul class="type-key">{names}</ul>'
         f'<ul class="flow-key">{"".join(key)}</ul>'
+        f'<p class="note">{esc(UI["flows_sizes"])}</p>'
         f'<p class="hint">{esc(UI["flows_hint"])}</p>'
         f'<h3 class="flows-h">{esc(UI["flows_changes"])}</h3>'
         f'<ul class="flow-list" id="flow-list">{items}</ul>'

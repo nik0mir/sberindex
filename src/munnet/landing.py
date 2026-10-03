@@ -481,6 +481,11 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         if ok_if(ch["limits"]["title_if"])
         else H["descriptive"]["limits_neutral"]
     )
+    # порция 6j (check-ux): заголовок T7 — фактом с медианными ошибками (site.build.texts.comparable_title),
+    # и у главы 6, и в пункте первого экрана; иначе — заголовок словаря
+    t7_title = comparable_title(
+        (site["build"].get("texts") or {}).get("comparable_title"), t7, facts.get("t7") or {}
+    ) or _headline(H, "T7_utility", t7, vd)
     # после вскрытия (site.build.texts, §4.4): короткие заголовки пунктов — те же заголовки site.headlines,
     # что у глав (по тем же правилам показа); полные тексты пунктов — дословно под «Как проверяли»
     heads_by_test = {
@@ -488,7 +493,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "T3_reliable_placebo": _headline(H, "T3_reliable_placebo", t3, vd),
         "T5_trivial": _headline(H, "T5_trivial", t5, vd),
         "T2_direction": dyn_lead,
-        "T7_utility": _headline(H, "T7_utility", t7, vd),
+        "T7_utility": t7_title,
         "T6_bank_coverage": limits_title,
     }
     on_top = {s0["title"], s0["lead"]}  # уже стоят заголовком и подзаголовком экрана 0
@@ -522,6 +527,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "regions_note": regions_note(TX.get("regions_note"), numbers),
         "search_none": fill_if_all(TX.get("search_none"), numbers),
         "hero": hero_texts(cfg, TX.get("hero") or {}, scope, n_types),
+        "checked_title": TX.get("checked_title"),  # порция 6j: h2 «Что проверяли» при первом экране-карте
     }
     flows = P["t3_flows"][t3]
     n_set = int(it["tests"]["T7_utility"]["k"])
@@ -535,14 +541,16 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "layout_caption": None,  # TODO: {preserved} — из раскладки (site_layout, следующая порция)
         },
         "types": {
-            "title": _headline(H, "T5_trivial", t5, vd),
+            "title": types_title(TX.get("types_title"), t5, facts.get("t5") or {})
+            or _headline(H, "T5_trivial", t5, vd),
             "note": H["T4_basket_vs_place"]["describe"],
             "text": texts["T5_trivial"],
             "note_text": texts["T4_basket_vs_place"],
             "explain": types_explain((TX.get("types_explain") or {}).get(t5), facts.get("t5") or {}),
         },
         "order": {
-            "title": _headline(H, "T1_ladder_external", t1, vd),
+            "title": order_title(TX.get("order_title"), t1, facts.get("t1") or {}, vd)
+            or _headline(H, "T1_ladder_external", t1, vd),
             "text": texts["T1_ladder_external"] + facts.get("t1_notes", {}).get("T1_ladder_external", ""),
             "proxies": texts.get("T1_proxies", ""),
         },
@@ -553,7 +561,8 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "layer_name": flows["layer_name"],
         },
         "comparable": {
-            "title": _headline(H, "T7_utility", t7, vd),
+            "title": t7_title,
+            "abs_note": comparable_abs(TX.get("comparable_abs"), t7, facts.get("t7") or {}),
             "lead": _headline(H, "T7_type_gain", v["T7_type_gain"], vd),
             "text": texts["T7_utility"],
             "same_period": A["honesty"]["t7_same_period"],
@@ -584,7 +593,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "ministry": fill(R["ministry"][t7], f),
         "analysts": fill(an[t3], f) if (ok_if(an["show_if"]) and an[t3]) else None,
         "business": fill(R["business"]["text"], numbers),
-        "business_label": R["business"]["label"],
+        "business_label": TX.get("descr_label") or R["business"]["label"],  # порция 6j
         "examples": None,  # TODO: реальные МО по правилам roles.*.example (следующая порция)
     }
     view = build_view(cfg, facts, vd)
@@ -607,7 +616,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "caption": "Относительно своего региона",
         },
         "reliability_key": P["reliability_grammar"]["key"],
-        "stability_label": A["mo_stability"]["label"],
+        "stability_label": TX.get("descr_label") or A["mo_stability"]["label"],  # порция 6j
         "card": {  # строки карточки из site.build.texts (линтуются как текст сайта)
             "no_comparable": TX.get("no_comparable"),
             "shifted": TX.get("shifted"),
@@ -657,6 +666,55 @@ def types_explain(tpl: str | None, t5: Mapping) -> str | None:
     if not tpl or t5.get("max_ami") is None or not t5.get("max_label"):
         return None
     return fill(tpl, {"ami": style.fmt_num(float(t5["max_ami"]), 2), "max_label": str(t5["max_label"])})
+
+
+def comparable_title(tpl: str | None, verdict: str, t7: Mapping) -> str | None:
+    """Порция 6j (check-ux): h2 главы 6 при вердикте T7 ``not`` — факт с медианными ошибками (цель
+    относительно своего региона, ``facts.t7.median_error``): набор продукта против соседей по своему региону.
+    Только если у набора продукта ошибка больше; иначе None — заголовок словаря ``site.headlines``."""
+    p = t7.get("product")
+    rel = t7.get("median_error") or {}
+    if not tpl or verdict != "not" or not p or rel.get("B") is None or rel.get(p) is None:
+        return None
+    if not float(rel[p]) > float(rel["B"]):
+        return None
+    f3 = lambda v: style.fmt_num(float(v), 3)  # noqa: E731
+    return fill(tpl, {"p_rel": f3(rel[p]), "b_rel": f3(rel["B"])})
+
+
+def comparable_abs(tpl: str | None, verdict: str, t7: Mapping) -> str | None:
+    """Порция 6k: строка под h2 главы 6 — те же наборы без поправки на регион (``facts.t7.median_error_abs``),
+    как в совете «Что с этим делать». Только вместе с ``comparable_title`` (вердикт T7 ``not``)."""
+    p = t7.get("product")
+    ab = t7.get("median_error_abs") or {}
+    if not tpl or verdict != "not" or not p or ab.get("B") is None or ab.get(p) is None:
+        return None
+    f3 = lambda v: style.fmt_num(float(v), 3)  # noqa: E731
+    return fill(tpl, {"p_abs": f3(ab[p]), "b_abs": f3(ab["B"])})
+
+
+def types_title(tpl: str | None, verdict: str, t5: Mapping) -> str | None:
+    """Порция 6k (check-ux): короткий h2 главы 3 при вердикте T5 ``not_repeats`` — ближайшее деление без типов
+    и AMI (``facts.t5``); заголовок словаря остаётся пунктом раздела «Что проверяли». Иначе None."""
+    if not tpl or verdict != "not_repeats" or t5.get("max_ami") is None or not t5.get("max_label"):
+        return None
+    return fill(tpl, {"max_label": str(t5["max_label"]), "ami": style.fmt_num(float(t5["max_ami"]), 2)})
+
+
+def order_title(tpl: str | None, verdict: str, t1: Mapping, vd: Any) -> str | None:
+    """Порция 6k (check-ux): h2 главы 4 при вердикте T1 ``partial_overall`` без «— не доказано» в конце —
+    фактом, если у каждого оборота лучшее деление без типов упорядочено сильнее типов (``facts.t1.per``:
+    ``best_rival_rho`` > ``rho_b``). Обороты — то же поле, что у заголовка словаря. Иначе None."""
+    per = t1.get("per") or {}
+    if not tpl or verdict != "partial_overall" or not per:
+        return None
+    for r in per.values():
+        if r.get("best_rival_rho") is None or r.get("rho_b") is None:
+            return None
+        if not float(r["best_rival_rho"]) > float(r["rho_b"]):
+            return None
+    turn = (vd.of("T1_ladder_external") or {}).get("turnovers_overall")
+    return fill(tpl, {"turnovers": str(turn)}) if turn else None
 
 
 def comp_link(tpl: str | None, t7: Mapping) -> str | None:
@@ -721,6 +779,33 @@ def limits_key(tpl: Mapping | None, text: str, names: Mapping[str, str]) -> str 
     if "ε²" in text and tpl.get("eps"):
         bits.append(str(tpl["eps"]))
     return f"{tpl.get('label', 'Как читать')}: " + "; ".join(bits) if bits else None
+
+
+def t3_unstable_label(tpl: Mapping | None, runs: pd.DataFrame | None) -> str | None:
+    """Порция 6k (check-ux): пометка «неустойчиво» для T3 — только прогоны R1, где вердикт T3 ``not``
+    при вердикте основного расчёта выше (``r1_runs.csv``), словами ``robust.run_words``. Нет данных, слов
+    для прогона или основной расчёт тоже ``not`` — None (остаётся общая пометка)."""
+    if not tpl or not tpl.get("unstable_t3") or runs is None or runs.empty:
+        return None
+    t = runs[runs["test"] == "T3_reliable_placebo"]
+    main = t.loc[t["run"] == "main", "verdict"]
+    if main.empty or main.iloc[0] == "not":
+        return None
+    words = tpl.get("run_words") or {}
+    where: list[str] = []
+    kinds = (
+        r"^(?:variant|tracking|seed):"  # прогоны R1; строки итога («итог (main_text: lowest)») — не прогоны
+    )
+    for run in t.loc[(t["verdict"] == "not") & t["run"].astype(str).str.match(kinds), "run"]:
+        w = words.get(str(run)) or words.get(str(run).split(":")[0])
+        if not w:
+            return None
+        if w not in where:
+            where.append(w)
+    if not where:
+        return None
+    joined = where[0] if len(where) == 1 else ", ".join(where[:-1]) + " и " + where[-1]
+    return fill(tpl["unstable_t3"], {"where": joined})
 
 
 def robust_texts(tpl: Mapping | None, r1: Mapping, variants: Sequence[Mapping] | None) -> dict[str, str]:
@@ -1354,9 +1439,42 @@ def first_screen_svg(d: SiteData, hm: HexMap, hexgrid: Mapping, mo: pd.DataFrame
                 break
     lab.append("</g>")
     parts += lab
+    parts += phone_cities(hexgrid["cities"], g.width, g.height)
     parts += callouts(d, hm, mo, story, taken)
     parts.append("</svg>")
     return "".join(parts)
+
+
+def phone_cities(cities: Sequence[Mapping], w: float, h: float, n: int = 6, px: float = 351) -> list[str]:
+    """Порция 6j (check-ux): подписи городов плоской карты для телефона — до ``n`` крупнейших
+    (порядок ``hexgrid.cities`` — по населению) на белой плашке, кегль 13 px при ширине карты ``px``
+    (375 px экрана минус поля); пересекающиеся плашки пропускаются. Показывает только CSS на ширине
+    ≤ 599 px без увеличения карты."""
+    u = w / px  # единиц viewBox на пиксель экрана
+    fs, pad, hh = 13 * u, 4 * u, 20 * u
+    out = ['<g class="cities-ph" aria-hidden="true">']
+    taken: list[tuple[float, float, float, float]] = []
+    for c in cities:
+        if len(taken) >= n:
+            break
+        bw = len(c["name"]) * fs * 0.58 + 2 * pad
+        # плашка над городом, иначе под ним; обе заняты или вне карты — город без подписи
+        for y1 in (c["y"] - 3 * u, c["y"] + 3 * u + hh):
+            box = (c["x"] - bw / 2, y1 - hh, c["x"] + bw / 2, y1)
+            if box[0] < 0 or box[1] < 0 or box[2] > w or box[3] > h:
+                continue
+            if any(not (box[2] < a or box[0] > cc or box[3] < b or box[1] > e) for a, b, cc, e in taken):
+                continue
+            taken.append(box)
+            out.append(
+                f'<rect x="{box[0]:.1f}" y="{box[1]:.1f}" width="{bw:.1f}" height="{hh:.1f}" '
+                f'rx="{3 * u:.1f}"/>'
+                f'<text x="{c["x"]:.1f}" y="{y1 - 6 * u:.1f}" text-anchor="middle" font-size="{fs:.1f}">'
+                f"{_esc(c['name'])}</text>"
+            )
+            break
+    out.append("</g>")
+    return out
 
 
 CHAR_W = 6.6  # ширина знака подписи 11 px с запасом, оценка для раскладки подписей
@@ -1738,7 +1856,10 @@ def useful_texts(
         "flag": site_useful.flag_summary(border.get("flag", ""), border.get("flag_most") or {}, uf)
         if border.get("flag")
         else None,
-        "flag_label": str(uf.get("label") or cfg["usefulness"]["type_flag"]["label"]),
+        # порция 6j: плашка — site.build.texts.descr_label (значение usefulness.type_flag.label не меняется)
+        "flag_label": str(
+            tx.get("descr_label") or uf.get("label") or cfg["usefulness"]["type_flag"]["label"]
+        ),
     }
 
 
@@ -2364,7 +2485,10 @@ def screen0_html(
     # порция 5a: h1 страницы — заголовок первого экрана (site.build.texts.hero.title); заголовок по T1
     # остаётся    # заголовком раздела «Что проверяли» (h2) и главы 4
     tag = "h2" if s0.get("hero") else "h1"
-    head.append(f'<{tag} id="answer-title" class="answer-h">{_t(s0["title"])}</{tag}>')
+    # порция 6j: при первом экране-карте h2 раздела «Что проверяли» — свой (hero.checked_title), заголовок T1
+    # остаётся у главы 4 (иначе два одинаковых h2)
+    h_title = s0.get("checked_title") if s0.get("hero") else None
+    head.append(f'<{tag} id="answer-title" class="answer-h">{_t(h_title or s0["title"])}</{tag}>')
     head.append(f'<p class="lead" id="answer-lead">{_t(s0["lead"])}</p>')
     head += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, [s0["title"], s0["lead"]])]
     out["answer_head"] = "\n".join(head)
@@ -2466,6 +2590,19 @@ def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[
         f'<p class="h0-kicker" id="hero-kicker">{_t(hx.get("kicker", ""))}</p>'
         f'<h1 id="hero-title">{_t(hx.get("title") or s0["title"])}</h1>'
         + (f'<p class="h0-why" id="hero-why">{_t(_dot(hx["why"]))}</p>' if hx.get("why") else "")
+        # порция 6j (check-ux): что такое тип и почему верить — на телефоне сразу под «зачем»
+        + (
+            f'<p class="h0-brief" id="hero-brief">{_t(_dot(hx["brief"]))}'
+            # порция 6k: совет с оговоркой «нашли, уже видя результаты» — только на телефоне (CSS .h0-ph)
+            + (
+                f' <span class="h0-ph">{_t(_dot(hx["brief_advice"]))}</span>'
+                if hx.get("brief_advice")
+                else ""
+            )
+            + "</p>"
+            if hx.get("brief")
+            else ""
+        )
         # порция 6i (judge-c6 № 3): на телефоне поиск ниже карты — заметная ссылка к нему сразу под «зачем»
         + (
             f'<a class="h0-findlink" id="hero-find" href="#find">{_t(hx["find_link"])}</a>'
@@ -2824,7 +2961,11 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         if bad:
             raise QCError("site: флаг «крупный»: " + "; ".join(bad))
         large = site_size.large_ids(size_in["by_mo"])
-        mo["lg"] = mo["node"].map(lambda n: 1 if pd.notna(n) and int(n) in large else None)
+        base = {int(i) for i in size_in["by_mo"]["territory_id"]}
+        # порция 6j: 0 — узел базы, не крупный; None — узла нет в size_by_mo (карточка решает по населению)
+        mo["lg"] = mo["node"].map(
+            lambda n: (1 if int(n) in large else 0 if int(n) in base else None) if pd.notna(n) else None
+        )
     bad = check_var_counts(mo[mo["role"].isin(["territorial", "city"])])
     if bad:
         raise QCError(
@@ -2839,6 +2980,9 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         facts.get("r1") or {},
         (checks.get("r1") or {}).get("variants"),
     )
+    t3_lab = t3_unstable_label((cfg["site"]["build"].get("texts") or {}).get("robust"), d.opt("r1_runs.csv"))
+    if t3_lab:  # порция 6k: пометка называет прогоны, в которых вывод T3 меняется (r1_runs.csv)
+        robust["unstable_label"] = t3_lab
     if robust.get("unstable_label"):
         story["view"]["unstable_label"] = robust["unstable_label"]
         checks["r1"]["unstable_label"] = robust["unstable_label"]
@@ -2901,7 +3045,6 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         if size_t is not None:
             site_size.check_rows(size_t)
             useful["size"] = size_t
-            story["card"]["large_note"] = site_size.card_note(tx.get("size") or {}, size_t)
     ft = site_findings.findings_texts(tx.get("findings") or {}, story, facts, checks, useful)
     if useful_in is not None and ft is None:
         log.warning("site: блок «Что устояло» не собран — доля случаев и пример пользы не показаны")
@@ -2923,6 +3066,10 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
             },
         )
     )
+    if size_t is not None:  # порция 6j: строки карточки «С кем сверять» — как совет по размеру
+        story["card"].update(
+            site_size.card_notes(tx.get("size") or {}, size_t, n_shown=int(cfg["site"]["n_similar_shown"]))
+        )
     ptx = tx.get("passports")
     bad = lint_texts(
         cfg,

@@ -204,10 +204,10 @@ UI: dict[str, str] = {
         "Одинаковые названия бывают в разных регионах: их различает регион."
     ),
     "all_note": (
-        "Устойчивость: «тип устойчив» — тот же тип во всех вариантах расчёта и повторах с другим начальным "
-        "числом; смену типа между годами показывают колонки 2023 и 2024. Тип, итог 2023–2024 — по всем 24 "
-        "месяцам сразу; 2023 и 2024 — тип по каждому году отдельно. У районов Москвы и Петербурга тип "
-        "и годы — города целиком."
+        "Устойчивость: «тип устойчив» — тот же тип во всех вариантах расчёта и повторах с другим случайным "
+        "начальным значением; смену типа между годами показывают колонки 2023 и 2024. Тип, итог "
+        "2023–2024 — по всем 24 месяцам сразу; 2023 и 2024 — тип по каждому году отдельно. У районов Москвы "
+        "и Петербурга тип и годы — города целиком."
     ),
     "all_nojs": "Таблица строится в браузере. Без JavaScript её можно скачать одним файлом:",
     "all_nojs_tail": "UTF-8, открывается в Excel.",
@@ -656,6 +656,8 @@ def chapter_comparable(
     if ch.get("lead"):
         text += f'<p class="sub">{esc(ch["lead"])}</p>'
     k = (t7 or {}).get("k") or ""
+    if ch.get("abs_note"):  # порция 6k: та же пара наборов без поправки на регион, как в совете
+        text += f'<p class="sub">{esc(_dot_end(ch["abs_note"]))}</p>'
     text += f"<p>{esc(UI['comp_read'].format(k=k))}</p>"
     if ch.get("same_period"):
         text += f'<p class="note">{esc(ch["same_period"])}.</p>'
@@ -824,9 +826,16 @@ def _pct0(x: float) -> str:
 def chapter_limits(story: Mapping, checks: Mapping, geo: Mapping | None, esc: Esc) -> str:
     ch = story["chapters"]["limits"]
     text = f'<p class="outcome">{esc(ch["text"])}</p>' if ch.get("text") else ""
-    if ch.get("key"):  # порция 6e: «как читать» — типы названиями, МО, ε² (текст исхода выше — дословно)
+    if ch.get("context") and text:  # порция 6j: перед дословным исходом T6 — что смена типа не подтверждена
+        # порция 6k: «как читать» (типы названиями, МО, ε²) — тоже до текста исхода
+        key = f'<p class="explain">{esc(_dot_end(ch["key"]))}</p>' if ch.get("key") else ""
+        text = f'<p class="sub">{esc(_dot_end(ch["context"]))}</p>' + key + text
+    elif ch.get("key"):  # порция 6e: «как читать» — типы названиями, МО, ε² (текст исхода выше — дословно)
         text += f'<p class="explain">{esc(_dot_end(ch["key"]))}</p>'
+    out_text = str(ch.get("text") or "")
     for x in ch.get("lead") or []:
+        if str(x).rstrip(".") in out_text:  # порция 6k: строка уже есть в тексте исхода — не повторять
+            continue
         text += f'<p class="sub">{esc(x)}.</p>'
     items = [(UI[f"lim_{k}"], v) for k, v in (ch.get("items") or {}).items() if v and f"lim_{k}" in UI]
     if items:

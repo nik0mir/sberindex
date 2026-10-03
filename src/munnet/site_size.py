@@ -198,7 +198,12 @@ def size_texts(
         key = "large_caveat" if dhi >= 0 else "large_caveat_below"
         if tx.get(key):
             caveat = _fill(
-                tx[key], {"d_lo": style.fmt_num(dlo, 1, sign=True), "d_hi": style.fmt_num(dhi, 1, sign=True)}
+                tx[key],
+                {
+                    "d_lo": style.fmt_num(dlo, 1, sign=True),
+                    "d_hi": style.fmt_num(dhi, 1, sign=True),
+                    "small_share": vals["small_share"],  # порция 6j: «56,3% против 50% при равной точности»
+                },
             )
     labels = group_labels(sc["quintile_bounds"])
     rows = [
@@ -259,14 +264,29 @@ def size_texts(
         "ref": tx["ref"],
         "rows": rows,
         "threshold": vals["threshold"],
+        "small_share": vals["small_share"],
+        "share": vals["share"],
+        "k": vals["k"],
+        "large_pop": bound,
     }
 
 
-def card_note(tx: Mapping, st: Mapping | None) -> str:
-    """Строка карточки для крупного МО (под списком похожих по тратам в других регионах)."""
-    if not st or not tx.get("card_large"):
-        return ""
-    return _fill(tx["card_large"], {"threshold": st["threshold"]})
+def card_notes(tx: Mapping, st: Mapping | None, n_shown: int = 5) -> dict[str, Any]:
+    """Порция 6j (check-ux): строки карточки «С кем сверять» — как совет по размеру. ``simb_note`` — для МО
+    меньше порога, ``simb_note_large`` — для крупных (порог ``large_pop``, флаг ``lg`` в ``mo.json``);
+    прежние строки о рознице под списком похожих (``sim_note``) и строка «крупный» (``large_note``)
+    снимаются — их смысл теперь в строке над списками. Нет текстов — пустой словарь (строки карточки
+    как в порции 6d)."""
+    if not st or not tx.get("card_small") or not tx.get("card_large"):
+        return {}
+    f = {k: st[k] for k in ("threshold", "small_share", "share", "k")} | {"n_shown": style.fmt_num(n_shown)}
+    return {
+        "simb_note": _fill(tx["card_small"], f),
+        "simb_note_large": _fill(tx["card_large"], f),
+        "sim_note": "",
+        "large_note": "",
+        "large_pop": float(st["large_pop"]),
+    }
 
 
 def strings(st: Mapping | None, card: str = "") -> list[str]:
@@ -285,7 +305,15 @@ def strings(st: Mapping | None, card: str = "") -> list[str]:
 def _text(x: float, y: float, s: str, cls: str = "", anchor: str = "start") -> str:
     c = f' class="{cls}"' if cls else ""
     a = f' text-anchor="{anchor}"' if anchor != "start" else ""
-    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}>{_e(s)}</text>'
+    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}>{_e(_nb(s))}</text>'
+
+
+def _nb(s: str) -> str:
+    """Типографика ru-text в подписях SVG (порция 6j): неразрывный пробел после однобуквенных слов и перед
+    тире — та же функция, что для HTML (``landing.nbsp``)."""
+    from munnet.landing import nbsp
+
+    return nbsp(str(s)) if s else s
 
 
 def size_svg(st: Mapping, W: float = 440) -> str:

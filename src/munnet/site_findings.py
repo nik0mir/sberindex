@@ -59,7 +59,15 @@ def _svg(w: float, h: float, body: str, label: str, cls: str) -> str:
 def _text(x: float, y: float, s: str, cls: str = "", anchor: str = "start") -> str:
     c = f' class="{cls}"' if cls else ""
     a = f' text-anchor="{anchor}"' if anchor != "start" else ""
-    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}>{_e(s)}</text>'
+    return f'<text x="{x:.1f}" y="{y:.1f}"{c}{a}>{_e(_nb(s))}</text>'
+
+
+def _nb(s: str) -> str:
+    """Типографика ru-text в подписях SVG (порция 6j): неразрывный пробел после однобуквенных слов и перед
+    тире — та же функция, что для HTML (``landing.nbsp``)."""
+    from munnet.landing import nbsp
+
+    return nbsp(str(s)) if s else s
 
 
 def rel_text(v: float | None) -> str:
@@ -163,8 +171,9 @@ def findings_texts(
     t1 = t1_numbers(facts, checks)
     t7 = t7_numbers(checks)
     shares = r1_shares(checks)
-    if t1 is None or t7 is None or not shares:
-        return None
+    t5 = facts.get("t5") or {}
+    if t1 is None or t7 is None or not shares or t5.get("max_ami") is None or not t5.get("max_label"):
+        return None  # порция 6j: строка «Где граница» говорит AMI ближайшего деления — без него блока нет
     low = shares[0]  # вариант с наименьшей долей «тот же тип»; все варианты — на графике
     variants = _fill(tx["border"]["variant"], {"what": low["what"], "pct": style.fmt_pct(low["share"], 1)})
     t3_head = _dot(str((story.get("screen0") or {}).get("lead") or ""))
@@ -201,7 +210,15 @@ def findings_texts(
         },
         "border": {
             **{k: tx["border"][k] for k in ("label", "title", "chart")},
-            "text": _fill(tx["border"]["text"], {"variants": variants, "t3_head": t3_head})
+            "text": _fill(
+                tx["border"]["text"],
+                {"variants": variants, "t3_head": t3_head}
+                # порция 6j: «почти ничего не добавляют» → ближайшее деление и AMI из facts.t5
+                | {
+                    "ami": _f(float(t5["max_ami"]), 2),
+                    "ami_label": str(t5["max_label"]),
+                },
+            )
             # порция 6e (check-ux): что такое плацебо — одной фразой после заголовка T3, если он о плацебо
             + (
                 " " + _dot(str(tx["border"]["placebo"]))
