@@ -16,6 +16,9 @@ from munnet import usefulness_by_type as B
 from munnet.config import Config, load_config
 from munnet.contracts import QCError
 
+# сквозные тесты usefulness.run на синтетике: справка usefulness_level (входы кластеризации) — заглушка
+pytestmark = pytest.mark.usefixtures("stub_usefulness_level")
+
 BLOCK = load_config()["usefulness"]["by_type_test"]
 HIGH, LOW = [3, 4], [1, 2]
 

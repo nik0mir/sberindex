@@ -18,6 +18,9 @@ from munnet import usefulness_size as Z
 from munnet.config import load_config
 from munnet.contracts import QCError
 
+# сквозные тесты usefulness.run на синтетике: справка usefulness_level (входы кластеризации) — заглушка
+pytestmark = pytest.mark.usefixtures("stub_usefulness_level")
+
 BLOCK = load_config()["usefulness"]["size_posthoc"]
 
 

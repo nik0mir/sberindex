@@ -15,6 +15,9 @@ from munnet import usefulness as U
 from munnet.config import Config, load_config
 from munnet.contracts import MissingInputError, QCError
 
+# сквозные тесты usefulness.run на синтетике: справка usefulness_level (входы кластеризации) — заглушка
+pytestmark = pytest.mark.usefixtures("stub_usefulness_level")
+
 WORDS = {
     "more_often": "чаще, чем нет",
     "about_half": "примерно в половине случаев",
