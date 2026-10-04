@@ -162,6 +162,7 @@ def findings_texts(
     checks: Mapping,
     useful: Mapping | None = None,
     level: Mapping | None = None,
+    icvi: Mapping | None = None,
 ) -> dict[str, Any] | None:
     """Тексты блока с подставленными числами; None — блок не показывается (вердикты не те, что в
     ``requires``, или числовое условие не выполнено). ``useful`` (порция 6b, ``site_useful``) — доля случаев,
@@ -232,6 +233,8 @@ def findings_texts(
                 if tx["border"].get("placebo") and "плацебо" in t3_head.lower()
                 else ""
             ),
+            # порция 6m (совет 04.10): разделение типов в сети корзин и в признаках (report_facts)
+            **sep_texts(tx["border"].get("sep"), icvi),
             **(
                 {"flag": border_flag, "flag_label": (useful or {}).get("flag_label", "")}
                 if border_flag
@@ -243,6 +246,30 @@ def findings_texts(
         "_t7": t7,
         "_shares": shares,
         "_example": (useful or {}).get("example"),
+        "_example_small": (useful or {}).get("example_small"),  # порция 6m: пример под советом
+    }
+
+
+def sep_texts(tpl: str | None, icvi: Mapping | None) -> dict[str, str]:
+    """Порция 6m (совет 04.10): «по корзине трат типы разделены…, по уровню трат и экономике места чётких
+    границ нет» — доля силы связей внутри типа (AVI итога и её случайный базис) и силуэт итога из
+    ``outputs/evaluate/report_facts.json`` (``icvi.final_avi``, ``icvi.final_avi_base``, ``icvi.final_sw``).
+    Нет шаблона или чисел — пусто."""
+    keys = ("icvi.final_avi", "icvi.final_avi_base", "icvi.final_sw")
+    if not tpl or not icvi or any((icvi.get(k) or {}).get("value") is None for k in keys):
+        return {}
+    val = lambda k: float(icvi[k]["value"])  # noqa: E731
+    sw = icvi["icvi.final_sw"].get("text") or _f(val("icvi.final_sw"), 3)
+    return {
+        "sep": _fill(
+            str(tpl),
+            {
+                "avi": style.fmt_pct(val("icvi.final_avi"), 0),
+                "base": style.fmt_pct(val("icvi.final_avi_base"), 0),
+                "sw": str(sw),
+                "k": _f(int(icvi.get("knn_k") or 10)),
+            },
+        )
     }
 
 
@@ -331,6 +358,10 @@ def _shape(t: int, x: float, y: float, r: float, color: str, shapes: Mapping) ->
     return f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{color}" stroke="#fff" stroke-width="1"/>'
 
 
+LOG_AXIS = "логарифмическая шкала: ×2 — вдвое больше, чем в регионе"
+LOG_AXIS_SHORT = "логарифмическая шкала"  # телефон: холст 320
+
+
 def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str, W: float = 440) -> str:
     """Медианы розничного оборота на жителя по типам к своему региону (лог-шкала, подписи «×0,75»):
     строки — как в главе 4 при ``t1_layout`` (снизу вверх по ``ladder.order``), линия по ``line_by_turnover``
@@ -350,13 +381,16 @@ def retail_svg(story: Mapping, order: Sequence[int], t1: Mapping, title: str, W:
     vals = [v for v in med.values() if v is not None]
     lo, hi = min([lo, *vals]) - 0.05, max([hi, *vals]) + 0.05
     sx = lambda v: x0 + (v - lo) / (hi - lo) * (x1 - x0)  # noqa: E731
-    H = top + row * len(rows_top) + 22
+    H = top + row * len(rows_top) + 40  # порция 6m: ещё строка — подпись логарифмической шкалы
     g = []
     for m, s in ((0.5, "×0,5"), (1.0, "×1"), (2.0, "×2")):
         x = sx(math.log(m))
         stroke = f'stroke="{INK2}" stroke-dasharray="2 2"' if m == 1 else f'stroke="{RULE}"'
         g.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{top}" y2="{top + row * len(rows_top)}" {stroke}/>')
         g.append(_text(x, top + row * len(rows_top) + 15, s, "axis", "middle"))
+    # порция 6m (совет 04.10, judge-c6): подпись шкалы прямо у оси
+    ya = top + row * len(rows_top) + 33
+    g.append(_text(x0, ya, LOG_AXIS_SHORT, "axis") if stacked else _text(x1, ya, LOG_AXIS, "axis", "end"))
     pts = []
     holes = []  # порция 6i: на телефоне подпись типа над точкой — линия медиан под подписью прерывается
     for j, t in enumerate(rows_top):
@@ -459,6 +493,8 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
             note = _dot(p["note"]) + (" " + _dot(p["rules"]) if p.get("rules") else "")
             extra = f'<p class="fd-cap">{esc(_dot(p["chart"]))}</p><p class="fd-note">{esc(note)}</p>'
         body = f"<p>{esc(_dot(p['text']))}</p>"
+        if key == "border" and p.get("sep"):  # порция 6m: разделение типов в сети корзин и в признаках
+            body += f'<p class="fd-sep">{esc(_dot(p["sep"]))}</p>'
         if key == "stood" and p.get("level"):  # порция 6l: ρ уровня трат рядом с ρ типов, с меткой
             lab = f' <span class="label-note">{esc(p["level_label"])}</span>' if p.get("level_label") else ""
             body += f'<p class="fd-level">{esc(_dot(p["level"]))}{lab}</p>'
@@ -469,7 +505,13 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
         if key == "use" and p.get(
             "size"
         ):  # порция 6f: два совета по размеру; розница — под «Где нашли совет»
-            cols.append(_use_size_html(p, body, fig, extra, esc))
+            old = ""
+            if ft.get("_example_small") and ft.get("_example"):  # порция 6m: прежний пример — к рознице
+                from munnet import site_useful as _su
+                from munnet.site_chapters import phone_pair as _pp
+
+                old = _su.example_html(ft["_example"], esc, _pp, PHONE_W, dom_id="use-example-retail")
+            cols.append(_use_size_html(p, body, fig, extra + old, esc))
             continue
         cols.append(
             f'<div class="fd fd-{key}" id="fd-{key}"><p class="fd-lab">{esc(p["label"])}</p>'
@@ -479,7 +521,10 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
     from munnet import site_useful
     from munnet.site_chapters import phone_pair
 
-    example = site_useful.example_html(ft.get("_example"), esc, phone_pair, PHONE_W)
+    # порция 6m: под советом — пример небольшого МО (usefulness.example_small); прежний пример (розница,
+    # Йошкар-Ола) — в раскрывающемся «Где нашли совет»
+    small = site_useful.example_small_html(ft.get("_example_small"), esc)
+    example = small or site_useful.example_html(ft.get("_example"), esc, phone_pair, PHONE_W)
     return (
         '<section class="findings5" id="findings" aria-labelledby="findings-title">'
         f'<h2 id="findings-title">{esc(ft["title"])}</h2>'
@@ -506,6 +551,7 @@ def _use_size_html(p: Mapping, body: str, fig: str, extra: str, esc: Esc) -> str
     chart = _pair(lambda w: site_size.size_svg(st, w))
     # 03.10 (совет судей): исход проверки по типам и то, что крупные МО — почти те же типы 3–4, одним абзацем
     bytype = _dot(st["by_type"]) + (" " + _dot(st["types_size"]) if st.get("types_size") else "")
+    bytype += " " + _dot(st["type_perm"]) if st.get("type_perm") else ""  # порция 6m: p перестановки
     return (
         f'<div class="fd fd-use" id="fd-use"><p class="fd-lab">{esc(p["label"])}</p>'
         f"<h3>{esc(p['title'])}</h3>{advice}"
@@ -526,7 +572,7 @@ def card_texts(
         return {}
     t7 = t7_numbers(checks)
     keys = ("simb_title", "sim_title", "stability", "sim_from", "net_title", "net_toggle", "arcs_default",
-            "arcs_net")  # fmt: skip
+            "arcs_net", "type_note", "basket_scale")  # fmt: skip
     out = {k: str(tx[k]) for k in keys if tx.get(k)}
     if tx.get("net_note") and k_net:
         out["net_note"] = _fill(tx["net_note"], {"k": _f(k_net)})

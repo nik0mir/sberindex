@@ -256,6 +256,8 @@ def site_numbers(cfg: Config) -> dict[str, str]:
     regions = (
         {
             "n_incomplete": f"{len(inc)} {plural_ru(len(inc), 'регионе', 'регионах', 'регионах')}",
+            # порция 6m: именительный падеж для подзаголовка первого экрана («Ещё 4 региона в данных есть…»)
+            "n_regions_incomplete": f"{len(inc)} {plural_ru(len(inc), 'регион', 'региона', 'регионов')}",
             "incomplete": ", ".join(inc),
             "n_absent": f"{n_abs} {plural_ru(n_abs, 'региона', 'регионов', 'регионов')}",
             "absent": str((ef.get("e1.absent_regions") or {}).get("text") or ""),
@@ -545,6 +547,10 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "hero": hero_texts(cfg, TX.get("hero") or {}, scope, n_types),
         "checked_title": TX.get("checked_title"),  # порция 6j: h2 «Что проверяли» при первом экране-карте
     }
+    # порция 6m (совет 04.10): почему регионов 73, а не 77 — коротко в подзаголовке первого экрана
+    kn = fill_if_all((TX.get("hero") or {}).get("kicker_note"), numbers)
+    if kn and screen0.get("hero") and screen0["hero"].get("kicker"):
+        screen0["hero"]["kicker"] = f"{screen0['hero']['kicker']}. {kn}"
     flows = P["t3_flows"][t3]
     n_set = int(it["tests"]["T7_utility"]["k"])
     chapters = {
@@ -568,7 +574,14 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "title": order_title(TX.get("order_title"), t1, facts.get("t1") or {}, vd)
             or _headline(H, "T1_ladder_external", t1, vd),
             "text": texts["T1_ladder_external"] + facts.get("t1_notes", {}).get("T1_ladder_external", ""),
-            "proxies": texts.get("T1_proxies", ""),
+            # порция 6m (совет 04.10, блокер): «по ступеням снизу вверх» из шаблона proxy_item нарушает правку
+            # T1 partial_overall («слов „ступени“ и „лестница“ нет») — на сайте порядок назван типами
+            "proxies": site_proxies(
+                texts.get("T1_proxies", ""),
+                t1,
+                [str(facts["names_final"].get(str(t), t)) for t in facts["ladder"]["order"]],
+                TX.get("proxies_order"),
+            ),
         },
         "dynamics": {
             "title": _headline(H, "T3_reliable_placebo", t3, vd),
@@ -675,6 +688,17 @@ def level_rho_load(cfg: Config, rel: str | None, mode_name: str = "normal") -> d
     return lv
 
 
+def report_facts(cfg: Config, mode_name: str = "normal") -> dict | None:
+    """Порция 6m: числа этапа evaluate (``outputs/evaluate/report_facts.json``) для строки «по корзине трат
+    типы разделены…» в «Где граница». Необязательный вход: нет файла или режим не обычный — None."""
+    path = cfg.dir("outputs") / "evaluate" / "report_facts.json"
+    if mode_name != "normal" or not path.exists():
+        return None
+    out = json.loads(path.read_text(encoding="utf-8"))
+    out["knn_k"] = int(cfg["network"]["sparsify"]["k"])  # «с 10 самыми похожими» — разрежение основной сети
+    return out
+
+
 def run_pre(tpl: str | None, facts: Mapping, tests: Sequence[str]) -> list[str | None] | None:
     """Порция 6l, третий круг (check-ux 04.10): своя строка перед дословным текстом T2 основного расчёта —
     разложение смен типа «вверх» и «вниз» (``facts.t2.main``: n_up, n_down). Сумма должна равняться числу смен
@@ -735,7 +759,8 @@ def hero_texts(cfg: Config, tx: Mapping[str, str], scope: Mapping, n_types: int)
         "n_cells": style.fmt_num(n_cells) if n_cells else "",
         "n_untyped": style.fmt_num(int(scope.get("n_untyped") or 0)),
     }
-    return {k: fill(str(v), vals) for k, v in tx.items() if k != "island_note"}
+    # island_note — шаблон подписей островов; kicker_note — дописывает story() с числами site_numbers (6m)
+    return {k: fill(str(v), vals) for k, v in tx.items() if k not in ("island_note", "kicker_note")}
 
 
 def fill_if_all(tpl: str | None, vals: Mapping[str, str]) -> str | None:
@@ -750,6 +775,47 @@ def types_explain(tpl: str | None, t5: Mapping) -> str | None:
     if not tpl or t5.get("max_ami") is None or not t5.get("max_label"):
         return None
     return fill(tpl, {"ami": style.fmt_num(float(t5["max_ami"]), 2), "max_label": str(t5["max_label"])})
+
+
+LADDER_PHRASE = " по ступеням снизу вверх"
+
+
+def page_stems(cfg: Config, story: Mapping, payloads: Mapping[str, bytes]) -> list[str]:
+    """Порция 6m (совет 04.10): основы «ступен» и «лестниц» запрещены на всей странице — в видимом тексте,
+    встроенном JSON и файлах data/*.json, включая дословные тексты этапа 5, — если их не разрешает вердикт
+    (``site.forbidden_words.by_verdict``). Основа ищется в начале слова: «доступен» не считается."""
+    by = cfg["site"]["forbidden_words"]["by_verdict"]
+    v = dict(story["verdicts"])
+    bad = []
+    for stem in ("ступен", "лестниц"):
+        cond = by.get(stem) or {}
+        if all(v.get(t) in lv for t, lv in cond.items()):
+            continue
+        rx = re.compile(rf"(?<![а-яё]){stem}", re.IGNORECASE)
+        for name, b in payloads.items():
+            if name == "index.html" or (name.startswith("data/") and name.endswith(".json")):
+                m = rx.search(b.decode("utf-8", "replace"))
+                if m:
+                    t = b.decode("utf-8", "replace")
+                    bad.append(f"«{stem}» в {name}: …{t[max(0, m.start() - 40) : m.end() + 40]}…")
+    return bad
+
+
+def site_proxies(text: str, verdict: str, names: Sequence[str], tpl: str | None) -> str:
+    """Порция 6m (совет 04.10): описание заместителей места T1 (``facts.texts.T1_proxies``, шаблон
+    ``interpret…proxies.proxy_item`` — «… по ступеням снизу вверх — …») без слова «ступени», если вердикт T1
+    не ``confirmed`` (правка исхода запрещает «ступени» и «лестницу» на лендинге): фраза убирается из каждого
+    элемента, порядок типов называется один раз в начале (``site.build.texts.proxies_order``, типы в порядке
+    ``facts.ladder.order``). Числа и порядок значений те же. При ``confirmed`` или без шаблона — текст
+    как есть."""
+    if verdict == "confirmed" or not tpl or LADDER_PHRASE not in text:
+        return text
+    body = text.replace(LADDER_PHRASE, "")
+    head, sep, rest = body.partition(": ")
+    if not sep:
+        return text
+    order = " → ".join(f"«{n}»" for n in names)
+    return f"{head} {fill(str(tpl), {'order': order})}: {rest}"
 
 
 def comparable_title(tpl: str | None, verdict: str, t7: Mapping) -> str | None:
@@ -2609,6 +2675,10 @@ def screen0_html(
         body = "".join(f"<p>{_t(x)}</p>" for x in cav) + "".join(
             f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, cav)
         )
+        # порция 6m (check-ux 03.10): в дословной оговорке типы — номерами; «Как читать» — как в главе 7
+        lkey = (story["chapters"].get("limits") or {}).get("key")
+        if lkey and re.search(r"\bтип(а|ов|ы)? [1-4]\b", " ".join(cav)):
+            body = f'<p class="explain">{_t(_dot(lkey))}</p>' + body
         notes.append(
             f'<div class="caveat"><p><b>{_t(lab.get("caveat_label", "Оговорка"))}.</b> '
             f"{_t(_dot(s0.get('caveat_head') or ''))}</p>"
@@ -3108,7 +3178,8 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     if scene is not None and flag_codes:  # подсказка объёмной карты: флаг после типа (порция 6b)
         scene["cells"]["f"] = [flag_codes.get(int(i)) for i in scene["cells"]["id"]]
     methods = build_methods(d)
-    story["meta"]["pending"] = ["geo.json", "munnet_landing.pdf"]
+    # порция 6m (совет 04.10): «pending» убран — PDF не делаем, geo.json страница не загружает
+    # (полигоны не нужны: карты — равные ячейки из hexgrid.json и scene.json)
     story["meta"]["type_source"] = d.type_source
     meta = {
         "seed": cfg["seed"],
@@ -3145,6 +3216,14 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         )
         if size_t is not None:
             site_size.check_rows(size_t)
+            # порция 6m, второй круг: пример совета небольшим и средним МО (usefulness.example_small, 28a2079)
+            useful["example_small"] = site_useful.example_small_texts(
+                tx.get("useful_small") or {},
+                site_useful.load_example_small(cfg, mode),
+                mo_rows,
+                (cfg["usefulness"].get("example_small") or {}).get("words") or {},
+                story["card"].get("flag_words") or {},
+            )
             ex = useful.get("example")
             if ex:  # порция 6l: пример пользы — крупное МО под советом небольшим и средним
                 ex["size_note"] = site_size.example_note(
@@ -3160,6 +3239,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         level=level_rho_load(
             cfg, ((tx.get("findings") or {}).get("stood") or {}).get("level_from"), mode.name
         ),
+        icvi=report_facts(cfg, mode.name),
     )
     if useful_in is not None and ft is None:
         log.warning("site: блок «Что устояло» не собран — доля случаев и пример пользы не показаны")
@@ -3196,6 +3276,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         + site_useful.strings(
             (useful or {}).get("use"), (useful or {}).get("example"), (useful or {}).get("flag")
         )
+        + site_useful.example_small_strings((useful or {}).get("example_small"))
         + site_size.strings(size_t)
         + list(robust.values())
         + list((dyn_t or {}).values()),
@@ -3265,6 +3346,9 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     payloads.update(fonts)
     if scene is not None:
         payloads.update(vendor_files())
+    bad = page_stems(cfg, story, payloads)
+    if bad:
+        raise QCError("site: запрещённые слова на странице: " + "; ".join(bad[:10]))
     over = check_budget(payloads, cfg["site"]["budget_mb"], inline_bytes)
     if over:
         raise QCError("site: бюджет: " + "; ".join(over))

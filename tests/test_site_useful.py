@@ -465,9 +465,9 @@ def test_stood_level_line_from_level_rho():
     assert "level" not in plain["stood"]
     st = site_findings.findings_texts(*args, level=_level())["stood"]
     assert st["level"] == (
-        "Уровень трат — насколько жители тратят больше или меньше, чем обычно в своём регионе. Он связан "
-        "с розницей Росстата сильнее типов: ρ 0,63 против 0,55. По общепиту разница в пределах погрешности: "
-        "ρ 0,40 у уровня трат и 0,37 у типов"
+        "Уровень трат — насколько жители тратят больше или меньше, чем в среднем по муниципалитетам своего "
+        "региона. Он связан с розницей Росстата сильнее типов: ρ 0,63 против 0,55. По общепиту разница "
+        "в пределах погрешности: ρ 0,40 у уровня трат и 0,37 у типов"
     )
     assert st["level_label"] == "посчитано после проверок, правило заранее не записано"
     st = site_findings.findings_texts(*args, level=_level(ci_c=(0.01, 0.06)))["stood"]
@@ -478,3 +478,72 @@ def test_stood_level_line_from_level_rho():
     ft = site_findings.findings_texts(*args, level=_level())
     h = site_findings.findings_html(ft, _story(), [2, 1, 3, 4], landing._t, "Источник.")
     assert 'class="fd-level"' in h and "label-note" in h[h.index('class="fd-level"') :]
+
+
+def test_border_sep_from_report_facts():
+    """Порция 6m (совет 04.10): «по корзине трат типы разделены…» — проценты и силуэт из report_facts."""
+    from test_site_findings import _checks, _facts, _story
+
+    icvi = {
+        "knn_k": 10,
+        "icvi.final_avi": {"value": 0.9132, "text": "0,913"},
+        "icvi.final_avi_base": {"value": 0.2495, "text": "0,249"},
+        "icvi.final_sw": {"value": 0.00666, "text": "0,007"},
+    }
+    args = (TX["findings"], _story(), _facts(), _checks(), _useful(_uf()))
+    b = site_findings.findings_texts(*args, icvi=icvi)["border"]
+    assert "с 10 самыми похожими" in b["sep"] and "в среднем 91% этих связей" in b["sep"]
+    assert "было бы 25%" in b["sep"]
+    assert "силуэт 0,007" in b["sep"]
+    assert "sep" not in site_findings.findings_texts(*args)["border"]
+
+
+def _chg(own, b, d, closer, eb=0.05, ed=0.06):
+    out = {"own_change": own, "median_B_change": b, "median_D_change": d, "closer": closer}
+    return out | {"err_B": eb, "err_D": ed}
+
+
+def test_example_small_texts_and_html(tmp_path):
+    """Порция 6m, второй круг: пример совета небольшим МО — таблица по трём показателям, кто ближе — из поля
+    closer, розница строкой «в выбор не входила», правило выбора и «вывода нет» — тексты сайта."""
+    ex = {
+        "status": "done",
+        "territory_id": 881,
+        "name": "Октябрьский",
+        "region": "Амурская область",
+        "type_name": "Города, меньше транспорта",
+        "flag_text": "тип зависит от варианта расчёта",
+        "pop_avg_2023": 18555.0,
+        "per_target": {
+            "shipments": _chg(0.2896, 0.2095, 0.1377, "B"),
+            "ndfl": _chg(0.1540, 0.1913, 0.1949, "B"),
+            "catering": _chg(1.0711, 0.0186, 0.0472, "D", 0.7097, 0.6819),
+        },
+        "retail": _chg(0.1647, 0.2745, 0.1406, "D"),
+        "members_B": [{"territory_id": 872, "name": "Благовещенский", "region": "Амурская область"}],
+        "members_D": [{"territory_id": 1983, "name": "Ивдельский", "region": "Свердловская область"}],
+        "pool": {"bound": 53546.3, "n_pool": 481},
+    }
+    mo = {
+        881: {"n": "Октябрьский муниципальный район", "r": "Амурская область"},
+        872: {"n": "Благовещенский муниципальный округ", "r": "Амурская область"},
+    }
+    words = CFG["usefulness"]["example_small"]["words"]
+    fw = {"s": "тип не зависит от варианта расчёта"}
+    es = site_useful.example_small_texts(TX["useful_small"], ex, mo, words, fw)
+    assert es["title"] == "Октябрьский муниципальный район, Амурская область"
+    assert "18,6 тыс. жителей" in es["sub"] and "(тип зависит от варианта расчёта)" in es["sub"]
+    assert [r[0] for r in es["rows"]] == ["Отгрузка", "Доход по 5-НДФЛ", "Оборот общепита"]
+    assert es["rows"][0][1:] == ["+29%", "+21%", "+14%", "соседи"]
+    assert es["rows"][1][1:] == ["+15,4%", "+19,1%", "+19,5%", "соседи"]  # медианы равны при целых — десятые
+    assert es["rows"][2][-1] == "оба далеко, похожие чуть ближе"  # обе ошибки больше far_err
+    assert es["retail"].startswith("Розница — на этом показателе совет и нашли")
+    assert "оборот +16%" in es["retail"]
+    assert "ближе похожие" in es["retail"]
+    assert "из 481 муниципалитета меньше 53,5 тыс. жителей" in es["rule"] and "ранг" not in es["rule"]
+    assert es["label"] == "Пример к совету небольшим и средним муниципалитетам" and es["caption"]
+    assert "Благовещенский муниципальный округ" in es["members_b"]
+    assert "Ивдельский (Свердловская область)" in es["members_d"]
+    h = site_useful.example_small_html(es, landing._t)
+    assert 'id="use-example"' in h and "<table" in h and 'data-go="881"' in h
+    assert site_useful.example_small_texts(TX["useful_small"], None, mo, words, {}) is None

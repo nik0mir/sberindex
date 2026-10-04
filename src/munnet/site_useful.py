@@ -400,14 +400,16 @@ def example_svg(ex: Mapping, W: float = 440) -> str:
     )
 
 
-def example_html(ex: Mapping | None, esc: Esc, pair: Callable[[str, str], str], phone_w: float) -> str:
+def example_html(
+    ex: Mapping | None, esc: Esc, pair: Callable[[str, str], str], phone_w: float, dom_id: str = "use-example"
+) -> str:
     """Полоса «Пример по правилу» под тремя колонками блока: текст и кнопка слева, график справа."""
     if not ex:
         return ""
     fig = pair(example_svg(ex), example_svg(ex, phone_w))
     rev = f'<p class="fd-rev">{esc(_dot(ex["reverse"]))}</p>' if ex.get("reverse") else ""
     return (
-        '<div class="fd-ex" id="use-example">'
+        f'<div class="fd-ex" id="{dom_id}">'
         f'<div class="fd-ex-text"><p class="fd-lab">{esc(ex["label"])}</p><h3>{esc(ex["title"])}</h3>'
         f"<p>{esc(_dot(ex['text']))}</p>"
         f'<p class="fd-note">{esc(_dot(ex["rule"]))}</p>'
@@ -422,3 +424,162 @@ def example_html(ex: Mapping | None, esc: Esc, pair: Callable[[str, str], str], 
 def _dot(s: str) -> str:
     s = s.rstrip()
     return s if not s or s[-1] in ".!?…" else s + "."
+
+
+# --- порция 6m, второй круг: пример совета небольшим и средним МО (usefulness.example_small) ---
+
+EXAMPLE_SMALL_TARGETS = ("shipments", "ndfl", "catering")  # порядок строк таблицы примера
+
+
+def load_example_small(cfg: Any, mode: Any) -> dict | None:
+    """``outputs/usefulness/example_small.json`` (правило ``usefulness.example_small`` записано до выбора,
+    28a2079) или None: нет файла, не обычный режим, ``status`` не ``done`` — примера нет, остаётся прежний.
+    Файл старше ``facts.json`` этапа interpret — код 1; сверка ``qc`` не сошлась — код 3."""
+    if mode.name != "normal":
+        return None
+    p = cfg.dir("outputs") / "usefulness" / "example_small.json"
+    if not p.exists():
+        log.warning("site: нет %s — пример совета небольшим и средним МО не показывается", p)
+        return None
+    ip = mode.interpret_dir / "facts.json"
+    if ip.exists() and p.stat().st_mtime < ip.stat().st_mtime:
+        raise MissingInputError(f"site: {p} старше {ip} — перезапустите этап usefulness")
+    with open(p, encoding="utf-8") as f:
+        ex = json.load(f)
+    if ex.get("status") != "done":
+        log.warning("site: %s: status = %r — пример не показывается", p, ex.get("status"))
+        return None
+    qc = ex.get("qc") or {}
+    if float(qc.get("abs_diff", 1.0)) > 1e-12:
+        raise QCError(f"site: {p}: доля «соседи ближе» у МО пула не совпала с size_check.json (qc.abs_diff)")
+    return ex
+
+
+def example_small_texts(
+    tx: Mapping, ex: Mapping | None, mo: Mapping[int, Mapping], words: Mapping, flag_words: Mapping[str, str]
+) -> dict[str, Any] | None:
+    """Тексты примера: название с регионом, население и тип с флагом устойчивости, таблица по трём показателям
+    совета (своё изменение, медианы соседей по региону и похожих по тратам МО других регионов, кто ближе —
+    поле ``closer`` выхода), списки ориентиров с регионами, правило выбора и «вывода об отдельном МО нет»
+    (``usefulness.example_small.words``). Нет примера или текстов — None."""
+    if not ex or not tx:
+        return None
+    pt = ex.get("per_target") or {}
+    if any(t not in pt for t in EXAMPLE_SMALL_TARGETS):
+        return None
+    tid = int(ex["territory_id"])
+    r = mo.get(tid) or {}
+    name = str(r.get("n") or ex.get("name") or "")
+    region = str(r.get("r") or ex.get("region") or "")
+    pct = lambda v: style.fmt_pct(float(v), 0, sign=True)  # noqa: E731
+    flag = str(ex.get("flag_text") or "")
+    flag = str(flag_words.get("s") or flag) if flag == "тип устойчив" else flag
+    sub = _fill(
+        tx["sub"],
+        {
+            "pop": f"{style.fmt_num(float(ex['pop_avg_2023']) / 1000.0, 1)} тыс.",
+            "type": str(ex.get("type_name") or ""),
+        },
+    ) + (f" ({flag})" if flag else "")
+    rows = []
+    far = float(tx.get("far_err") or 0)
+    for t in EXAMPLE_SMALL_TARGETS:
+        d = pt[t]
+        # порция 6m, п. 14: медианы ориентиров совпали при целых процентах — все три числа строки с десятыми
+        dec = 1 if pct(d["median_B_change"]) == pct(d["median_D_change"]) else 0
+        fmt = lambda v, n=dec: style.fmt_pct(float(v), n, sign=True)  # noqa: E731
+        c = str(d.get("closer"))
+        both_far = far > 0 and min(float(d.get("err_B", 0)), float(d.get("err_D", 0))) > far
+        closer = (tx.get("closer_far") or {}).get(c) if both_far else None
+        rows.append(
+            [
+                str(tx["targets"][t]),
+                fmt(d["own_change"]),
+                fmt(d["median_B_change"]),
+                fmt(d["median_D_change"]),
+                str(closer or tx["closer"].get(c, "")),
+            ]
+        )
+
+    def names_b() -> str:
+        full = [(mo.get(int(m["territory_id"])) or {}).get("n") or m["name"] for m in ex["members_B"]]
+        return ", ".join(str(x) for x in full)
+
+    def names_d() -> str:
+        return ", ".join(f"{m['name']} ({m['region']})" for m in ex["members_D"])
+
+    pool = ex.get("pool") or {}
+    n_pool = int(pool.get("n_pool") or 0)
+    gen = "муниципалитета" if n_pool % 10 == 1 and n_pool % 100 != 11 else "муниципалитетов"  # «среди 481 …»
+    rule = _fill(
+        str(tx.get("rule") or words.get("rule") or ""),
+        {
+            "n_pool": style.fmt_num(n_pool),
+            "mo_gen": gen,
+            "bound": style.fmt_num(float(pool.get("bound") or 0) / 1000.0, 1),
+        },
+    )
+    rt = ex.get("retail") or {}
+    retail = ""
+    if tx.get("retail") and rt.get("own_change") is not None:  # розница в выбор не входила — строкой
+        retail = _fill(
+            tx["retail"],
+            {
+                "own": pct(rt["own_change"]),
+                "b": pct(rt["median_B_change"]),
+                "d": pct(rt["median_D_change"]),
+                "closer": str(tx["closer"].get(str(rt.get("closer")), "")),
+            },
+        )
+    return {
+        "id": tid,
+        "label": tx["label"],
+        "title": f"{name}, {region}",
+        "sub": sub,
+        "intro": tx["intro"],
+        "head": list(tx["head"]),
+        "rows": rows,
+        "members_b": _fill(tx["members_b"], {"region": region, "names": names_b()}),
+        "members_d": _fill(tx["members_d"], {"names": names_d()}),
+        "rule": rule,
+        "retail": retail,
+        "no_claim": str(tx.get("no_claim") or words.get("no_claim") or ""),
+        "open": tx["open"],
+        "caption": str(tx.get("caption") or ""),
+    }
+
+
+def example_small_strings(es: Mapping | None) -> list[str]:
+    """Строки примера — для линта."""
+    if not es:
+        return []
+    out = [es["label"], es["title"], es["sub"], es["intro"], es["members_b"], es["members_d"], es["open"]]
+    out += [es.get("retail") or "", es.get("rule") or "", es.get("no_claim") or "", es.get("caption") or ""]
+    out += list(es["head"]) + [c for r in es["rows"] for c in r]
+    return [s for s in out if s]
+
+
+def example_small_html(es: Mapping | None, esc: Esc) -> str:
+    """Полоса «Пример по правилу» под тремя колонками: таблица по трём показателям совета (текстом — графику
+    с разными масштабами изменений таблица понятнее), списки ориентиров, правило выбора мелко."""
+    if not es:
+        return ""
+    th = "".join(f'<th scope="col">{esc(h)}</th>' for h in es["head"])
+    trs = "".join(
+        f'<tr><th scope="row">{esc(r[0])}</th>' + "".join(f"<td>{esc(c)}</td>" for c in r[1:]) + "</tr>"
+        for r in es["rows"]
+    )
+    return (
+        '<div class="fd-ex fd-ex-small" id="use-example">'
+        f'<div class="fd-ex-text"><p class="fd-lab">{esc(es["label"])}</p><h3>{esc(es["title"])}</h3>'
+        f'<p class="fd-ex-sub">{esc(_dot(es["sub"]))}</p><p>{esc(_dot(es["intro"]))}</p>'
+        f'<div class="tbl-wrap"><table class="ex-tbl"><thead><tr>{th}</tr></thead>'
+        f"<tbody>{trs}</tbody></table></div>"
+        + (f'<p class="fd-cap">{esc(_dot(es["caption"]))}</p>' if es.get("caption") else "")
+        + (f'<p class="fd-ex-retail">{esc(_dot(es["retail"]))}</p>' if es.get("retail") else "")
+        + f'<p class="fd-note">{esc(_dot(es["members_b"]))}</p>'
+        f'<p class="fd-note">{esc(_dot(es["members_d"]))}</p>'
+        f'<p class="fd-note">{esc(_dot(es["rule"]))} {esc(_dot(es["no_claim"]))}</p>'
+        f'<p><button type="button" class="open-card" data-go="{int(es["id"])}" data-map="1">'
+        f"{esc(es['open'])}</button></p></div></div>"
+    )

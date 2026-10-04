@@ -43,7 +43,20 @@ function webgl() {
   } catch (e) { return false; }
 }
 
+// порция 6m (judge-c6 № 5): по file:// браузер не загружает модули three.js из vendor/ — без попытки импорта
+// (ошибки в консоли нет) остаётся плоская карта, под пояснением — строка hero.file_note
+function fileMode() {
+  const HX = ((readJSON("story") || {}).screen0 || {}).hero || {};
+  const c = $("#scene"); if (c) c.hidden = true;
+  for (const id of ["h0-ui", "h0-actions"]) { const el = doc.getElementById(id); if (el) el.hidden = true; }
+  const at = doc.getElementById("hero-lede-flat") || doc.getElementById("hero-lede");
+  if (HX.file_note && at && !doc.getElementById("hero-file")) {
+    at.insertAdjacentHTML("afterend", `<p class="h0-file" id="hero-file">${esc(nbsp(HX.file_note))}.</p>`);
+  }
+}
+
 async function main() {
+  if (location.protocol === "file:") { fileMode(); return; }
   const canvas = $("#scene"), stage = $("#map0");
   if (!canvas || !stage || !webgl()) return;
   const scene0 = await loadScene();

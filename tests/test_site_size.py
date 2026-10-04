@@ -273,3 +273,15 @@ def test_example_note_only_for_large():
     assert site_size.example_note(SX, by_mo, 2, "Малое") is None
     assert site_size.example_note(SX, by_mo, 999, "Нет в базе") is None
     assert site_size.example_note({}, by_mo, 269, "Йошкар-Ола") is None
+
+
+def test_type_perm_line_and_interval_wording():
+    """Порция 6m: p перестановки типов внутри групп «регион × пятая часть» рядом с проверкой по типам;
+    описание интервала советов — каноническая фраза (ширина — повторы на перевыбранных регионах)."""
+    sc = _sc() | {"type_given_size": {"permutation": {"p_less": 0.5522}}}
+    st = site_size.size_texts(SX, _bt(), sc, NAMES)
+    assert st["type_perm"].endswith("(p = 0,55; обычный порог — 0,05)")
+    assert "различия по типам не больше случайных" in st["type_perm"]
+    assert site_size.size_texts(SX, _bt(), _sc(), NAMES)["type_perm"] == ""
+    assert "повторы расчёта на случайно перевыбранных регионах" in st["chart"]
+    assert "доля стоит почти посередине интервала" in st["chart"] and "95 из 100" not in st["chart"]

@@ -248,6 +248,11 @@ def size_texts(
         tx["types_size"],
         {"n_hi_large": style.fmt_num(int(ct.get("types_hi_large", 0))), "n_large": style.fmt_num(n_large)},
     )
+    # порция 6m (совет 04.10): тип при равном размере — перестановка типов внутри групп «регион × пятая часть»
+    pl = ((sc.get("type_given_size") or {}).get("permutation") or {}).get("p_less")
+    type_perm = ""
+    if pl is not None and tx.get("type_perm"):
+        type_perm = _fill(tx["type_perm"], {"p": style.fmt_num(float(pl), 2)})
     return {
         "advice_small": _fill(tx["advice_small"], vals),
         "advice_large": _fill(tx["advice_large"], vals),
@@ -258,6 +263,7 @@ def size_texts(
             tx["chart"], {"n_mo": mo_count(int(sc.get("n_base") or sum(int(q["n_base"]) for q in qs)))}
         ),
         "types_size": types_size,
+        "type_perm": type_perm,
         "by_type": by_type,
         "more": tx["more"],
         "aria": _fill(tx["aria"], {"vals": "; ".join(f"{r['label']} — {r['text']}" for r in rows)}),
@@ -308,7 +314,7 @@ def strings(st: Mapping | None, card: str = "") -> list[str]:
     out = [card]
     if st:
         keys = ("advice_small", "advice_large", "large_caveat", "lead_small", "lead_large", "chart",
-                "types_size", "by_type", "more", "aria", "ref")  # fmt: skip
+                "types_size", "type_perm", "by_type", "more", "aria", "ref")  # fmt: skip
         out += [str(st[k]) for k in keys] + [r["label"] for r in st["rows"]]
     return [s for s in out if s]
 

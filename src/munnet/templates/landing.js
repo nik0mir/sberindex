@@ -158,7 +158,7 @@ const MAX_OPTS = 12;
 let openSearch = () => {}; // поиск с готовым запросом (адрес ?mo=<название> с несколькими совпадениями)
 {
   const input = $("#search-input"), list = $("#search-list"), status = $("#search-status");
-  let items = [], active = -1;
+  let items = [], active = -1, chosen = null; // порция 6m: выбранное не открывает список заново
   const optLabel = (r) => `${r.n} — ${r.r} — ${typeName(r.t)}`;
   function close() { list.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); active = -1; }
   function setActive(i) {
@@ -188,6 +188,7 @@ let openSearch = () => {}; // поиск с готовым запросом (а�
     const r = items[i];
     if (!r) return;
     input.value = r.n;
+    chosen = r.n;
     close();
     go(r.id);
   }
@@ -198,7 +199,7 @@ let openSearch = () => {}; // поиск с готовым запросом (а�
     render();
   };
   input.addEventListener("input", render);
-  input.addEventListener("focus", () => { if (input.value) render(); });
+  input.addEventListener("focus", () => { if (input.value && input.value !== chosen) render(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); if (list.hidden) render(); setActive(Math.min(active + 1, items.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive(Math.max(active - 1, 0)); }
@@ -357,12 +358,21 @@ function basketChart(b, t) {
   PART_KEYS.forEach((p, i) => {
     const v = b[i] ?? 0, u = unst.has(p);
     const l = Math.min(pc(0), pc(v)), w = Math.max(0.6, Math.abs(pc(v) - pc(0)));
-    h += `<div class="bar-row"><span class="bar-lab">${esc(PART_LABELS[p])}${u ? "<small>знак неустойчив</small>" : ""}</span><span class="track">`;
+    h += `<div class="bar-row"><span class="bar-lab">${esc(PART_LABELS[p])}${u ? "<small>знак меняется*</small>" : ""}</span><span class="track">`;
     h += `<i class="bar${u ? " unst" : ""}" style="left:${l.toFixed(1)}%;width:${w.toFixed(1)}%"></i>`;
     if (med && med[i] != null) h += `<i class="tick" style="left:${pc(med[i]).toFixed(1)}%"></i>`;
     h += `</span></div>`;
   });
-  return h + '</div><div class="axis-words bar-axis"><span>← меньше, чем обычно в регионе</span><span>больше →</span></div>';
+  // порция 6m (judge-c6): числовая шкала — «×0,67», «×1», «×1,5»: во сколько раз доля части отличается от региона
+  const mult = [1.25, 1.5, 2, 3, 4].filter((m) => Math.log(m) <= lim).pop();
+  if (mult) {
+    const fx = (v) => "×" + String(Math.round(v * 100) / 100).replace(".", ",");
+    h += `<div class="bar-row bar-scale" aria-hidden="true"><span class="bar-lab"></span><span class="track scale">`;
+    h += [[-Math.log(mult), fx(1 / mult)], [0, "×1"], [Math.log(mult), fx(mult)]].map(([v, s]) => `<em style="left:${pc(v).toFixed(1)}%">${s}</em>`).join("");
+    h += `</span></div>`;
+  }
+  // порция 6m: стрелки не отрываются от слов при переносе (неразрывный пробел)
+  return h + '</div><div class="axis-words bar-axis"><span>← меньше, чем обычно в регионе</span><span>больше →</span></div>';
 }
 function pathChart(win, st) {
   if (!win) return "";
@@ -444,7 +454,7 @@ function renderCard(r) {
     const why = r.why_null ? `Нет типа: ${r.why_null}` : nodata; // причина этого МО точнее общей строки
     h += `<div class="type-line">${fig(null)}<span>Нет типа</span></div><p class="cap">${esc(why)}.</p>`;
   } else {
-    h += `<div class="type-line">${typeHTML(nd.t)}</div><p class="cap">${esc(names.caption || "Относительно своего региона")}</p>`;
+    h += `<div class="type-line">${typeHTML(nd.t)}</div><p class="cap">${esc(names.caption || "Относительно своего региона")}${CARD.type_note ? ". " + esc(CARD.type_note) + "." : ""}</p>`;
     h += stabilityLine(nd);
     if (r.role === "inner") h += `<p><button type="button" class="tool tool-text" data-go="${nd.id}">Карточка города</button></p>`;
   }
@@ -498,7 +508,7 @@ function renderCard(r) {
   }
   const bk = nd.b24 || nd.b23;
   if (bk) {
-    h += `<section class="row basket" aria-labelledby="c-bk"><h3 id="c-bk">Корзина ${nd.b24 ? "2024" : "2023"} года относительно своего региона</h3>${basketChart(bk, nd.t)}<p class="cap">Серые полосы — муниципалитет, чёрная засечка — медиана типа.</p></section>`;
+    h += `<section class="row basket" aria-labelledby="c-bk"><h3 id="c-bk">Корзина ${nd.b24 ? "2024" : "2023"} года относительно своего региона</h3>${basketChart(bk, nd.t)}<p class="cap">Серые полосы — муниципалитет, чёрная засечка — медиана типа.${CARD.basket_scale ? " " + esc(CARD.basket_scale) + "." : ""}${(view.unstable_parts || []).some((s) => s.startsWith(nd.t + ":")) ? " * Знак меняется: в одних вариантах расчёта медиана типа по этой части выше региона, в других — ниже." : ""}</p></section>`;
   }
   if (nd.win) {
     h += `<section class="row path" aria-labelledby="c-win"><h3 id="c-win">Тип по окнам</h3>${pathChart(nd.win, nd.st)}</section>`;
@@ -727,6 +737,8 @@ function drawEgo(r) {
     const [x, y] = hexCenter(o.hq, o.hr);
     s += `<line class="casing" x1="${sx}" y1="${sy}" x2="${x}" y2="${y}"/><line x1="${sx}" y1="${sy}" x2="${x}" y2="${y}"/>`;
   }
+  // порция 6m (judge-c6): остальные ячейки приглушены (CSS .has-ego) — выбранное МО и его списки — в цвете типа
+  for (const o of [nd, ...sim, ...simb]) { const t = (nodeOf(o) || o).t; s += `<path class="lit" d="${hexPath(o.hq, o.hr)}" style="fill:${t != null ? `var(--t${t})` : "#d3d7dc"}"/>`; }
   for (const o of sim) s += `<path class="nbr" d="${hexPath(o.hq, o.hr)}"/>`;
   s += `<path class="sel-halo" d="${hexPath(nd.hq, nd.hr, 1.35)}"/><path class="sel" d="${hexPath(nd.hq, nd.hr, 1.35)}"/>`;
   const rad = 8 / k;

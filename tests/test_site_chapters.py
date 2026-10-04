@@ -431,3 +431,28 @@ def test_run_pre_t2_split_by_code():
     assert landing.run_pre(tpl, other, tests) is None
     h = SC.chapter_dynamics(story(), checks(), ESC)
     assert "Смен типа, с которыми" not in h  # без text_pre — прежний вид
+
+
+def test_site_proxies_without_ladder_word():
+    """Порция 6m (совет 04.10): «по ступеням снизу вверх» убирается при T1 не confirmed;
+    порядок типов — один раз."""
+    txt = (
+        "Описание: доля городских округов по ступеням снизу вверх — 7% / 18% / 47% / 68%, монотонно: да; "
+        "медиана плотности по ступеням снизу вверх — −0,44 / −0,01 / 1,09 / 4,40, монотонно: да."
+    )
+    tpl = CFG["site"]["build"]["texts"]["proxies_order"]
+    got = landing.site_proxies(txt, "partial_overall", ["А", "Б", "В", "Г"], tpl)
+    assert "ступен" not in got and got.startswith("Описание по типам в порядке «А» → «Б» → «В» → «Г»: доля")
+    assert "7% / 18% / 47% / 68%" in got and "−0,44 / −0,01 / 1,09 / 4,40" in got
+    assert landing.site_proxies(txt, "confirmed", ["А"], tpl) == txt
+
+
+def test_page_stems_word_start_only():
+    """Порция 6m: «ступен» и «лестниц» на странице — код 3, кроме вердикта, который их разрешает;
+    «доступен» — не в счёт."""
+    story = {"verdicts": {"T1_ladder_external": "partial_overall"}}
+    ok = {"index.html": "Страница доступна; недоступен".encode(), "data/story.json": b"{}"}
+    assert landing.page_stems(CFG, story, ok) == []
+    bad = {"index.html": "по ступеням снизу вверх".encode()}
+    assert landing.page_stems(CFG, story, bad)
+    assert landing.page_stems(CFG, {"verdicts": {"T1_ladder_external": "confirmed"}}, bad) == []

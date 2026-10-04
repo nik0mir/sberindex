@@ -1126,3 +1126,29 @@ html.has-3d.h0-flat .lede-flat { display: block; }
 }
 /* порция 6l, третий круг: размеры файлов у ссылок скачивания на телефоне — не меньше 12 px */
 @media (max-width: 599px) { .downloads small, .nojs small { font-size: 12px; } }
+/* === порция 6m: совет 04.10 и «Потом» ============================================================================ */
+/* плоская карта: при выбранном МО остальные ячейки приглушены, как на объёмной */
+.hexmap.has-ego > path { opacity: .28; }
+.hexmap .ego .lit { stroke: #fff; stroke-width: .6px; vector-effect: non-scaling-stroke; }
+/* карточка: числовая шкала под полосами корзины */
+.bar-scale .track.scale { background: none; height: 16px; }
+.bar-scale .track.scale em { position: absolute; top: 0; transform: translateX(-50%); font-style: normal; font-size: 12px; line-height: 16px; color: var(--ink-2); white-space: nowrap; }
+/* карточка на телефоне: заголовки разделов не уходят под прилипшую шапку карточки */
+#card-body h3, #card-body section { scroll-margin-top: 140px; }
+/* страница открыта как файл: объёмной карты нет, пояснение */
+.h0-file { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+/* порция 6m, второй круг: подсказки объёмной карты не заходят под кнопки «+ − Сбросить» на широком экране */
+@media (min-width: 701px) { .h0-howto, .h0-picked-note { right: 140px; max-width: min(300px, calc(100% - 172px)); } }
+/* пример под советом: таблица по трём показателям */
+.ex-tbl { border-collapse: collapse; font-size: 14px; margin: 4px 0 10px; }
+.ex-tbl th, .ex-tbl td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+.ex-tbl td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ex-tbl thead th { font-weight: 600; color: var(--ink-2); font-size: 13px; }
+.fd-ex-small { grid-template-columns: minmax(0, 1fr); grid-template-areas: "text"; }
+.fd-ex-small .tbl-wrap { overflow-x: auto; }
+.fd-ex-sub { color: var(--ink-2); }
+/* порция 6m, второй круг: размеры файлов у ссылок скачивания — 12 px на любой ширине */
+.downloads small, .nojs small { font-size: 12px; }
+@media (max-width: 599px) { .ex-tbl { font-size: 13px; } .ex-tbl thead th { font-size: 12px; } .ex-tbl th, .ex-tbl td { padding: 4px 6px 4px 0; } }
+/* порция 6m, п. 14: «Кто ближе» переносится по словам — таблица на 375 без прокрутки */
+.ex-tbl td:last-child { white-space: normal; min-width: 6em; }
