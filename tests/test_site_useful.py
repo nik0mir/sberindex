@@ -253,7 +253,7 @@ def test_flag_codes_and_cross_check():
 @pytest.fixture(autouse=True)
 def _no_layout(monkeypatch):
     empty = pd.DataFrame({"territory_id": [], "nx": [], "ny": []})
-    monkeypatch.setattr(landing, "similarity", lambda cfg: ({"chosen": None, "preserved": {}}, empty))
+    monkeypatch.setattr(landing, "similarity", lambda cfg: ({"chosen": None, "preserved": {}}, empty, None))
 
 
 def _setup(tmp_path):

@@ -192,7 +192,7 @@ def test_ndfl_license_not_cc_by():
 @pytest.fixture(autouse=True)
 def _no_layout(monkeypatch):
     empty = pd.DataFrame({"territory_id": [], "nx": [], "ny": []})
-    monkeypatch.setattr(landing, "similarity", lambda cfg: ({"chosen": None, "preserved": {}}, empty))
+    monkeypatch.setattr(landing, "similarity", lambda cfg: ({"chosen": None, "preserved": {}}, empty, None))
 
 
 def _write_size(d: Path, large: set[int], sc: dict | None = None, bt: dict | None = None) -> None:

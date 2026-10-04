@@ -46,6 +46,7 @@ from munnet import (
     site_chapters_tail,
     site_findings,
     site_hexgrid,
+    site_netmap,
     site_scene,
     site_size,
     site_useful,
@@ -2490,9 +2491,11 @@ def build_methods(d: SiteData) -> dict | None:
     }
 
 
-def similarity(cfg: Config) -> tuple[dict, pd.DataFrame]:
-    """Раскладка «по сходству трат» по правилу ``site.similarity_layout`` (``site_layout``): сводка
-    и координаты ``nx``, ``ny`` выбранной раскладки (перестановки нет — пустая таблица)."""
+def similarity(cfg: Config) -> tuple[dict, pd.DataFrame, dict | None]:
+    """Раскладка «по сходству трат» по правилу ``site.similarity_layout`` (``site_layout``): сводка,
+    координаты ``nx``, ``ny`` выбранной раскладки (перестановки нет — пустая таблица) и данные схемы
+    «Сеть корзин целиком» (порция 6n, ``site_netmap``): ``graph_fr`` того же расчёта — при любом исходе
+    правила; ``site.build.netmap: false`` — без схемы (None)."""
     from munnet import site_layout
 
     if not (cfg.dir("outputs") / "cluster" / "final.json").exists():
@@ -2504,7 +2507,14 @@ def similarity(cfg: Config) -> tuple[dict, pd.DataFrame]:
             str(cfg["site"]["similarity_layout"]["caption"]),
             {"preserved": style.fmt_pct(res.preserved[res.chosen])},
         )
-    return summary, res.nxy()
+    net = None
+    if cfg["site"]["build"].get("netmap", True):
+        net = site_netmap.build(
+            res,
+            site_netmap.main_edges_weighted(cfg.dir("processed")),
+            int(cfg["site"]["similarity_layout"]["n_net_neighbors"]),
+        )
+    return summary, res.nxy(), net
 
 
 # --- выгрузки CSV и HTML ------------------------------------------------------------------------------------
@@ -3106,7 +3116,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     useful_in = site_useful.load(cfg, mode)
     # порция 6f: исход by_type_test и разведка size_posthoc — необязательный вход (как 6b)
     size_in = site_size.load(cfg, mode, useful_in)
-    layout, nxy = similarity(cfg)
+    layout, nxy, netmap = similarity(cfg)
     story["chapters"]["similarity"]["layout_caption"] = layout.get("caption")
     story["view"]["similarity_layout"] = layout.get("chosen")
     hm = build_hexmap(d)
@@ -3143,6 +3153,10 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     story["card"]["var_words"] = var_words(d)
     types = build_types(d, mo, story, values)
     checks = build_checks(d, mo, layout, hm)
+    if netmap is not None:  # порция 6n: узлы схемы — МО страницы с типом (территориальные и узлы-города)
+        bad = site_netmap.check(netmap, mo.loc[mo["role"].isin(["territorial", "city"]), "id"].tolist())
+        if bad:
+            raise QCError("site: схема сети корзин: " + "; ".join(bad))
     # порция 6e: понятные формулировки пометок R1 на сайте (site.build.texts.robust); facts.json не меняется
     robust = robust_texts(
         (cfg["site"]["build"].get("texts") or {}).get("robust"),
@@ -3197,6 +3211,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         "methods": methods,
         "hexgrid": hexgrid,
         "scene": scene,
+        "netmap": netmap,
     }
     story["screen0"]["examples"] = screen_examples(types, story)
     data["types"]["reference"] = profile_reference(d)
@@ -3266,6 +3281,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
             site_size.card_notes(tx.get("size") or {}, size_t, n_shown=int(cfg["site"]["n_similar_shown"]))
         )
     ptx = tx.get("passports")
+    net_t = site_netmap.texts(tx.get("netmap"), netmap)  # порция 6n: числа — из netmap.json
     bad = lint_texts(
         cfg,
         story,
@@ -3279,13 +3295,15 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         + site_useful.example_small_strings((useful or {}).get("example_small"))
         + site_size.strings(size_t)
         + list(robust.values())
-        + list((dyn_t or {}).values()),
+        + list((dyn_t or {}).values())
+        + site_netmap.strings(net_t),
     )
     banned_h = list(cfg["site"]["forbidden_words"]["headlines_always"]) + list(
         cfg["interpret"]["naming"]["banned"]
     )
     dyn_heads = [dyn_t["title"], dyn_t["short"]] if dyn_t else []
-    bad += [f"запрет в заголовке: «{w}» в «{h}»" for h in site_findings.titles(ft) + dyn_heads
+    net_heads = [net_t["title"]] if net_t else []
+    bad += [f"запрет в заголовке: «{w}» в «{h}»" for h in site_findings.titles(ft) + dyn_heads + net_heads
             for w in banned_h if norm(w) in norm(h)]  # fmt: skip
     if bad:
         raise QCError("site: линт текстов порции 5b: " + "; ".join(bad[:10]))
@@ -3296,6 +3314,14 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     story["chapters"]["method"]["numbers"] = method_numbers(story, mo, checks, methods)
     geo = cells_geo(hm, mo)
     rival = site_chapters_tail.rival_maps(rival_partition(d, checks, mo), story, geo, _t)
+    net_html = (
+        site_netmap.html_block(
+            net_t, netmap, types, story["names"]["final"], story["view"]["shapes"], _t,
+            site_chapters.UI["src_rosstat"],
+        )
+        if net_t and netmap
+        else ""
+    )  # fmt: skip
     chapters = "\n".join(
         [
             site_chapters.chapters_html(
@@ -3308,6 +3334,7 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
                 passports,
                 (ptx or {}).get("detail"),
                 rival,
+                net_html,
             ),
             site_chapters_tail.chapters_html(
                 story,
@@ -3330,7 +3357,14 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     inline = bool(cfg["site"]["build"].get("inline_all", True))
     order = [int(x) for x in checks.get("t1_order") or facts["ladder"]["order"]]
     src_key = "src_rosstat_ndfl" if ft and ft["use"].get("size") else "src_rosstat"  # порция 6f
-    findings = site_findings.findings_html(ft, story, order, _t, site_chapters.UI[src_key])
+    findings = site_findings.findings_html(
+        ft,
+        story,
+        order,
+        _t,
+        site_chapters.UI[src_key],
+        net_link=(net_t or {}).get("findings_link", "") if net_html else "",
+    )
     parts = screen0_html(story, meta, hexgrid, mo) | {
         "chapters_html": chapters,
         "sources_html": sources,

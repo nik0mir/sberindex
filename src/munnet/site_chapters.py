@@ -710,6 +710,7 @@ def chapter_types(
     passports: str = "",
     detail: str | None = None,
     rival: str = "",
+    netmap: str = "",
 ) -> str:
     ch = story["chapters"]["types"]
     view = story["view"]
@@ -818,6 +819,7 @@ def chapter_types(
         + ("</details>" if full_open else "")
         + f'<figcaption class="source">{esc(UI["src_rosstat"])}</figcaption>'
         + (_table(["", "", UI["col_med"], UI["col_ci"], UI["col_iqr"]], trows, esc) if trows else "")
+        + netmap  # порция 6n: «Сеть корзин целиком» — после паспортов, до деления без типов (site_netmap)
         + ami_html
         + "</figure>"
         + rival
@@ -1449,14 +1451,16 @@ def chapters_html(
     passports: str = "",
     detail: str | None = None,
     rival: str = "",
+    netmap: str = "",
 ) -> str:
     """Главы 1, 3, 4, 5 в порядке страницы (§2). ``esc`` — экранирование с типографикой ru-text;
     ``passports`` — паспорта типов главы 3 (порция 5b, ``site_findings.passports_html``); ``rival`` — карта-
-    соперник T5 (порция 6c, ``site_chapters_tail.rival_maps``)."""
+    соперник T5 (порция 6c, ``site_chapters_tail.rival_maps``); ``netmap`` — схема «Сеть корзин целиком»
+    (порция 6n, ``site_netmap.html_block``)."""
     return "\n".join(
         [
             chapter_basket(story, types, mo, esc),
-            chapter_types(story, types, checks, ref, mo, esc, passports, detail, rival),
+            chapter_types(story, types, checks, ref, mo, esc, passports, detail, rival, netmap),
             chapter_order(story, checks, esc),
             chapter_dynamics(story, checks, esc),
         ]

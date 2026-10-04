@@ -463,8 +463,11 @@ def _pair(build: Callable[[float], str]) -> str:
     return phone_pair(build(440), build(PHONE_W))
 
 
-def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc: Esc, src: str) -> str:
-    """Раздел «Что устояло и чем полезно» (три колонки; на телефоне — одна). Нет текстов — пусто."""
+def findings_html(
+    ft: Mapping | None, story: Mapping, order: Sequence[int], esc: Esc, src: str, net_link: str = ""
+) -> str:
+    """Раздел «Что устояло и чем полезно» (три колонки; на телефоне — одна). Нет текстов — пусто.
+    ``net_link`` — ссылка из «Где граница» на схему сети корзин в главе «Типы» (порция 6n)."""
     if not ft:
         return ""
     cols = []
@@ -495,6 +498,8 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
         body = f"<p>{esc(_dot(p['text']))}</p>"
         if key == "border" and p.get("sep"):  # порция 6m: разделение типов в сети корзин и в признаках
             body += f'<p class="fd-sep">{esc(_dot(p["sep"]))}</p>'
+            if net_link:
+                body += f'<p class="fd-netlink"><a href="#netmap">{esc(net_link)}</a></p>'
         if key == "stood" and p.get("level"):  # порция 6l: ρ уровня трат рядом с ρ типов, с меткой
             lab = f' <span class="label-note">{esc(p["level_label"])}</span>' if p.get("level_label") else ""
             body += f'<p class="fd-level">{esc(_dot(p["level"]))}{lab}</p>'

@@ -973,9 +973,249 @@ function initAll() {
   // название открывает карточку: обработчик ссылок глав (.chapter, button[data-go]) выше
   allFilter();
 }
+// --- глава «Типы»: схема «Сеть корзин целиком» (порция 6n, site_netmap.py) -------------------------------------
+// Координаты (раскладка graph_fr, повёрнутая длинной осью по горизонтали), 10 самых похожих каждого узла и числа
+// подписи — из netmap.json; страница только масштабирует, поворачивает на 90° на узком экране и рисует на canvas.
+// Без осей, стрелок и подписей порядка. Наведение (касание) — соседи по сети, щелчок — карточка (go), легенда —
+// выделение типа; выбранный в поиске или карточке муниципалитет отмечен акцентом (событие munnet:select).
+function initNet(nm) {
+  const box = $("#netmap");
+  if (!box || !nm || !nm.ids || !nm.ids.length) return;
+  const stage = $(".net-stage", box), cv = $(".net-canvas", box), tipEl = $(".net-tip", box), panel = $(".net-panel", box);
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
+  const N = nm.ids.length, K = nm.k || 10;
+  // целые 0…4095 по два знака (site_netmap.encode), «~~» — нет соседа
+  const AB = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+  const dec = (s) => Int16Array.from({ length: s.length / 2 }, (_, i) => (s[2 * i] === "~" ? -1 : AB.indexOf(s[2 * i]) * 64 + AB.indexOf(s[2 * i + 1])));
+  const NX = dec(nm.x), NY = dec(nm.y), NB = dec(nm.nb);
+  if (NX.length !== N || NB.length !== N * K) return;
+  const idx = new Map(nm.ids.map((id, i) => [id, i]));
+  const T = nm.ids.map((id) => { const r = MO.get(id); return r && r.t != null ? r.t : 0; });
+  const css = getComputedStyle(doc.documentElement);
+  const COL = {};
+  for (const t of new Set(T)) COL[t] = (css.getPropertyValue("--t" + t) || "").trim() || "#9e9e9e";
+  const ACC = (css.getPropertyValue("--accent") || "").trim() || "#a3172d";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const PX = new Float32Array(N), PY = new Float32Array(N);
+  const cur = new Float32Array(N).fill(0.78), from = new Float32Array(N), to = new Float32Array(N);
+  const seen = new Float32Array(N); // появление при прокрутке: 0…1 у каждой точки
+  const delay = Float32Array.from({ length: N }, (_, i) => (((Math.imul(i + 1, 2654435761) >>> 0) % 1000) / 1000) * 0.6);
+  let W = 0, H = 0, R = 2.5, vert = false;
+  // sel — последний выбранный муниципалитет (поиск, карточка): кольцо и название остаются и после закрытия карточки;
+  // пока карточка открыта (open), его соседи по сети подсвечены
+  let hover = -1, sel = -1, open = false, keyHover = null, keyPin = null, lastType = "mouse";
+  let tween = null, intro = null, visible = false, raf = 0;
+  const nbOf = (i) => { const out = []; for (let j = 0; j < K; j++) { const v = NB[i * K + j]; if (v >= 0) out.push(v); } return out; };
+  const focus = () => (hover >= 0 ? hover : open ? sel : -1);
+  function layout() {
+    const w = stage.clientWidth;
+    if (!w) return;
+    vert = w < 560;
+    stage.classList.toggle("vert", vert);
+    const pad = 14;
+    let s;
+    if (vert) {
+      W = Math.round(Math.min(230, Math.max(150, w * 0.5)));
+      s = (W - 2 * pad) / nm.h;
+      H = Math.round(nm.w * s + 2 * pad);
+    } else {
+      W = Math.min(w, 1180);
+      s = (W - 2 * pad) / nm.w;
+      H = Math.round(nm.h * s + 2 * pad);
+    }
+    for (let i = 0; i < N; i++) {
+      if (vert) { PX[i] = pad + (nm.h - NY[i]) * s; PY[i] = pad + NX[i] * s; } // поворот на 90°, без отражения
+      else { PX[i] = pad + NX[i] * s; PY[i] = pad + NY[i] * s; }
+    }
+    R = Math.max(1.9, Math.min(3.3, Math.sqrt(((W - 2 * pad) * (H - 2 * pad)) / N) * 0.25));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    cv.style.width = W + "px"; cv.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+  // прозрачность точки в состоянии: фокус (наведение или выбор) — он и его соседи, легенда — свой тип
+  function target() {
+    const f = focus(), lt = keyHover ?? keyPin;
+    if (f >= 0) { to.fill(0.3); to[f] = 1; for (const j of nbOf(f)) to[j] = 1; }
+    else if (lt != null) { for (let i = 0; i < N; i++) to[i] = T[i] === lt ? 0.92 : 0.28; }
+    else to.fill(0.78);
+  }
+  function update() {
+    target();
+    from.set(cur);
+    if (reduce || !visible) { cur.set(to); tween = null; draw(); return; }
+    tween = { t0: performance.now(), dur: 200 };
+    loop();
+  }
+  function loop() { if (!raf) raf = requestAnimationFrame(frame); }
+  function frame(now) {
+    raf = 0;
+    let more = false;
+    if (tween) {
+      const e = Math.min(1, (now - tween.t0) / tween.dur), k = 1 - Math.pow(1 - e, 3);
+      for (let i = 0; i < N; i++) cur[i] = from[i] + (to[i] - from[i]) * k;
+      if (e < 1) more = true; else tween = null;
+    }
+    if (intro) {
+      const p = Math.min(1, (now - intro) / 1100);
+      for (let i = 0; i < N; i++) seen[i] = Math.max(0, Math.min(1, (p - delay[i]) / 0.4));
+      if (p < 1) more = true; else intro = null;
+    }
+    draw();
+    if (more) loop();
+  }
+  function shape(p, t, x, y, r) {
+    const s = SHAPES[t];
+    if (s === "▲") { p.moveTo(x, y - r * 1.2); p.lineTo(x + r * 1.1, y + r * 0.8); p.lineTo(x - r * 1.1, y + r * 0.8); p.closePath(); }
+    else if (s === "■") { const q = r * 0.88; p.rect(x - q, y - q, 2 * q, 2 * q); }
+    else if (s === "◆") { const q = r * 1.25; p.moveTo(x, y - q); p.lineTo(x + q, y); p.lineTo(x, y + q); p.lineTo(x - q, y); p.closePath(); }
+    else { p.moveTo(x + r, y); p.arc(x, y, r, 0, 2 * Math.PI); }
+  }
+  // тонкая дуга к соседу: всегда изгибается в одну сторону — веер читается легче прямых
+  function arc(a, b) {
+    const x0 = PX[a], y0 = PY[a], x1 = PX[b], y1 = PY[b], mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    ctx.moveTo(x0, y0);
+    ctx.quadraticCurveTo(mx - (y1 - y0) * 0.22, my + (x1 - x0) * 0.22, x1, y1);
+  }
+  function draw() {
+    if (!visible || !W) return;
+    ctx.clearRect(0, 0, W, H);
+    const f = focus(), nb = f >= 0 ? nbOf(f) : [], hot = new Set(nb);
+    if (f >= 0) hot.add(f);
+    // фон: точки пачками по типу и уровню прозрачности (один path на пачку)
+    const buckets = new Map();
+    for (let i = 0; i < N; i++) {
+      if (hot.has(i)) continue;
+      const a = cur[i] * seen[i];
+      if (a < 0.02) continue;
+      const key = T[i] * 100 + Math.round(a * 20);
+      let p = buckets.get(key);
+      if (!p) { p = new Path2D(); buckets.set(key, p); }
+      shape(p, T[i], PX[i], PY[i], R);
+    }
+    for (const [key, p] of buckets) { ctx.globalAlpha = (key % 100) / 20; ctx.fillStyle = COL[Math.floor(key / 100)]; ctx.fill(p); }
+    ctx.globalAlpha = 1;
+    if (f >= 0) {
+      const k = cur[f]; // выбранная точка и её соседи видны и во время проявления
+      ctx.globalAlpha = 0.6 * k;
+      ctx.strokeStyle = "#595959"; ctx.lineWidth = 1.1;
+      ctx.beginPath(); for (const j of nb) arc(f, j); ctx.stroke();
+      ctx.globalAlpha = k;
+      for (const j of nb) {
+        const p = new Path2D(); shape(p, T[j], PX[j], PY[j], R * 1.45);
+        ctx.fillStyle = COL[T[j]]; ctx.fill(p); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.stroke(p);
+      }
+      const p = new Path2D(); shape(p, T[f], PX[f], PY[f], R * 2.1);
+      ctx.fillStyle = COL[T[f]]; ctx.fill(p); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(p);
+      ctx.globalAlpha = 1;
+    }
+    label();
+  }
+  // выбранный муниципалитет: кольцо акцента и название (поверх любого состояния)
+  function label() {
+    if (sel < 0) return;
+    const x = PX[sel], y = PY[sel];
+    ctx.beginPath(); ctx.arc(x, y, R * 2.1 + 4, 0, 2 * Math.PI);
+    ctx.strokeStyle = ACC; ctx.lineWidth = 2; ctx.stroke();
+    const r = MO.get(nm.ids[sel]);
+    if (!r || (hover >= 0 && hover !== sel)) return;
+    const s = cap1(r.ns || r.n);
+    ctx.font = "600 13px 'Golos Text', system-ui, sans-serif";
+    const tw = ctx.measureText(s).width;
+    let tx = x + R * 2.1 + 8, ty = y - R * 2.1 - 6;
+    if (tx + tw > W - 2) tx = x - R * 2.1 - 8 - tw;
+    tx = Math.max(2, tx); ty = Math.max(14, Math.min(H - 4, ty));
+    ctx.lineJoin = "round"; ctx.lineWidth = 4; ctx.strokeStyle = "rgba(252,251,248,.95)"; ctx.strokeText(s, tx, ty);
+    ctx.fillStyle = ACC; ctx.fillText(s, tx, ty);
+  }
+  function nearest(ev, radius) {
+    const b = cv.getBoundingClientRect(), x = ev.clientX - b.left, y = ev.clientY - b.top;
+    let best = -1, bd = radius * radius;
+    for (let i = 0; i < N; i++) { const dx = PX[i] - x, dy = PY[i] - y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } }
+    return best;
+  }
+  const title = (r) => (r.role === "city" ? `${cap1(r.ns || r.n)}, город целиком` : cap1(r.ns || r.n));
+  function showTip(i) {
+    const r = MO.get(nm.ids[i]);
+    if (!r) { tipEl.hidden = true; return; }
+    tipEl.innerHTML = nbsp(`${fig(r.t)} <b>${esc(title(r))}</b><br><span class="tip-meta">${esc(r.r)} — ${esc(typeName(r.t))}</span><br><span class="tip-meta">${esc(box.dataset.open || "")}</span>`);
+    tipEl.hidden = false;
+    const tw = tipEl.offsetWidth, th = tipEl.offsetHeight, ox = cv.offsetLeft, oy = cv.offsetTop;
+    let x = ox + PX[i] + 14, y = oy + PY[i] - th - 10;
+    if (x + tw > stage.clientWidth) x = ox + PX[i] - tw - 14;
+    if (y < 0) y = oy + PY[i] + 14;
+    tipEl.style.left = Math.max(0, x) + "px"; tipEl.style.top = y + "px";
+  }
+  function showPanel(i) {
+    const r = i >= 0 ? MO.get(nm.ids[i]) : null;
+    if (!r) { panel.innerHTML = `<p class="np-empty">${esc(nbsp(box.dataset.panelEmpty || ""))}</p>`; return; }
+    panel.innerHTML = nbsp(`<p class="np-name">${fig(r.t)} <b>${esc(title(r))}</b></p><p class="np-meta">${esc(r.r)}</p><p class="np-meta">${esc(typeName(r.t))}</p>`) +
+      `<button type="button" class="tool tool-text np-open" data-go="${r.id}">${esc(box.dataset.openTouch || "")}</button>`;
+  }
+  cv.addEventListener("pointerdown", (e) => { lastType = e.pointerType || "mouse"; });
+  cv.addEventListener("pointermove", (e) => {
+    if (e.pointerType === "touch") return;
+    const i = nearest(e, Math.max(12, R * 4));
+    if (i !== hover) { hover = i; update(); }
+    cv.style.cursor = i >= 0 ? "pointer" : "default";
+    if (i >= 0) showTip(i); else tipEl.hidden = true;
+  });
+  cv.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "touch") return;
+    tipEl.hidden = true;
+    if (hover >= 0) { hover = -1; update(); }
+  });
+  cv.addEventListener("click", (e) => {
+    if (lastType === "touch") { // касание: соседи и кнопка карточки рядом со схемой; пусто — снять
+      const i = nearest(e, 24);
+      hover = i; showPanel(i); update();
+      return;
+    }
+    const i = nearest(e, Math.max(12, R * 4));
+    if (i >= 0) go(nm.ids[i]);
+  });
+  // легенда: наведение и фокус — предпросмотр, нажатие — закрепить (повторное — снять)
+  const keys = [...box.querySelectorAll(".net-key")];
+  const setKeys = () => { for (const b of keys) b.setAttribute("aria-pressed", String(Number(b.dataset.t) === keyPin)); };
+  for (const b of keys) {
+    const t = Number(b.dataset.t);
+    b.addEventListener("pointerdown", (e) => { lastType = e.pointerType || "mouse"; });
+    b.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") { keyHover = t; update(); } });
+    b.addEventListener("pointerleave", () => { if (keyHover != null) { keyHover = null; update(); } });
+    b.addEventListener("focus", () => { if (b.matches(":focus-visible")) { keyHover = t; update(); } });
+    b.addEventListener("blur", () => { if (keyHover != null) { keyHover = null; update(); } });
+    b.addEventListener("click", () => {
+      keyPin = keyPin === t ? null : t;
+      keyHover = null;
+      if (hover >= 0 && lastType === "touch") { hover = -1; showPanel(-1); }
+      setKeys(); update();
+    });
+  }
+  doc.addEventListener("munnet:select", (e) => {
+    const id = e.detail && e.detail.id;
+    if (id == null) { if (open) { open = false; update(); } return; } // карточка закрыта: отметка остаётся
+    sel = idx.has(id) ? idx.get(id) : -1;
+    open = sel >= 0;
+    update();
+  });
+  if (current != null) { const r = MO.get(current), nd = r && nodeOf(r); if (nd && idx.has(nd.id)) { sel = idx.get(nd.id); open = true; } }
+  new ResizeObserver(() => layout()).observe(stage);
+  const io = new IntersectionObserver((ents) => {
+    if (!ents.some((x) => x.isIntersecting)) return;
+    io.disconnect();
+    visible = true;
+    target(); cur.set(to);
+    if (reduce) { seen.fill(1); draw(); } else { intro = performance.now(); loop(); }
+  }, { threshold: 0.15 });
+  io.observe(stage);
+  if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(() => draw());
+  box.classList.add("net-on");
+}
 // --- загрузка ----------------------------------------------------------------------------------------------------
 (async () => {
-  const [mo, types, hexgrid] = await Promise.all([loadData("mo"), loadData("types"), loadData("hexgrid")]);
+  const [mo, types, hexgrid, netmap] = await Promise.all([loadData("mo"), loadData("types"), loadData("hexgrid"), loadData("netmap")]);
   for (const t of rowsOf(types && types.types ? types.types : types)) TYPES.set(Number(t.t ?? t.type ?? t.number), t);
   for (const r of rowsOf(mo)) {
     MO.set(r.id, r);
@@ -988,6 +1228,7 @@ function initAll() {
   renderExamples();
   bindFindLink();
   openParam();
+  initNet(netmap); // порция 6n: схема рисуется, когда попадает в окно (IntersectionObserver)
   initAll(); // строк в DOM — только страница из 50, индекс 2192 записей строится за миллисекунды
   if (!MO.size) {
     $("#search-hint").textContent += " Карточки недоступны: данные не загрузились.";

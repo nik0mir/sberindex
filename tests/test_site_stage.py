@@ -198,7 +198,7 @@ def test_t1_text_cap_used():
 def _no_layout(monkeypatch):
     """Раскладка главы 2 требует выходов cluster — в синтетике её заменяет сводка «перестановки нет»."""
     empty = pd.DataFrame({"territory_id": [], "nx": [], "ny": []})
-    monkeypatch.setattr(landing, "similarity", lambda cfg: ({"chosen": None, "preserved": {}}, empty))
+    monkeypatch.setattr(landing, "similarity", lambda cfg: ({"chosen": None, "preserved": {}}, empty, None))
 
 
 def _setup(tmp_path, **over):
