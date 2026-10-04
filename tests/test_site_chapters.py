@@ -242,8 +242,11 @@ def test_placebo_summary_by_verdicts():
     t3["main"] = t3["main"] | {"passed": True, "median": 2.0}
     s = SC.placebo_summary(t3)
     assert s.startswith("Заголовок главы — по самому строгому варианту расчёта.")
-    assert "«другое правило связей между муниципалитетами» число смен не отличается от плацебо: 50" in s
-    assert "плацебо 88." in s and "(40 против медианы 2)" in s and "не устоял" in s
+    # порция 6l (check-ux 04.10): «не больше, чем на плацебо» и «порог» вместо «не отличается» и перцентиля
+    assert "муниципалитетами» смен не больше, чем на плацебо: 50 при пороге 88." in s
+    # порция 6l: одно опорное число плацебо — 95-й перцентиль (медианы в итоге нет)
+    assert "(40 при пороге 3)" in s and "не устоял" in s
+    assert "медиан" not in s
     # итог не «not» — фразы «не отличается» нет; основной расчёт не прошёл — фразы о нём нет
     t3b = t3 | {"verdict_final": "partial", "main": t3["main"] | {"passed": False}}
     s = SC.placebo_summary(t3b)
@@ -262,9 +265,13 @@ def test_dynamics_texts_as_in_report():
     t3["main"] = t3["main"] | {"passed": True}
     dt = SC.dynamics_texts(tx, t3)
     assert dt["title"] == "Смена типа за год не подтверждена"
-    assert "40 против 3 на 95-м перцентиле" in dt["lead"] and "50 при 95-м перцентиле 88" in dt["lead"]
+    assert "40 при пороге 3" in dt["lead"] and "50 при пороге 88" in dt["lead"] and "5% плацебо" in dt["lead"]
     assert dt["lead"].endswith("не подтверждена.") and "{" not in dt["lead"]
-    assert "при другом — столько же" in dt["short"]
+    assert "при другом — не больше" in dt["short"]
+    assert all("столько же" not in v for v in dt.values())  # 148 при пороге 236 — «не больше»
+    # порция 6l: строка «Тип по годам» карточки — при том же исходе; без корня «надёжн» (запрет при T3 not)
+    assert dt["card_status"].startswith("Смена типа за год не подтверждена")
+    assert "надёжн" not in dt["card_status"].lower()
     # другой исход — текстов нет
     assert SC.dynamics_texts(tx, t3 | {"verdict_final": "partial"}) is None
     assert SC.dynamics_texts(tx, t3 | {"verdict_main": "not"}) is None
@@ -285,7 +292,7 @@ def test_dynamics_texts_as_in_report():
     s2 = story()
     s2["chapters"]["dynamics"] = s2["chapters"]["dynamics"] | {"verdict": dt["lead"]}
     h = SC.chapter_dynamics(s2, checks() | {"t3": t3}, ESC)
-    assert 'class="dyn-verdict"' in h and "40 против 3" in h
+    assert 'class="dyn-verdict"' in h and "40 при пороге 3" in h
     hc = HeadlineChecker(CFG.data)
     v = {"T3_reliable_placebo": "not", "T1_ladder_external": "partial_overall", "one_in_ten": False}
     assert hc.text_violations(list(dt.values()), v) == []
@@ -361,3 +368,66 @@ def test_ui_lint_catches_forbidden_word():
     combo = next(all_combos(CFG.data)) | {"T3_reliable_placebo": "not"}
     assert hc.text_violations(["надёжные переходы"], combo)
     assert hc.text_violations(["прогноз типа"], combo | {"T3_reliable_placebo": "confirmed"})
+
+
+def test_run_labels_only_when_runs_differ():
+    """Порция 6l (judge-c5 03.10): подписи прогонов у текстов исходов главы 5 — по facts.r1.source_run,
+    только если прогоны разные и у каждого есть подпись."""
+    labels = CFG["site"]["build"]["texts"]["dynamics"]["run_labels"]
+    tests = ["T3_reliable_placebo", "T2_direction"]
+    src = {"T3_reliable_placebo": "variant:graph_basket_cos", "T2_direction": "main"}
+    facts = {"r1": {"source_run": src}}
+    got = landing.run_labels(labels, facts, tests)
+    assert got == [labels["variant:graph_basket_cos"], labels["main"]]
+    assert landing.run_labels(labels, {"r1": {"source_run": {}}}, tests) is None  # оба — основной расчёт
+    odd = {"r1": {"source_run": {"T3_reliable_placebo": "variant:no_level"}}}
+    assert landing.run_labels(labels, odd, tests) is None  # подписи нет — подписей нет совсем
+    assert landing.run_labels(None, facts, tests) is None
+    h = SC.chapter_dynamics(story(), checks(), ESC)  # без подписей — прежний вид
+    assert 'class="run-lab"' not in h
+
+
+def test_level_rho_load(tmp_path, caplog):
+    """Порция 6l: level_rho.json — необязательный вход: нет ссылки или файла — None; не обычный режим — None;
+    файл старше facts.json этапа interpret — код 1."""
+    import logging
+    import os
+
+    from munnet.contracts import MissingInputError
+
+    class _Cfg:
+        def dir(self, _k):
+            return tmp_path
+
+    (tmp_path / "usefulness").mkdir()
+    (tmp_path / "interpret").mkdir()
+    ip = tmp_path / "interpret" / "facts.json"
+    ip.write_text("{}", encoding="utf-8")
+    lp = tmp_path / "usefulness" / "level_rho.json"
+    assert landing.level_rho_load(_Cfg(), None) is None
+    with caplog.at_level(logging.WARNING):
+        assert landing.level_rho_load(_Cfg(), "usefulness/level_rho.json") is None
+    assert any("уровне трат" in r.getMessage() for r in caplog.records)
+    lp.write_text('{"status": "done", "turnovers": {}}', encoding="utf-8")
+    assert landing.level_rho_load(_Cfg(), "usefulness/level_rho.json")["status"] == "done"
+    assert landing.level_rho_load(_Cfg(), "usefulness/level_rho.json", "demo") is None
+    old = ip.stat().st_mtime - 100
+    os.utime(lp, (old, old))
+    with pytest.raises(MissingInputError, match="старше"):
+        landing.level_rho_load(_Cfg(), "usefulness/level_rho.json")
+
+
+def test_run_pre_t2_split_by_code():
+    """Порция 6l, третий круг: разложение смен T2 основного расчёта (n_up + n_down = t3.main.n_reliable) —
+    своей строкой перед дословным текстом; сумма не сошлась или T2 не из основного расчёта — строки нет."""
+    tpl = CFG["site"]["build"]["texts"]["dynamics"]["t2_split"]
+    tests = ["T3_reliable_placebo", "T2_direction"]
+    facts = {"t2": {"main": {"n_up": 148, "n_down": 33}}, "t3": {"main": {"n_reliable": 181}}, "r1": {}}
+    got = landing.run_pre(tpl, facts, tests)
+    assert got[0] is None and "— 181: из них 148" in got[1] and "33 — к типам с меньшей" in got[1]
+    assert "надёжн" not in got[1].lower()
+    assert landing.run_pre(tpl, facts | {"t3": {"main": {"n_reliable": 180}}}, tests) is None
+    other = facts | {"r1": {"source_run": {"T2_direction": "variant:no_level"}}}
+    assert landing.run_pre(tpl, other, tests) is None
+    h = SC.chapter_dynamics(story(), checks(), ESC)
+    assert "Смен типа, с которыми" not in h  # без text_pre — прежний вид

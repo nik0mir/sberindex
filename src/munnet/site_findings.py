@@ -156,7 +156,12 @@ def r1_shares(checks: Mapping) -> list[dict]:
 
 
 def findings_texts(
-    tx: Mapping, story: Mapping, facts: Mapping, checks: Mapping, useful: Mapping | None = None
+    tx: Mapping,
+    story: Mapping,
+    facts: Mapping,
+    checks: Mapping,
+    useful: Mapping | None = None,
+    level: Mapping | None = None,
 ) -> dict[str, Any] | None:
     """Тексты блока с подставленными числами; None — блок не показывается (вердикты не те, что в
     ``requires``, или числовое условие не выполнено). ``useful`` (порция 6b, ``site_useful``) — доля случаев,
@@ -207,7 +212,9 @@ def findings_texts(
             "text": _fill(
                 tx["stood"]["text"], {k: t1[k] for k in ("rho_a", "rho_b", "rival_rho", "rival", "n_a")}
             ),
-        },
+        }
+        # порция 6l: ρ уровня трат с оборотом Росстата рядом с ρ типов (stood.level, level_rho.json)
+        | level_texts(tx["stood"], level, facts),
         "border": {
             **{k: tx["border"][k] for k in ("label", "title", "chart")},
             "text": _fill(
@@ -237,6 +244,40 @@ def findings_texts(
         "_shares": shares,
         "_example": (useful or {}).get("example"),
     }
+
+
+def level_texts(stx: Mapping, lv: Mapping | None, facts: Mapping) -> dict[str, str]:
+    """Порция 6l: строка «уровень трат связан с розницей сильнее типов» (``stood.level``) и, если по общепиту
+    интервал разности захватывает ноль, — ``stood.level_same``; метка — поле ``note`` файла до двоеточия.
+    Строка только при 95% интервале разности «уровень − типы» по рознице выше нуля; иначе пусто (текст написан
+    под этот исход). ρ типов по рознице в файле не совпал с ``facts.t1`` — код 3."""
+    from munnet.contracts import QCError
+
+    if not lv or not stx.get("level"):
+        return {}
+    t = lv.get("turnovers") or {}
+    r, c = t.get("retail") or {}, t.get("catering") or {}
+    rho_a = (((facts.get("t1") or {}).get("per") or {}).get("retail") or {}).get("rho_a")
+    if rho_a is None or not r.get("types") or not r.get("level") or not r.get("diff_level_minus_types"):
+        return {}
+    if abs(float(r["types"]["rho"]) - float(rho_a)) > 5e-4:
+        raise QCError(f"site: level_rho.json: ρ типов по рознице {r['types']['rho']} ≠ facts.t1 {rho_a}")
+    if not float(r["diff_level_minus_types"]["ci"][0]) > 0:
+        return {}
+    nums = {"level_r": _f(r["level"]["rho"], 2), "types_r": _f(r["types"]["rho"], 2)}
+    text = _fill(str(stx["level"]), nums)
+    dc = (c.get("diff_level_minus_types") or {}).get("ci")
+    if stx.get("level_same") and dc and float(dc[0]) <= 0 <= float(dc[1]):
+        text = (
+            _dot(text)
+            + " "
+            + _fill(
+                str(stx["level_same"]),
+                {"level_c": _f(c["level"]["rho"], 2), "types_c": _f(c["types"]["rho"], 2)},
+            )
+        )
+    label = str(lv.get("note") or "").split(":")[0].strip()
+    return {"level": text, "level_label": label}
 
 
 def _mo_count(n: int) -> str:
@@ -418,6 +459,9 @@ def findings_html(ft: Mapping | None, story: Mapping, order: Sequence[int], esc:
             note = _dot(p["note"]) + (" " + _dot(p["rules"]) if p.get("rules") else "")
             extra = f'<p class="fd-cap">{esc(_dot(p["chart"]))}</p><p class="fd-note">{esc(note)}</p>'
         body = f"<p>{esc(_dot(p['text']))}</p>"
+        if key == "stood" and p.get("level"):  # порция 6l: ρ уровня трат рядом с ρ типов, с меткой
+            lab = f' <span class="label-note">{esc(p["level_label"])}</span>' if p.get("level_label") else ""
+            body += f'<p class="fd-level">{esc(_dot(p["level"]))}{lab}</p>'
         if key == "use" and p.get("share"):  # порция 6b: доля случаев и оговорка о своём регионе
             body += f'<p class="fd-share">{esc(_dot(p["share"]))}</p><p>{esc(_dot(p["r_line"]))}</p>'
             if p.get("r_edit"):  # порция 6g: откуда заголовок «со своим регионом» (edits.vs_R_not_more_often)

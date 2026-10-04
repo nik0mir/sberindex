@@ -247,6 +247,7 @@ def example_texts(
     }
     out: dict[str, Any] = {
         "id": tid,
+        "name": name,
         "label": tx["ex_label"],
         "title": _fill(tx["ex_title"], vals),
         "text": _fill(tx["ex_text"], vals),
@@ -314,7 +315,7 @@ def strings(ut: Mapping | None, ex: Mapping | None, flag: str | None) -> list[st
         out += [ut["share"], ut["r_line"], ut["rules"], ut.get("r_edit") or ""]
     if ex:
         out += [ex["label"], ex["title"], ex["text"], ex["rule"], ex["open"], ex["aria"], ex["axis"]]
-        out += [r[0] for r in ex["rows"]] + [ex.get("reverse") or ""]
+        out += [r[0] for r in ex["rows"]] + [ex.get("reverse") or "", ex.get("size_note") or ""]
     return [s for s in out if s]
 
 
@@ -410,7 +411,9 @@ def example_html(ex: Mapping | None, esc: Esc, pair: Callable[[str, str], str], 
         f'<div class="fd-ex-text"><p class="fd-lab">{esc(ex["label"])}</p><h3>{esc(ex["title"])}</h3>'
         f"<p>{esc(_dot(ex['text']))}</p>"
         f'<p class="fd-note">{esc(_dot(ex["rule"]))}</p>'
-        f'<p><button type="button" class="open-card" data-go="{int(ex["id"])}" data-map="1">'
+        # порция 6l: пример — крупное МО, совет над ним — небольшим и средним (site_size.example_note)
+        + (f'<p class="fd-note fd-exsize">{esc(_dot(ex["size_note"]))}</p>' if ex.get("size_note") else "")
+        + f'<p><button type="button" class="open-card" data-go="{int(ex["id"])}" data-map="1">'
         f"{esc(ex['open'])}</button></p></div>"
         f"<figure>{fig}</figure>{rev}</div>"
     )

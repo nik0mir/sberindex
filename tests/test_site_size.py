@@ -259,3 +259,17 @@ def test_site_size_stale_is_code1(tmp_path):
     _write_size(d, set(), sc=_sc(delta=-0.01))  # посчитано на другом исходе by_type_test
     with pytest.raises(MissingInputError, match="by_type"):
         landing.run(cfg)
+
+
+def test_example_note_only_for_large():
+    """Порция 6l (check-ux 03.10): строка под «Пример по правилу» — только если пример — крупное МО;
+    население — из size_by_mo.csv, «тыс.» с десятичной запятой."""
+    by_mo = pd.DataFrame(
+        {"territory_id": [269, 2], "pop_avg_2023": [294919.5, 15637.5], "large": [True, False]}
+    )
+    s = site_size.example_note(SX, by_mo, 269, "Йошкар-Ола")
+    assert s.startswith("Йошкар-Ола — крупный муниципалитет: 294,9 тыс. жителей в 2023 году")
+    assert "смотреть на оба ориентира" in s and "{" not in s
+    assert site_size.example_note(SX, by_mo, 2, "Малое") is None
+    assert site_size.example_note(SX, by_mo, 999, "Нет в базе") is None
+    assert site_size.example_note({}, by_mo, 269, "Йошкар-Ола") is None

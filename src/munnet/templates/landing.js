@@ -398,7 +398,6 @@ function statusLine(r) {
   let h = noise
     ? `<p class="status noise">${esc(CARD.status_noise || "Смена типа в пределах шума")}.</p>`
     : `<p class="status solid">${esc(CARD.status_reliable || "Смена типа: обе половины года согласны")}.</p>`;
-  if (r.t != null && r.t !== r.t24) h += `<p class="status">Итоговый ${T(r.t)} посчитан по всем 24 месяцам сразу, поэтому может отличаться от типа отдельного года.</p>`;
   return h;
 }
 // устойчивость словами, одной строкой рядом с типом; варианты расчёта и повторы с другим seed — раздельно (§3.9)
@@ -426,7 +425,7 @@ function stabilityLine(nd) {
   // порция 6j: «Устойчивость типа: Тип устойчив.» — повтор; при флаге — только он
   const head = flag ? `<b class="flag-word flag-${esc(nd.fl[0])}">${esc(cap1(flag))}.</b> ` : `<b>${esc(CARD.stability || "Устойчивость типа")}:</b> `;
   const body = bits.map(cap1).join(". ");
-  return `<p class="rob-line">${head}${body}. <span class="label-note">${esc(story.stability_label || "описание: заранее не проверяли")}</span></p>`;
+  return `<p class="rob-line">${head}${body}. <span class="label-note">${esc(story.stability_label || "описание: заранее записанной проверки нет")}</span></p>`;
 }
 
 function renderCard(r) {
@@ -453,9 +452,11 @@ function renderCard(r) {
 
   // 2. С кем сверять изменения: соседи по своему региону (набор B T7), затем похожие по тратам в других регионах
   if (nd.simb && nd.simb.length) {
-    h += `<section class="row sim-b" aria-labelledby="c-simb"><h3 id="c-simb">${esc(CARD.simb_title || "Соседи по своему региону")}</h3>${simList(nd.simb, false)}`;
-    // порция 6j: строка — как совет по размеру: у крупных (флаг lg; вне базы — по населению) своя
+    // порция 6j: строка — как совет по размеру: у крупных (флаг lg; вне базы — по населению) своя;
+    // порция 6l: у крупных и заголовок — про оба ориентира
     const big = nd.lg != null ? nd.lg === 1 : (nd.pop || r.pop || 0) >= (CARD.large_pop || Infinity);
+    const st = (big && CARD.simb_title_large) || CARD.simb_title || "Соседи по своему региону";
+    h += `<section class="row sim-b" aria-labelledby="c-simb"><h3 id="c-simb">${esc(st)}</h3>${simList(nd.simb, false)}`;
     const sn = (big && CARD.simb_note_large) || CARD.simb_note;
     if (sn) h += `<p class="sim-note">${esc(sn)}.</p>`;
     h += `</section>`;
@@ -488,7 +489,10 @@ function renderCard(r) {
   h += `<details class="more"><summary>Подробнее</summary>`;
   const moreHead = h.length;
   if (nd.t != null && nd.t23 != null) {
-    h += `<section class="row" aria-labelledby="c-path"><h3 id="c-path">Тип по годам</h3><dl class="path-line">`;
+    h += `<section class="row" aria-labelledby="c-path"><h3 id="c-path">Тип по годам</h3>`;
+    // порция 6l (check-ux 04.10): тип по годам разный — тип выше посчитан по всем 24 месяцам
+    if (nd.t23 !== nd.t24) h += `<p class="cap">Тип выше — по всем 24 месяцам; по годам отдельно он бывает другим.</p>`;
+    h += `<dl class="path-line">`;
     h += `<dt>2023</dt><dd>${typeHTML(nd.t23)}</dd><dt>2024</dt><dd>${typeHTML(nd.t24)}</dd></dl>`;
     h += statusLine(nd) + `</section>`;
   }
@@ -500,7 +504,7 @@ function renderCard(r) {
     h += `<section class="row path" aria-labelledby="c-win"><h3 id="c-win">Тип по окнам</h3>${pathChart(nd.win, nd.st)}</section>`;
   }
   if (ty && ty.why && nd.why) {
-    h += `<section class="row" aria-labelledby="c-why"><h3 id="c-why">Чем отличается тип</h3><p class="cap">Описание типа, не причина</p><div class="why">`;
+    h += `<section class="row" aria-labelledby="c-why"><h3 id="c-why">Чем отличается тип</h3><p class="cap">Чем тип отличается от остальных; причины не проверяли</p><div class="why">`;
     ty.why.forEach((w, i) => {
       h += `<div class="why-row"><span class="lab">${esc(w.label)}<small>${w.kind === "place" ? "признак места" : "часть корзины"}</small></span>${strip(w, nd.why[i])}</div>`;
     });

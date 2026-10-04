@@ -283,10 +283,24 @@ def card_notes(tx: Mapping, st: Mapping | None, n_shown: int = 5) -> dict[str, A
     return {
         "simb_note": _fill(tx["card_small"], f),
         "simb_note_large": _fill(tx["card_large"], f),
+        # порция 6l (check-ux 04.10): у крупных заголовок блока — про оба ориентира
+        "simb_title_large": str(tx.get("card_title_large") or ""),
         "sim_note": "",
         "large_note": "",
         "large_pop": float(st["large_pop"]),
     }
+
+
+def example_note(tx: Mapping, by_mo: pd.DataFrame, ex_id: int, name: str) -> str | None:
+    """Порция 6l (check-ux 03.10): пример пользы (``usefulness.pick_example``) выбран на рознице, где размер
+    ещё не учитывали. Если это крупный муниципалитет (флаг ``large`` в ``size_by_mo.csv``), а совет над ним —
+    небольшим и средним, строка ``size.ex_large`` говорит об этом: население 2023 года и совет для крупных.
+    Пример не крупный, нет шаблона или узла в базе — None (строки нет)."""
+    tpl = tx.get("ex_large")
+    row = by_mo[by_mo["territory_id"].astype(int) == int(ex_id)]
+    if not tpl or row.empty or int(ex_id) not in large_ids(by_mo):
+        return None
+    return _fill(str(tpl), {"name": name, "pop": _thousands(float(row["pop_avg_2023"].iloc[0]))})
 
 
 def strings(st: Mapping | None, card: str = "") -> list[str]:
@@ -350,7 +364,8 @@ def size_svg(st: Mapping, W: float = 440) -> str:
         f'stroke-width="1" stroke-dasharray="3 3"/>'
     )
     g.append(_text(x50, top - 8, st["ref"], "axis", "middle"))
-    for t in (0.0, 0.25, 0.5):
+    # порция 6l (check-ux): деление 60% — столбики доходят до 58%
+    for t in (0.0, 0.25, 0.5, 0.6):
         g.append(_text(sx(t), yb + 16, style.fmt_pct(t, 0), "axis", "start" if t == 0 else "middle"))
     return (
         f'<svg class="fd-svg size-svg" viewBox="0 0 {W:g} {H:g}" role="img" aria-label="{_e(st["aria"])}" '

@@ -50,7 +50,7 @@ def test_reverse_example_takes_chapter6_number_by_code():
     t7ex = {"territory_id": 44, "errors": {"A": 0.0439, "B": 0.0583, "C": 0.0488, "D": 0.0496}}
     ex = site_useful.example_texts(ux, _uf(), {}, t7_example=t7ex)
     rev = ex["reverse"]
-    assert "0,058 против 0,033 без поправки на регион (в таблице главы 6 — 0,050, с поправкой)" in rev
+    assert "0,058 против 0,033 без поправки на регион (в главе 6, с поправкой на регион, — 0,050)" in rev
     assert "ошибаются больше похожих по тратам" in rev
     # пример главы 6 — другой муниципалитет: скобки с его числом нет, пустого поля тоже
     rev2 = site_useful.example_texts(ux, _uf(), {}, t7_example={**t7ex, "territory_id": 7})["reverse"]

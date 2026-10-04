@@ -289,7 +289,9 @@ def site_numbers(cfg: Config) -> dict[str, str]:
             "share_cross": style.fmt_pct(1 - float(main["same_region"].mean())),
             "share_cross_random": style.fmt_pct(1 - float((n_r * (n_r - 1)).sum()) / (big_n * (big_n - 1))),
             "n_rhythm": style.fmt_num(n_rhythm),
-            "share_rhythm": str(share["text"]),
+            # порция 6l, третий круг (check-ux 04.10): знаменатель доли — узлы сети с полным рядом (1776);
+            # у 2016 МО разведки другая база (314, 15,6%). Шаблон roles.business заморожен, поле — нет
+            "share_rhythm": f"{share['text']} из {style.fmt_num(len(rhythm))}",
             "share_rhythm_null": str(ef["syn.null_reliable_share_nodes"]["text"]),
         }
     )
@@ -521,6 +523,20 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         if TX.get("intro") and scope.get("n_nodes") is not None
         else None,
         "point_heads": heads,
+        # порция 6l (judge-c5 03.10): подписи прогонов у текстов пунктов (тесты пункта — thesis_assembly)
+        "point_runs": [
+            run_labels((TX.get("dynamics") or {}).get("run_labels"), facts, list(ta[k]))
+            if len(ta[k]) == len(th[k])
+            else None
+            for k in ("point_1", "point_2", "point_3")
+        ],
+        # порция 6l, третий круг: разложение смен T2 основного расчёта перед его дословным текстом
+        "point_pre": [
+            run_pre((TX.get("dynamics") or {}).get("t2_split"), facts, list(ta[k]))
+            if len(ta[k]) == len(th[k])
+            else None
+            for k in ("point_1", "point_2", "point_3")
+        ],
         "caveat_head": H["T6_caveat"]["caveat"] if v["caveat"] else limits_title,
         "labels": {k: TX.get(k) for k in ("question_label", "how_checked", "caveat_label") if TX.get(k)},
         "gloss": dict(TX.get("gloss") or {}),
@@ -558,6 +574,13 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "title": _headline(H, "T3_reliable_placebo", t3, vd),
             "lead": dyn_lead,
             "texts": [texts["T3_reliable_placebo"], texts["T2_direction"]],
+            # порция 6l (judge-c5 03.10): из какого прогона каждый текст (facts.r1.source_run)
+            "text_runs": run_labels(
+                (TX.get("dynamics") or {}).get("run_labels"), facts, ["T3_reliable_placebo", "T2_direction"]
+            ),
+            "text_pre": run_pre(
+                (TX.get("dynamics") or {}).get("t2_split"), facts, ["T3_reliable_placebo", "T2_direction"]
+            ),
             "layer_name": flows["layer_name"],
         },
         "comparable": {
@@ -615,7 +638,8 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "descriptive": dict(facts["names_descriptive"]),
             "caption": "Относительно своего региона",
         },
-        "reliability_key": P["reliability_grammar"]["key"],
+        # порция 6l (check-ux 04.10): без третьего имени плацебо «(псевдогоды)»; ключ заморожен
+        "reliability_key": str(P["reliability_grammar"]["key"]).replace(" (псевдогоды)", ""),
         "stability_label": TX.get("descr_label") or A["mo_stability"]["label"],  # порция 6j
         "card": {  # строки карточки из site.build.texts (линтуются как текст сайта)
             "no_comparable": TX.get("no_comparable"),
@@ -626,6 +650,66 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         },
         "view": view,
     }
+
+
+def level_rho_load(cfg: Config, rel: str | None, mode_name: str = "normal") -> dict | None:
+    """Порция 6l (совет судей 03.10, п. 3 плана): ρ уровня трат с оборотом Росстата рядом с ρ типов —
+    ``findings.stood.level_from`` (``outputs/usefulness/level_rho.json``). Необязательный вход, как выходы
+    usefulness: нет ссылки, файла, ``status`` не ``done`` или режим не обычный — None (строки нет,
+    предупреждение). Файл старше ``outputs/interpret/facts.json`` — код 1 (устаревший вход)."""
+    if not rel:
+        return None
+    if mode_name != "normal":
+        return None
+    path = cfg.dir("outputs") / str(rel)
+    if not path.exists():
+        log.warning("site: нет %s — строки об уровне трат в «Что устояло» нет", path)
+        return None
+    ip = cfg.dir("outputs") / "interpret" / "facts.json"
+    if ip.exists() and path.stat().st_mtime < ip.stat().st_mtime:
+        raise MissingInputError(f"site: {path} старше {ip} — перезапустите этап usefulness")
+    lv = json.loads(path.read_text(encoding="utf-8"))
+    if lv.get("status") != "done":
+        log.warning("site: %s: status = %r — строки об уровне трат нет", path, lv.get("status"))
+        return None
+    return lv
+
+
+def run_pre(tpl: str | None, facts: Mapping, tests: Sequence[str]) -> list[str | None] | None:
+    """Порция 6l, третий круг (check-ux 04.10): своя строка перед дословным текстом T2 основного расчёта —
+    разложение смен типа «вверх» и «вниз» (``facts.t2.main``: n_up, n_down). Сумма должна равняться числу смен
+    основного расчёта ``facts.t3.main.n_reliable``; иначе, без шаблона или если T2 не из основного расчёта —
+    None (строки нет)."""
+    if not tpl or "T2_direction" not in tests:
+        return None
+    if str(((facts.get("r1") or {}).get("source_run") or {}).get("T2_direction", "main")) != "main":
+        return None
+    m2 = (facts.get("t2") or {}).get("main") or {}
+    n3 = ((facts.get("t3") or {}).get("main") or {}).get("n_reliable")
+    if m2.get("n_up") is None or m2.get("n_down") is None or n3 is None:
+        return None
+    up, down = int(m2["n_up"]), int(m2["n_down"])
+    if up + down != int(n3):
+        log.warning("site: t2.main n_up + n_down = %d ≠ t3.main.n_reliable %s", up + down, n3)
+        return None
+    line = fill(
+        str(tpl),
+        {"n": style.fmt_num(up + down), "up": style.fmt_num(up), "down": style.fmt_num(down)},
+    )
+    return [line if t == "T2_direction" else None for t in tests]
+
+
+def run_labels(labels: Mapping[str, str] | None, facts: Mapping, tests: Sequence[str]) -> list[str] | None:
+    """Порция 6l (judge-c5 03.10): подписи «из какого прогона» у текстов исходов главы 5 — по
+    ``facts.r1.source_run`` (прогон, давший итоговый вердикт; нет записи — основной расчёт). Только если
+    прогоны у текстов разные и у каждого есть подпись в ``labels``; иначе None (тексты без подписей)."""
+    if not labels:
+        return None
+    src = (facts.get("r1") or {}).get("source_run") or {}
+    runs = [str(src.get(t, "main")) for t in tests]
+    if len(set(runs)) < 2 or not all(labels.get(r) for r in runs):
+        return None
+    return [str(labels[r]) for r in runs]
 
 
 def hero_texts(cfg: Config, tx: Mapping[str, str], scope: Mapping, n_types: int) -> dict[str, str] | None:
@@ -1957,6 +2041,8 @@ def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFr
     """Четыре записи типов (§5): названия, правило, размер, профиль, корзина, полосы «почему», примеры."""
     from munnet.clustering.figures import FEATURE_LABELS
 
+    # порция 6l (check-ux 03.10): часть корзины — «продукты», как в паспортах типов и корзине карточки
+    flab = lambda f: FEATURE_LABELS.get(str(f), str(f)).replace("продовольствие", "продукты")  # noqa: E731
     view = story["view"]
     names = story["names"]
     nodes = mo[mo["role"].isin(["territorial", "city"])]
@@ -2016,7 +2102,7 @@ def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFr
             rec["profile"] = [
                 {
                     "feature": str(f),
-                    "label": FEATURE_LABELS.get(str(f), str(f)),
+                    "label": flab(f),
                     "median": _num(m, 4),
                     "lo": _num(lo, 4),
                     "hi": _num(hi, 4),
@@ -2037,7 +2123,7 @@ def build_types(d: SiteData, mo: pd.DataFrame, story: Mapping, values: pd.DataFr
             rec["why"] = [
                 {
                     "feature": f,
-                    "label": FEATURE_LABELS.get(f, f),
+                    "label": flab(f),
                     "kind": "basket" if f.startswith("clr_rel_") else "place",
                     "q": [_num(v, 3) for v in np.nanquantile(values[f].to_numpy(dtype=float), qs)],
                     "med": _num(np.nanmedian(vt[f].to_numpy(dtype=float)), 3),
@@ -2100,7 +2186,7 @@ def build_checks(d: SiteData, mo: pd.DataFrame, layout: Mapping, hm: HexMap) -> 
         else [
             {
                 "name": r["name"],
-                "label": r["label"],
+                "label": str(r["label"]).replace("продовольствие", "продукты"),  # порция 6l, как в карточке
                 "group": r["group"],
                 "rho_b_catering": _num(r.get("rho_b_catering"), 3),
                 "rho_b_retail": _num(r.get("rho_b_retail"), 3),
@@ -2406,7 +2492,8 @@ def download_csvs(mo: pd.DataFrame, types: list[dict], checks: Mapping, story: M
     )
     for col in ("node_id", "type", "type_2023", "type_2024", "pop_avg"):
         m[col] = pd.array(m[col].round() if col == "pop_avg" else m[col], dtype="Int64")
-    enc = lambda df: df.to_csv(index=False).encode("utf-8-sig")  # noqa: E731
+    # порция 6l (check-repro 03.10): перевод строки LF на любой ОС — как в git (иначе на Windows CRLF)
+    enc = lambda df: df.to_csv(index=False, lineterminator="\n").encode("utf-8-sig")  # noqa: E731
     readme = (
         "Выгрузки лендинга munnet. Данные: СберИндекс (CC BY-SA 4.0); Росстат, БД ПМО в обработке "
         "«Если быть точным» (CC BY 4.0); ФНС, 5-НДФЛ в обработке «Если быть точным» (лицензия на странице "
@@ -2494,12 +2581,22 @@ def screen0_html(
     out["answer_head"] = "\n".join(head)
 
     items = []
+    pruns = s0.get("point_runs") or []
     for i, (hs, texts) in enumerate(zip(s0.get("point_heads") or [], s0["points"], strict=False)):
+        runs = (pruns[i] if i < len(pruns) else None) or []  # порция 6l: из какого прогона текст
         body = []
         if i == 0 and s0.get("question"):
             q = lab.get("question_label", "Вопрос")
             body.append(f'<p class="q"><b>{_t(q)}.</b> {_t(s0["question"])}</p>')
-        body += [f"<p>{_t(x)}</p>" for x in texts]
+        # порция 6l, третий круг: подпись прогона — с точкой (дословный текст начинается с прописной); своя
+        # строка-разложение — отдельным абзацем с подписью, дословный текст — следом
+        pre = ((s0.get("point_pre") or [None] * 3)[i] if i < len(s0.get("point_pre") or []) else None) or []
+        for j, x in enumerate(texts):
+            rl = f'<b class="run-lab">{_t(runs[j])}.</b> ' if j < len(runs) else ""
+            if j < len(pre) and pre[j]:
+                body += [f"<p>{rl}{_t(_dot(pre[j]))}</p>", f"<p>{_t(x)}</p>"]
+            else:
+                body.append(f"<p>{rl}{_t(x)}</p>")
         body += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, texts)]
         heads = "".join(f'<span class="pt-h">{_t(_dot(h))}</span> ' for h in hs).strip()
         items.append(
@@ -2955,7 +3052,9 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
             raise QCError("site: флаг устойчивости типа: " + "; ".join(bad[:5]))
         flag_codes = {int(k): str(v) for k, v in codes.items()}
         mo["fl"] = mo["node"].map(lambda n: flag_codes.get(int(n)) if pd.notna(n) else None)
-        story["card"]["flag_words"] = words
+        # порция 6l (check-ux 03.10): слова флага — site.build.texts.card.flag_words поверх mo_flags.csv
+        site_words = ((cfg["site"]["build"].get("texts") or {}).get("card") or {}).get("flag_words") or {}
+        story["card"]["flag_words"] = {c: str(site_words.get(c) or w) for c, w in words.items()}
     if size_in is not None:  # флаг «крупный» по узлу (у района столицы — узел-город, его в size_by_mo нет)
         bad = site_size.check_large(size_in["by_mo"], size_in["size"])
         if bad:
@@ -2996,6 +3095,8 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         (cfg["site"]["build"].get("texts") or {}).get("dynamics"), checks.get("t3")
     )
     site_chapters.apply_dynamics(story, dyn_t, story["chapters"]["dynamics"]["title"])
+    if dyn_t and dyn_t.get("card_status"):  # порция 6l: «Тип по годам» в карточке — при исходе главы 5
+        story["card"]["status_noise"] = dyn_t["card_status"]
     if useful_in is not None:  # те же доли «тот же тип», что у usefulness.type_flag.per_variant (иначе код 3)
         bad = check_r1_shares(checks.get("r1") or {}, useful_in["facts"])
         if bad:
@@ -3044,8 +3145,22 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         )
         if size_t is not None:
             site_size.check_rows(size_t)
+            ex = useful.get("example")
+            if ex:  # порция 6l: пример пользы — крупное МО под советом небольшим и средним
+                ex["size_note"] = site_size.example_note(
+                    tx.get("size") or {}, size_in["by_mo"], int(ex["id"]), str(ex.get("name") or "")
+                )
             useful["size"] = size_t
-    ft = site_findings.findings_texts(tx.get("findings") or {}, story, facts, checks, useful)
+    ft = site_findings.findings_texts(
+        tx.get("findings") or {},
+        story,
+        facts,
+        checks,
+        useful,
+        level=level_rho_load(
+            cfg, ((tx.get("findings") or {}).get("stood") or {}).get("level_from"), mode.name
+        ),
+    )
     if useful_in is not None and ft is None:
         log.warning("site: блок «Что устояло» не собран — доля случаев и пример пользы не показаны")
     if tx.get("findings") and ft is None:

@@ -99,7 +99,8 @@ UI: dict[str, str] = {
     "types_border": "На границе с другим типом",
     "types_largest": "Крупнейший",
     "types_aria": "{name}: медианы признаков типа относительно типичного муниципалитета",
-    "types_note_label": "Описание: заранее не проверяли",
+    # запасная плашка; на странице — story.stability_label (site.build.texts.descr_label)
+    "types_note_label": "описание: заранее записанной проверки нет",
     "ami_title": "С каким делением без типов типы совпадают сильнее всего",
     "ami_cap": (
         "AMI — совпадение типов с делением муниципалитетов по одному признаку: 0 — как у случайного деления, "
@@ -128,7 +129,8 @@ UI: dict[str, str] = {
     "order_aria_b": "Сила порядка {turnover} внутри страт у типов и у делений без типов",
     "order_best": "сильнейшее: {label}",
     "order_types": "типы {rho}",
-    "order_proxies": "Описание: заранее не проверяли",
+    # порция 6l: заголовок раскрывающегося описания — о чём оно; плашка — story.stability_label
+    "order_proxies": "Городские округа, столицы регионов и плотность населения по типам",
     # глава 5
     "flows_a": "Тип в 2023 году",
     "flows_b": "Тип в 2024 году",
@@ -153,25 +155,26 @@ UI: dict[str, str] = {
     # порция 6b (check-ux): итог под графиком плацебо словами; фразы — по вердиктам checks.t3, числа — там же
     "placebo_sum_head": "Заголовок главы — по самому строгому варианту расчёта.",
     "placebo_sum_final_not": (
-        "При варианте «{variant}» число смен не отличается от плацебо: {obs} при 95-м перцентиле "
-        "плацебо {p95}."
+        "При варианте «{variant}» смен не больше, чем на плацебо: {obs} при пороге {p95}."
     ),
+    # порция 6l (check-ux 03.10): одно опорное число плацебо в главе — 95-й перцентиль (было «против медианы»)
     "placebo_sum_main_up": (
-        "В основном расчёте смен больше, чем на плацебо ({obs} против медианы {med}), но этот результат "
-        "не устоял к вариантам расчёта."
+        "В основном расчёте смен больше, чем бывает на плацебо ({obs} при пороге {p95}), но "
+        "этот результат не устоял к вариантам расчёта."
     ),
     "placebo_main": "Основной расчёт — {label}",
     "placebo_obs": "наблюдение {n}",
     "placebo_p95": "95-й перцентиль плацебо {n}",
     "placebo_key": (
-        "Точка — одно плацебо: «год», собранный из перемешанных месяцев 2023 и 2024 годов. Пунктир — "
-        "95-й перцентиль плацебо, красная черта — наблюдение. Проверка пройдена, если черта правее пунктира."
+        "Точка — одно плацебо: «год», собранный из перемешанных месяцев 2023 и 2024 годов. Пунктир — порог: "
+        "больше этого числа смен дают только 5% плацебо (95-й перцентиль). Красная черта — наблюдение. "
+        "Проверка пройдена, если черта правее пунктира."
     ),
     "placebo_aria": "Число смен типа: {label}; наблюдение {obs}, 95-й перцентиль плацебо {p95}",
     "placebo_col_run": "Расчёт",
     "placebo_col_obs": "Наблюдение",
     "placebo_col_med": "Медиана плацебо",
-    "placebo_col_p95": "95-й перцентиль плацебо",
+    "placebo_col_p95": "Порог: 95-й перцентиль плацебо",
     "placebo_axis": "число смен типа за год",
     "type_n": "Тип {t}",
     "col_types": "типы",
@@ -717,7 +720,8 @@ def chapter_types(
         text += f'<details class="how"><summary>{esc(UI["how"])}</summary><p>{esc(ch["text"])}</p></details>'
     if ch.get("note"):
         text += (
-            f'<p class="note"><b>{esc(UI["types_note_label"])}.</b> {esc(ch["note"])}</p>'
+            f'<p class="note">{esc(ch["note"])} <span class="label-note">'
+            f"{esc(story.get('stability_label') or UI['types_note_label'])}</span></p>"
             if not str(ch["note"]).lower().startswith("описание")
             else f'<p class="note">{esc(ch["note"])}</p>'
         )
@@ -981,7 +985,8 @@ def chapter_order(story: Mapping, checks: Mapping, esc: Esc) -> str:
     if ch.get("proxies"):
         text += (
             f'<details class="how"><summary>{esc(UI["order_proxies"])}</summary>'
-            f"<p>{esc(ch['proxies'])}</p></details>"
+            f'<p>{esc(ch["proxies"])} <span class="label-note">'
+            f"{esc(story.get('stability_label') or UI['types_note_label'])}</span></p></details>"
         )
     svg_a, svg_b, table = order_svgs(story, checks)
     pa, pb, _ = order_svgs(story, checks, PHONE_W)
@@ -1253,7 +1258,7 @@ def placebo_summary(t3: Mapping | None) -> str:
             )
         if t3.get("unstable") and main.get("passed") and main.get("observed") is not None:
             out.append(
-                UI["placebo_sum_main_up"].format(obs=_f(main["observed"]), med=_f(main.get("median") or 0))
+                UI["placebo_sum_main_up"].format(obs=_f(main["observed"]), p95=_f(main.get("p95") or 0))
             )
     return " ".join(out)
 
@@ -1285,7 +1290,7 @@ def dynamics_texts(tx: Mapping | None, t3: Mapping | None) -> dict[str, str] | N
         "fin_p95": _f(fin["p95"]),
     }
     out = {k: str(tx[k]) for k in ("title", "short", "lead")}
-    out |= {k: str(tx[k]) for k in ("sub", "limits_context") if tx.get(k)}
+    out |= {k: str(tx[k]) for k in ("sub", "limits_context", "card_status") if tx.get(k)}
     lead = out["lead"].format(**vals).rstrip()
     out["lead"] = lead if lead.endswith((".", "!", "?", "…")) else lead + "."  # абзац — с точкой
     return out
@@ -1326,7 +1331,17 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
     if ch.get("verdict"):  # 03.10 (совет судей): итог главы с числами обоих расчётов, как в отчёте
         text += f'<p class="dyn-verdict">{esc(ch["verdict"])}</p>'
     if texts:
-        body = "".join(f"<p>{esc(x)}</p>" for x in texts)
+        # порция 6l (judge-c5 03.10): у каждого текста исхода — из какого он прогона (рядом два разных «148»)
+        runs = ch.get("text_runs") or []
+        lab = lambda i: f'<b class="run-lab">{esc(runs[i])}.</b> ' if i < len(runs) else ""  # noqa: E731
+        # порция 6l, третий круг: своя строка-разложение перед дословным текстом T2 (text_pre)
+        pre = ch.get("text_pre") or []
+        body = "".join(
+            f"<p>{lab(i)}{esc(pre[i].rstrip('.') + '.')}</p><p>{esc(x)}</p>"
+            if i < len(pre) and pre[i]
+            else f"<p>{lab(i)}{esc(x)}</p>"
+            for i, x in enumerate(texts)
+        )
         text += f'<details class="how"><summary>{esc(UI["how"])}</summary>{body}</details>'
     flows = checks.get("flows") or {}
     svg = phone_pair(alluvial_svg(story, flows), alluvial_svg(story, flows, PHONE_W))
@@ -1372,11 +1387,11 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
     head = [UI["flows_col_from"], UI["flows_col_to"], UI["flows_col_n"]] + (
         [UI["flows_col_rel"]] if show_rel else []
     )
+    # порция 6l: в таблице, как на графике и в тексте, одно опорное число плацебо — 95-й перцентиль
     prow = [
         [
             esc(r["label"] + (" — " + r["sub"] if r.get("sub") else "")),
             _f(r.get("observed") or 0),
-            _f(r.get("median") or 0, 1),
             _f(r.get("p95") or 0),
         ]
         for r in runs
@@ -1408,7 +1423,7 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
         + _table(head, trows, esc, UI["alt_flows"])
         + (
             _table(
-                [UI["placebo_col_run"], UI["placebo_col_obs"], UI["placebo_col_med"], UI["placebo_col_p95"]],
+                [UI["placebo_col_run"], UI["placebo_col_obs"], UI["placebo_col_p95"]],
                 prow,
                 esc,
                 UI["alt_placebo"],

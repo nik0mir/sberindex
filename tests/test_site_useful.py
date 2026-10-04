@@ -172,7 +172,7 @@ def test_flag_summary_most_from_lowest_variant():
     """«Чаще всего — от …» — вариант с наименьшей долей «тот же тип»; числа — type_flag."""
     border = TX["findings"]["border"]
     s = site_useful.flag_summary(border["flag"], border["flag_most"], _uf())
-    assert s.startswith("Тип устойчив у 578 из 1776 муниципалитетов с типом (32,5%)")
+    assert s.startswith("Тип не зависит от варианта расчёта у 578 из 1776 муниципалитетов с типом (32,5%)")
     assert s.endswith("от правила связей между муниципалитетами")
     uf = _uf()
     uf["type_flag"]["per_variant"][2]["same_share"] = 0.3
@@ -306,7 +306,13 @@ def test_site_with_usefulness_flags_in_mo_and_card(tmp_path):
     for i in types:
         assert rows[i]["fl"] == ("s" if i % 2 else "d"), i
     assert rows[101]["fl"] == rows[CITY]["fl"]  # район столицы — флаг города
-    assert story["card"]["flag_words"]["s"] == "тип устойчив"
+    # порция 6l: слова флага на сайте — site.build.texts.card.flag_words поверх mo_flags.csv
+    assert story["card"]["flag_words"]["s"] == "тип не зависит от варианта расчёта"
+    assert story["card"]["flag_words"]["d"] == "тип зависит от варианта расчёта"
+    # порция 6l (check-repro): выгрузки CSV — с переводом строки LF на любой ОС
+    raw = (tmp_path / "site" / "data" / "download" / "mo.csv").read_bytes()
+    assert b"\r\n" not in raw and raw.count(b"\n") > 1
+    assert "тип не зависит от варианта расчёта" in raw.decode("utf-8-sig")
     # знак разности ошибок у отдельного МО (works, d) на страницу не попадает
     html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     assert '"works"' not in html and "rule_by_mo" not in html
@@ -426,3 +432,49 @@ def test_hero_why_and_stood_title():
         f["use"]["title_region"],
     ):
         assert not any(landing.norm(w) in landing.norm(t) for w in banned), t
+
+
+def _level(ci_r=(0.053, 0.108), ci_c=(-0.012, 0.067), types_r=0.5509):
+    """Синтетический level_rho.json (числа — как в выходе usefulness 04.10)."""
+    return {
+        "status": "done",
+        "note": "посчитано после проверок, правило заранее не записано: справка рядом с T1 (a)",
+        "turnovers": {
+            "retail": {
+                "types": {"rho": types_r},
+                "level": {"rho": 0.6327},
+                "diff_level_minus_types": {"point": 0.082, "ci": list(ci_r)},
+            },
+            "catering": {
+                "types": {"rho": 0.3745},
+                "level": {"rho": 0.3999},
+                "diff_level_minus_types": {"point": 0.025, "ci": list(ci_c)},
+            },
+        },
+    }
+
+
+def test_stood_level_line_from_level_rho():
+    """Порция 6l: строка «уровень трат … сильнее типов» в «Что устояло» — числа из level_rho.json, метка — из
+    note; только при интервале разности по рознице выше нуля; по общепиту — «в пределах погрешности»,
+    только если интервал захватывает ноль; ρ типов не совпал с facts.t1 — код 3."""
+    from test_site_findings import _checks, _facts, _story
+
+    args = (TX["findings"], _story(), _facts(), _checks(), _useful(_uf()))
+    plain = site_findings.findings_texts(*args)
+    assert "level" not in plain["stood"]
+    st = site_findings.findings_texts(*args, level=_level())["stood"]
+    assert st["level"] == (
+        "Уровень трат — насколько жители тратят больше или меньше, чем обычно в своём регионе. Он связан "
+        "с розницей Росстата сильнее типов: ρ 0,63 против 0,55. По общепиту разница в пределах погрешности: "
+        "ρ 0,40 у уровня трат и 0,37 у типов"
+    )
+    assert st["level_label"] == "посчитано после проверок, правило заранее не записано"
+    st = site_findings.findings_texts(*args, level=_level(ci_c=(0.01, 0.06)))["stood"]
+    assert "общепит" not in st["level"]
+    assert "level" not in site_findings.findings_texts(*args, level=_level(ci_r=(-0.01, 0.1)))["stood"]
+    with pytest.raises(QCError):
+        site_findings.findings_texts(*args, level=_level(types_r=0.60))
+    ft = site_findings.findings_texts(*args, level=_level())
+    h = site_findings.findings_html(ft, _story(), [2, 1, 3, 4], landing._t, "Источник.")
+    assert 'class="fd-level"' in h and "label-note" in h[h.index('class="fd-level"') :]
