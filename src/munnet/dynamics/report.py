@@ -83,6 +83,50 @@ def _events_text(counts: Mapping[str, int]) -> str:
     return ", ".join(parts) if parts else "событий нет"
 
 
+def driver_posthoc(drv: pd.DataFrame, types: pd.DataFrame, alpha: float) -> dict[str, float | int | str]:
+    """Числа прочтения проверки сюжета после вскрытия (03.10.2026); предрегистрированный вердикт не меняют.
+
+    Тип окна строится по сети корзин, поэтому первая часть проверки (Манн — Уитни, |изменение| части корзины)
+    срабатывает почти для любой части, по которой различаются типы. Факты: сколько из шести частей значимы,
+    размах отношений медиан, какие части не значимы, и размах медиан типов по общепиту, маркетплейсам
+    и продовольствию (``types.csv``) — по какой части типы различаются сильнее всего.
+    """
+    parts = drv.loc[drv["is_part"].astype(bool)]
+    lo = parts["ratio"].idxmin()
+    nonsig = parts.loc[parts["p_value"] >= alpha]
+    span = {
+        q: float(types[f"clr_rel_{q}"].max() - types[f"clr_rel_{q}"].min())
+        for q in ("cafe", "marketplace", "food")
+    }
+    return {
+        "drv_n_parts": len(parts),
+        "drv_n_sig": int((parts["p_value"] < alpha).sum()),
+        "drv_ratio_min": float(parts["ratio"].min()),
+        "drv_ratio_max": float(parts["ratio"].max()),
+        "drv_ratio_min_part": PART_GEN[lo.removeprefix("clr_rel_")],
+        "drv_nonsig": ", ".join(
+            f"{PART_GEN[q.removeprefix('clr_rel_')]} (p = {make_fact('p', v, 'p').text})"
+            for q, v in nonsig["p_value"].items()
+        ),
+        "drv_cafe_span": span["cafe"],
+        "drv_mp_span": span["marketplace"],
+        "drv_food_span": span["food"],
+    }
+
+
+POSTHOC_KINDS = {
+    "drv_n_parts": "int",
+    "drv_n_sig": "int",
+    "drv_ratio_min": "num2",
+    "drv_ratio_max": "num2",
+    "drv_ratio_min_part": "str",
+    "drv_nonsig": "str",
+    "drv_cafe_span": "num2",
+    "drv_mp_span": "num2",
+    "drv_food_span": "num2",
+}
+
+
 def build_facts(out: Path, p: DynParams, figs: list[FigureInfo]) -> dict[str, Fact]:
     js = json.loads((out / "facts.json").read_text(encoding="utf-8"))
     comp = pd.read_csv(out / "comparison.csv").set_index("approach")
@@ -205,8 +249,9 @@ def build_facts(out: Path, p: DynParams, figs: list[FigureInfo]) -> dict[str, Fa
     _fact(f, "drv_n_same", d["n_same"], "int")
     _fact(f, "drv_level_ratio", drv.loc["log_level_rel", "ratio"], "num2")
     _fact(f, "drv_level_p", drv.loc["log_level_rel", "p_value"], "p")
-    n_sig = int((drv.loc[drv["is_part"].astype(bool), "p_value"] < p.driver_alpha).sum())
-    _fact(f, "drv_n_sig", n_sig, "int")
+    types_tab = pd.read_csv(out / "types.csv").set_index("type")
+    for key, value in driver_posthoc(drv, types_tab, p.driver_alpha).items():
+        _fact(f, key, value, POSTHOC_KINDS[key])
     if d["significant"] and d["expectation_met"]:
         verdict = "подтвердилась полностью: обе части проверки выполнены"
     elif d["significant"]:
@@ -351,6 +396,25 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
     ),
     "уровень трат у перешедших меняется не сильнее (отношение < 1,2)": lambda f: (
         _v(f, "drv_level_ratio") < 1.2
+    ),
+    # Отступление после вскрытия 03.10.2026 (разделы «Главное за минуту» и 6): охраняют его текст.
+    "после вскрытия: по записанному правилу — частично (первая часть выполнена, маркетплейсы не первые)": (
+        lambda f: _v(f, "drv_p") < _v(f, "driver_alpha") and _v(f, "drv_rank") > 1
+    ),
+    "после вскрытия: первая часть выполняется почти для любой части корзины (значимы не меньше 4 из 6)": (
+        lambda f: _v(f, "drv_n_sig") >= 4 and _v(f, "drv_n_parts") == 6
+    ),
+    "после вскрытия: уровень трат у перешедших не значим и меняется слабее любой части корзины": (
+        lambda f: (
+            _v(f, "drv_level_p") >= _v(f, "driver_alpha")
+            and _v(f, "drv_level_ratio") < _v(f, "drv_ratio_min")
+        )
+    ),
+    "после вскрытия: по общепиту типы различаются сильнее маркетплейсов и продовольствия, и он первый": (
+        lambda f: (
+            _v(f, "drv_cafe_span") > max(_v(f, "drv_mp_span"), _v(f, "drv_food_span"))
+            and f["dyn.drv_top"].value == PART_GEN["cafe"]
+        )
     ),
 }
 

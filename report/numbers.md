@@ -327,18 +327,22 @@
 | в report.md нет — `docs/dynamics.md` | 0,3; 0,5; 0,7 | `dyn.tau_lo`, `dyn.tau`, `dyn.tau_hi` | пороги MONIC |
 | 7 | 12 пар; все 4 типа сохранились | `dyn.n_adjacent`, `dyn.ev_adj_surv_05` (48 = 12 × 4), `dyn.ev_fl_surv_05` (4) | события; пороги 0,3 и 0,7 — `dyn.ev_*_03`, `dyn.ev_*_07` |
 | в report.md нет — `docs/dynamics.md` | 2 < 1 < 3 < 4 | `dyn.cafe_order` | порядок типов по общепиту |
-| в report.md нет — `docs/dynamics.md` | α = 0,05 | `dyn.driver_alpha` | |
-| 1, 7 | 1,25 | `dyn.drv_ratio` | на первой странице с 03.10.2026 — «в 1,25 раза по медиане» |
-| 7 | p = 0,001 | `dyn.drv_p` | |
+| 7 | 0,05 (в «p < 0,05») | `dyn.driver_alpha` | порог записанной проверки; тем же порогом с 04.10.2026 считается `dyn.drv_n_sig` |
+| 7 | 1,25 | `dyn.drv_ratio` | «медиана абсолютного изменения доли маркетплейсов больше … в 1,25 раза» (переход / без смены); на первой странице 03.10.2026 было «в 1,25 раза по медиане», с 04.10.2026 числа там нет |
+| 7 | p = 0,001 | `dyn.drv_p` | первая часть проверки `dynamics.tracking.driver` выполнена по записанному правилу; после вскрытия (отступление 03.10.2026, в отчёте с 04.10.2026, раздел 7 и п. 6 раздела 9) это p ничего не проверяет: у сменивших тип МО сильнее меняются 5 частей корзины из 6 (`dyn.drv_n_sig`) |
 | в report.md нет — `docs/dynamics.md` | AUC 0,57 | `dyn.drv_auc` | |
-| 7 | 5-е | `dyn.drv_rank` | |
-| 1, 7 | 2,11 | `dyn.drv_top_ratio` (часть — `dyn.drv_top`) | на первой странице — «в 2,11 раза» |
+| 7 | 5-е | `dyn.drv_rank` | «пятые из шести частей корзины» |
+| 7; часть без числа — 1 («сильнее всего — у кафе и ресторанов») | 2,11 | `dyn.drv_top_ratio` (часть — `dyn.drv_top`); в «от 1,18 до 2,11» — `dyn.drv_ratio_max` | первое место у общепита; на первой странице 03.10.2026 было «в 2,11 раза», с 04.10.2026 числа там нет |
 | в report.md нет — `docs/dynamics.md` | 3,3·10⁻²² | `dyn.drv_top_p` | |
 | в report.md нет — `docs/dynamics.md` | 1399 | `dyn.drv_alt_n` | строгое «без смены» |
 | в report.md нет — `docs/dynamics.md` | 6,7·10⁻⁴ | `dyn.drv_alt_p` | |
 | в report.md нет — `docs/dynamics.md` | 1,27 | `dyn.drv_alt_ratio` | |
-| в report.md нет — `docs/dynamics.md` | 1,03 | `dyn.drv_level_ratio` | |
-| в report.md нет — `docs/dynamics.md` | 0,379 | `dyn.drv_level_p` | |
+| 7 | 1,03 | `dyn.drv_level_ratio` | уровень трат у перешедших МО и у остальных, с 04.10.2026 в разделе 7 |
+| 7 | p = 0,379 | `dyn.drv_level_p` | |
+| 1, 7, 9 | пяти частей из шести; 5 частей из 6 | `dyn.drv_n_sig` (5), `dyn.drv_n_parts` (6) | число частей корзины с p < 0,05 у сменивших тип МО, второе прочтение проверки (с 04.10.2026) |
+| 7 | 1,18 | `dyn.drv_ratio_min` (часть — `dyn.drv_ratio_min_part`, транспорт) | наименьшее отношение медиан среди частей корзины |
+| 7 | транспорт (p = 0,063) | `dyn.drv_nonsig` | единственная часть корзины без p < 0,05 |
+| 7 | 1,21; 0,52; 0,53 | `dyn.drv_cafe_span`, `dyn.drv_mp_span`, `dyn.drv_food_span`; `csv:outputs/dynamics/types.csv` | размах медиан типов по долям общепита, маркетплейсов и продуктов (CLR относительно региона) |
 | в report.md нет — `docs/dynamics.md` | 11 месяцев из 12 | `yaml:dynamics.window_months`, `yaml:dynamics.step_months` | пересечение соседних окон |
 | в report.md нет — `docs/dynamics.md` | 0,99 (seed) | `dyn.seed_ari_min` | |
 | 7, 8 | `events_jaccard: 0.5`, `bootstrap: 1000`, `window_months: 12`, `step_months: 1` | `yaml:dynamics` | параметры |
