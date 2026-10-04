@@ -39,6 +39,7 @@
 | 1 | 0,35 и 0,28 против 0,24 и 0,17 | `int.t1.per.catering.best_rival_rho` (0,345), `int.t1.per.retail.best_rival_rho` (0,277), `int.t1.per.catering.rho_b` (0,237), `int.t1.per.retail.rho_b` (0,173) | ρ внутри страт размера и доли горожан: лучшее деление без типов и типы |
 | 1 | AMI 0,31; порог 0,30 | `int.t5.max_ami` (0,313, деление `sized:log_level_rel:+`); `yaml:interpret.tests.T5_trivial.ami_max` | T5 |
 | 1 | 181; 21; 47 | `int.t3.main.n_reliable`, `int.t3.main.median`, `int.t3.main.p95` (47,05) | надёжные переходы и плацебо, основной расчёт |
+| 1, README (с 04.10.2026) | 148 надёжных смен типа; 236; «каждый двадцатый набор плацебо даёт 236 и больше»; «не больше, чем бывает на плацебо» | `int.post_unsealing.t3_runs` [run = variant:graph_basket_cos, scheme = main: n_reliable = 148, p95 = 236,05, median = 33,5, share_above = 0,11] | сеть «косинус корзин»; «каждый двадцатый» — прочтение 95-го перцентиля; до 04.10.2026 было «столько же, сколько на плацебо». Не путать со 148 переходов к большей доле общепита (`int.t2.main.n_up`, основной расчёт) |
 | 1, 8 | 8 из 9 | `csv:outputs/interpret/r1_runs.csv` [test = T3_reliable_placebo; runs кроме main — 9 строк, из них confirmed 8, not — variant:graph_basket_cos] | прогоны устойчивости R1 |
 | 1 | 148; 33; 0,82; 0,49 | `int.t2.main.n_up`, `int.t2.main.n_down`, `int.t2.main.share_up` (0,818), `int.t2.main.p0` (0,488) | направление переходов |
 | 8, Г | 0,036; 0,050; 0,042; 0,038; −0,005 (от −0,009 до −0,003) | `int.t7.median_error.B` (0,0362), `int.t7.median_error.D` (0,0496); без поправки на регион — `int.t7.median_error_abs.D` (0,0416), `int.t7.median_error_abs.C` (0,0382), `int.t7.diffs.B-D_abs` (−0,0054; интервал −0,0086…−0,0032) | медианная ошибка: соседи по региону, похожие по корзине без типа; без поправки на регион — похожие по корзине, случайные того же размера; разность «соседи минус похожие по корзине» без поправки |
@@ -122,6 +123,21 @@
 | 3 | 0,315 | `feat.tree_kappa` | каппа дерева, корзина относительно региона |
 | в report.md нет — `docs/features.md` | 0,005 | `feat.ami_region` | AMI типов с регионом |
 | в report.md нет — `docs/features.md` | 0,73 | `feat.edge_rho_max` | \|ρ\| уровня трат и доли общепита (`feat.edge_rho_pair`) |
+| 3 (с 04.10.2026) | 709 из 1776; 597 | замер 04.10.2026, команда ниже: узлы итогового разбиения (`data/processed/cluster_final.parquet`), признаки места 2023 года (`data/processed/features_place.parquet`, `year` = 2023; год `clustering.inputs.place_year`) | узлов, где хотя бы одна из пяти долей `emp_sh_*` равна нулю; из них с нулём у `emp_sh_primary` — 597 (у `emp_sh_industry` — 226, `emp_sh_trade_transport` — 39, `emp_sh_market_services` — 28, `emp_sh_public` — 0); почему доли занятости без CLR |
+| 3 (с 04.10.2026) | 0,6; η² 0,14–0,26; 0,80; 0,61 | `feat.eta2_max` (`eda.synthesis.eta2_regional`); `feat.emp_eta2_range`; `feat.market_access_eta2`; `feat.age_old_share_eta2` | правило отбора атрибутов по η² группы региона (`munnet.features:_verdict`); почему доли занятости без вычета региона |
+
+Команда замера 04.10.2026 (нули долей занятости, раздел 3; пропусков в этих колонках у 1776 узлов нет). В $X$ доли `emp_sh_*` входят как есть, без вычета региона: `munnet.features:place_features` не делает для них версий `*_rel` (`PLACE_RELATIVE`), `munnet.clustering.inputs:_assemble` берёт колонки `features.space.attributes` без изменений, `build_X` только заполняет пропуски и масштабирует.
+
+```bash
+PYTHONIOENCODING=utf-8 uv run --frozen python - <<'EOF'
+import pandas as pd
+ids = pd.read_parquet("data/processed/cluster_final.parquet")["territory_id"]
+p = pd.read_parquet("data/processed/features_place.parquet").query("year == 2023").set_index("territory_id").reindex(ids)
+g = ["primary", "industry", "trade_transport", "market_services", "public"]
+z = p[[f"emp_sh_{x}" for x in g]] == 0
+print(len(p), int(z.any(axis=1).sum()), z.sum().to_dict())  # 1776 709 {primary: 597, industry: 226, ...}
+EOF
+```
 
 ## Раздел 4. Рёбра сети
 
@@ -282,7 +298,8 @@
 | в report.md нет — `docs/icvi.md` | 2,0 | `icvi.ci_scale` | множитель отклонений |
 | в report.md нет — `docs/icvi.md` | 95% | `icvi.ci_level` | |
 | 6 (18 ячеек: итог, спектральная, Leiden; остальные — `docs/icvi.md`, раздел 3) | таблица «кандидат × индекс» (30 ячеек) | `csv:outputs/evaluate/icvi_long.csv [candidate ∈ {hybrid_k04, spectral_k04, leiden_k03, louvain_k06, gmm_k03}; value, ci_low, ci_high, z]` | итог: `icvi.final_sw`, `icvi.final_sw_lo`, `icvi.final_sw_hi`, `icvi.final_z_sw` и т. д. для ch, s_dbw, avi, avu, mq |
-| 6 | в среднем по типам 91,3% | `icvi.final_avi` (0,913) | AVI итога в процентах; AVI — невзвешенное среднее изолируемостей типов (`munnet.icvi:avi`), поэтому «в среднем по типам» (с 03.10.2026) |
+| 6; 1 и README — 91% и 0,913 (с 04.10.2026) | в среднем по типам 91,3% | `icvi.final_avi` (0,913) | AVI итога в процентах; по определению (`docs/icvi.md`, формула Iso_k, внутренние связи — упорядоченными парами) это доля веса связей узлов типа, ведущих к узлам того же типа; AVI — невзвешенное среднее изолируемостей типов (`munnet.icvi:avi`), поэтому «в среднем по типам» (с 03.10.2026) |
+| 1, 6, README (с 04.10.2026) | 25%; 24,9% | `icvi.final_avi_base` (0,249) | случайный базис AVI итога: случайные метки тех же размеров типов (`docs/icvi.md`, таблица «Сравнение разных K без смещения») |
 | 6 | z −6,5; −85,6 | `icvi.final_z_s_dbw` (−6,4956), `icvi.final_z_avu` (−85,571) | итог хуже случайных меток по S_Dbw и AVU; те же числа — в таблице раздела 6 и `docs/icvi.md`, раздел 3 |
 | 6 | 178,0 | `icvi.final_z_avi` | |
 | 6 | 2/3; 9 кандидатов | `icvi.avu_k3_maxdev` (0,000), `icvi.n_k3` | AVU при K = 3 |
@@ -460,7 +477,7 @@
 | Раздел | Число в тексте | Источник | Что это |
 |---|---|---|---|
 | в report.md нет — разделы 2–8 / `docs/*.md` | 5 регионах | `e1.n_gap_regions_2024` | нет зарплаты за 2024 год |
-| 9 | 0,007 | `icvi.final_sw` | силуэт итога |
+| 1, 6, 9, README | 0,007 | `icvi.final_sw` | силуэт итога (в признаках $X$, `munnet.icvi:SPACE`); на первой странице и в README с 04.10.2026 |
 | в report.md нет — разделы 2–8 / `docs/*.md` | 143 | `cl.hybrid_zavi_min` | наименьшая z AVI гибрида |
 | 5 (4 из 5 и 1; 3 из 5 и 2 из 5 — `docs/clustering.md`, таблица 6б) | 4 из 5, 1; 3 из 5, 2 из 5 | `cl.sf_prereg_all`, `cl.sf_tolerance_all` | выбор среди всех семейств по seed |
 | 9 (29.09) | 5 → 20; 29.09 | `yaml:clustering.synthetic.repeats` (комментарий «было 5»); `docs/clustering.md`, раздел 10 | синтетика не предрегистрирована |
