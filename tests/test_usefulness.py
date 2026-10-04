@@ -254,6 +254,7 @@ def test_run_end_to_end(tmp_path):
         "by_type_by_mo.csv",
         "size_check.json",  # разведка usefulness.size_posthoc — свои файлы
         "size_by_mo.csv",
+        "example_small.json",  # пример совета по правилу usefulness.example_small
     }
     r = facts["rule"]
     v = r["vs_D"]

@@ -18,7 +18,8 @@
 с ``size_check.json`` → ``lower_four`` — то есть пример выбран на тех же МО, целях и наборах, что 56,3%.
 
 Выход — ``<paths.outputs>/usefulness/example_small.json``; прежние выходы этапа не трогает. Вызывается после
-``usefulness_size.run`` (подключение к ``munnet.usefulness.run`` — отдельным шагом после коммита правила).
+``usefulness_size.run`` и ``usefulness_level.run`` последним шагом ``munnet.usefulness.run``
+(подключён после коммита правила 28a2079).
 """
 
 from __future__ import annotations

@@ -146,8 +146,30 @@ def _independent_pick(cfg) -> tuple[int, int]:
     return int(min(dist.index[dist <= best + 1e-12])), len(frame)
 
 
+TIME_KEYS = {
+    "seconds"
+}  # замеры времени в JSON этапа (size_check.json: seconds и shared_members_bootstrap.seconds)
+
+
+def _drop_time(x):
+    if isinstance(x, dict):
+        return {k: _drop_time(v) for k, v in x.items() if k not in TIME_KEYS}
+    if isinstance(x, list):
+        return [_drop_time(v) for v in x]
+    return x
+
+
 def _hashes(folder: Path) -> dict[str, str]:
-    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.iterdir())}
+    """sha256 каждого файла: JSON — без полей времени (TIME_KEYS), остальное — побайтно."""
+    out = {}
+    for p in sorted(folder.iterdir()):
+        if p.suffix == ".json":
+            obj = _drop_time(json.loads(p.read_text(encoding="utf-8")))
+            data = json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        else:
+            data = p.read_bytes()
+        out[p.name] = hashlib.sha256(data).hexdigest()
+    return out
 
 
 def test_end_to_end_matches_independent_pick(tmp_path):
@@ -157,9 +179,8 @@ def test_end_to_end_matches_independent_pick(tmp_path):
     before = _hashes(folder)
     res = E.run(cfg)
     after = _hashes(folder)
-    # прежние выходы не тронуты
-    assert {k: v for k, v in after.items() if k != "example_small.json"} == before
-    assert set(after) - set(before) == {"example_small.json"}
+    # example_small.json уже записал usefulness.run (последний шаг); повтор даёт те же файлы побайтно
+    assert after == before
 
     tid, n_pool = _independent_pick(cfg)
     assert res["territory_id"] == tid
@@ -220,3 +241,57 @@ def test_missing_inputs(tmp_path):
     cfg, *_ = _synthetic(tmp_path, np.random.default_rng(1))
     with pytest.raises(MissingInputError):  # нет size_check.json и mo_flags.csv — usefulness не запускался
         E.run(cfg)
+
+
+def test_existing_outputs_unchanged_with_and_without_example(tmp_path, monkeypatch):
+    """Все прежние выходы usefulness с примером совета и без него одинаковы: JSON — без полей времени,
+    остальные файлы — побайтно."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    cfg_a, *_ = _synthetic(a, np.random.default_rng(5))
+    cfg_b, *_ = _synthetic(b, np.random.default_rng(5))
+    U.run(cfg_a)
+    monkeypatch.setattr(E, "run", lambda cfg: None)
+    U.run(cfg_b)
+    ha = _hashes(Path(cfg_a["paths"]["outputs"]) / "usefulness")
+    hb = _hashes(Path(cfg_b["paths"]["outputs"]) / "usefulness")
+    assert set(ha) - set(hb) == {"example_small.json"}
+    assert {k: v for k, v in ha.items() if k != "example_small.json"} == hb
+
+
+def test_unchanged_check_catches_real_change(tmp_path, monkeypatch):
+    """Проверка выше не слепа: если пример изменит прежний выход (facts.json), хеши разойдутся; а одно лишь
+    поле времени в size_check.json их не меняет."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    cfg_a, *_ = _synthetic(a, np.random.default_rng(5))
+    cfg_b, *_ = _synthetic(b, np.random.default_rng(5))
+    U.run(cfg_a)
+    real_run = E.run
+
+    def run_and_touch(cfg):
+        res = real_run(cfg)
+        p = Path(cfg["paths"]["outputs"]) / "usefulness" / "facts.json"
+        f = json.loads(p.read_text(encoding="utf-8"))
+        f["example_small"] = res["territory_id"]
+        p.write_text(json.dumps(f, ensure_ascii=False, indent=1), encoding="utf-8")
+        return res
+
+    monkeypatch.setattr(E, "run", run_and_touch)
+    U.run(cfg_b)
+    oa = Path(cfg_a["paths"]["outputs"]) / "usefulness"
+    ob = Path(cfg_b["paths"]["outputs"]) / "usefulness"
+    ha, hb = _hashes(oa), _hashes(ob)
+    assert ha["facts.json"] != hb["facts.json"]
+    # поле времени: другое значение seconds не меняет хеш, другое значение данных — меняет
+    p = ob / "size_check.json"
+    f = json.loads(p.read_text(encoding="utf-8"))
+    f["seconds"] += 100.0
+    f["shared_members_bootstrap"]["seconds"] += 100.0
+    p.write_text(json.dumps(f), encoding="utf-8")
+    assert _hashes(ob)["size_check.json"] == ha["size_check.json"]
+    f["lower_four"]["share"] += 1e-9
+    p.write_text(json.dumps(f), encoding="utf-8")
+    assert _hashes(ob)["size_check.json"] != ha["size_check.json"]

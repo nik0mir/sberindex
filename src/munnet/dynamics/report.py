@@ -83,6 +83,11 @@ def _events_text(counts: Mapping[str, int]) -> str:
     return ", ".join(parts) if parts else "событий нет"
 
 
+def pct_range(lo: float, hi: float) -> str:
+    """Диапазон долей с одним знаком процента: 0,137 и 0,171 -> «13,7–17,1%» (ru-text)."""
+    return f"{style.fmt_pct(lo, 1).removesuffix('%')}–{style.fmt_pct(hi, 1)}"
+
+
 def driver_posthoc(drv: pd.DataFrame, types: pd.DataFrame, alpha: float) -> dict[str, float | int | str]:
     """Числа прочтения проверки сюжета после вскрытия (03.10.2026); предрегистрированный вердикт не меняют.
 
@@ -174,6 +179,7 @@ def build_facts(out: Path, p: DynParams, figs: list[FigureInfo]) -> dict[str, Fa
         _fact(f, f"hi_{s}", 100 * c["hi"], "num1")
         _fact(f, f"change_lo_{s}", c["change_lo"], "pct")
         _fact(f, f"change_hi_{s}", c["change_hi"], "pct")
+        _fact(f, f"change_ci_{s}", pct_range(c["change_lo"], c["change_hi"]), "str")
         _fact(f, f"exceeds_{s}", int(c["exceeds"]), "int")
         _fact(f, f"n_rel_{s}", c["n_reliable"], "int")
         _fact(f, f"share_rel_{s}", c["n_reliable"] / js["n_nodes"], "pct")

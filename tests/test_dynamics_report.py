@@ -101,3 +101,7 @@ def test_posthoc_claims_hold_on_observed_numbers():
 )
 def test_posthoc_claims_break_when_numbers_change(over):
     assert not all(R.CLAIMS[t](_facts(**over)) for t in POSTHOC_CLAIMS)
+
+
+def test_pct_range_keeps_one_percent_sign():
+    assert R.pct_range(0.137, 0.1712) == "13,7–17,1%"

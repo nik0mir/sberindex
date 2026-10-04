@@ -24,7 +24,9 @@
 ``by_type_runs.csv``, ``by_type_by_mo.csv``; затем разведка после вскрытия ``usefulness.size_posthoc``
 (модуль ``munnet.usefulness_size``: размер МО против типа) в ``size_check.json`` и ``size_by_mo.csv``;
 последней — справка, посчитанная после проверок без заранее записанного правила (модуль
-``munnet.usefulness_level``: ρ уровня трат с оборотами Росстата рядом с T1 (a)) в ``level_rho.json``.
+``munnet.usefulness_level``: ρ уровня трат с оборотами Росстата рядом с T1 (a)) в ``level_rho.json``;
+после неё — пример для совета небольшим и средним МО по правилу ``usefulness.example_small``, записанному
+до выбора (модуль ``munnet.usefulness_example``), в ``example_small.json``.
 """
 
 from __future__ import annotations
@@ -555,7 +557,7 @@ def run(cfg: Config) -> dict:
     )  # fmt: skip
     # Проверка usefulness.by_type_test (предрегистрация 01.10, f744563) — после существующих расчётов, в свои
     # файлы by_type*.json/csv; facts.json, rule_by_mo.csv и mo_flags.csv выше уже записаны и не меняются.
-    from munnet import usefulness_by_type, usefulness_level, usefulness_size
+    from munnet import usefulness_by_type, usefulness_example, usefulness_level, usefulness_size
 
     by_type = usefulness_by_type.run(cfg, rule["by_type"])
     # Разведка после вскрытия usefulness.size_posthoc (02.10): размер МО против типа — в свои файлы
@@ -564,4 +566,8 @@ def run(cfg: Config) -> dict:
     # Справка usefulness_level (04.10, посчитано после проверок, правило заранее не записано): ρ уровня трат
     # и деления по нему с оборотами Росстата рядом с T1 (a) — в свой level_rho.json; файлы выше не меняются.
     usefulness_level.run(cfg)
+    # Пример для совета небольшим и средним МО (правило usefulness.example_small записано 04.10 до выбора,
+    # 28a2079; иллюстрация, не проверка) — в свой example_small.json; читает size_check.json и mo_flags.csv,
+    # файлы выше не меняются.
+    usefulness_example.run(cfg)
     return facts

@@ -14,6 +14,7 @@ from test_usefulness import _synthetic
 
 from munnet import usefulness as U
 from munnet import usefulness_by_type as B
+from munnet import usefulness_example as E
 from munnet import usefulness_size as Z
 from munnet.config import load_config
 from munnet.contracts import QCError
@@ -421,6 +422,7 @@ def test_existing_outputs_unchanged(tmp_path, monkeypatch):
     cfg_b, *_ = _synthetic(b, np.random.default_rng(5))
     U.run(cfg_a)
     monkeypatch.setattr(Z, "run", lambda cfg, by_type_facts=None: None)
+    monkeypatch.setattr(E, "run", lambda cfg: None)  # пример совета читает size_check.json
     U.run(cfg_b)
     oa = Path(cfg_a["paths"]["outputs"]) / "usefulness"
     ob = Path(cfg_b["paths"]["outputs"]) / "usefulness"
