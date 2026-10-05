@@ -65,7 +65,7 @@ const SRC = "Источник: СберИндекс (CC BY-SA 4.0); Росста
 // палитра типов — из story.view (порядковая или номинальная по вердикту T1)
 for (const [t, c] of Object.entries(view.type_colors || {})) doc.documentElement.style.setProperty("--t" + t, c);
 
-const typeName = (t) => (t == null ? "нет типа" : (names.final || {})[t] || `Тип ${t}`);
+const typeName = (t) => (t == null ? "Без типа" : (names.final || {})[t] || `Тип ${t}`);
 function fig(t) {
   if (t == null) return '<i class="fig fig-t0" aria-hidden="true"></i>';
   return `<i class="fig fig-t${t}" aria-hidden="true">${SHAPES[t] || ""}</i>`;
@@ -451,8 +451,10 @@ function renderCard(r) {
   if (r.role === "inner") h += `<p class="kv">Район входит в узел-город ${esc(nd.n)}; тип — у города целиком.</p>`;
   if (nd.t == null) {
     const nodata = (CH.explore || {}).nodata || "Нет типа: ряд трат неполный (меньше 24 месяцев или с пропусками)";
-    const why = r.why_null ? `Нет типа: ${r.why_null}` : nodata; // причина этого МО точнее общей строки
-    h += `<div class="type-line">${fig(null)}<span>Нет типа</span></div><p class="cap">${esc(why)}.</p>`;
+    // причина этого МО точнее общей строки; 6o (check-ux 05.10): ярлык — «Без типа», как в легенде и таблице,
+    // под ним — только причина (начало «Нет типа:» замороженной строки не повторяется)
+    const why = cap1(String(r.why_null || nodata.replace(/^Нет типа:\s*/, "")));
+    h += `<div class="type-line">${fig(null)}<span>Без типа</span></div><p class="cap">${esc(why)}.</p>`;
   } else {
     h += `<div class="type-line">${typeHTML(nd.t)}</div><p class="cap">${esc(names.caption || "Относительно своего региона")}${CARD.type_note ? ". " + esc(CARD.type_note) + "." : ""}</p>`;
     h += stabilityLine(nd);
@@ -765,7 +767,7 @@ function renderKey() {
   const ul = $("#map-key");
   if (ul.children.length) return; // вписан при сборке
   const order = view.legend_order || [...TYPES.keys()];
-  const nd = (CH.explore || {}).nodata ? "нет типа" : "нет типа";
+  const nd = "Без типа";  // 6o (check-ux 05.10): одно слово везде
   ul.innerHTML = order.map((t) => {
     const ty = TYPES.get(t);
     return `<li>${fig(t)}<span>${esc(typeName(t))}${ty && ty.size ? ` · ${nf.format(ty.size)}` : ""}</span></li>`;
@@ -934,7 +936,7 @@ function allRender() {
   $("#mo-table").tBodies[0].innerHTML = nbsp(ALL.view.slice(a, b).map((x) =>
     `<tr><th scope="row" data-l="${esc(heads[0])}"><button type="button" class="mo-open" data-go="${x.id}">${esc(x.name)}</button></th>` +
     `<td data-l="${esc(heads[1])}">${esc(x.region)}</td>` +
-    `<td data-l="${esc(heads[2])}">${x.t == null ? fig(null) + "<span>нет типа</span>" : yt(x.t)}${x.inner ? "<small>тип города целиком</small>" : ""}</td>` +
+    `<td data-l="${esc(heads[2])}">${x.t == null ? fig(null) + "<span>Без типа</span>" : yt(x.t)}${x.inner ? "<small>тип города целиком</small>" : ""}</td>` +
     `<td data-l="${esc(heads[3])}">${x.fl && fw[x.fl] ? esc(cap1(fw[x.fl])) : "—"}</td>` +
     `<td data-l="${esc(heads[4])}">${yt(x.t23)}</td><td data-l="${esc(heads[5])}">${yt(x.t24)}</td></tr>`).join(""));
   $("#mo-status").textContent = n
@@ -951,7 +953,7 @@ function initAll() {
   const regs = [...new Set(ALL.rows.map((x) => x.region))].filter(Boolean).sort((a, b) => a.localeCompare(b, "ru"));
   $("#mo-region").insertAdjacentHTML("beforeend", regs.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join(""));
   const order = view.legend_order || [...TYPES.keys()];
-  $("#mo-type").insertAdjacentHTML("beforeend", order.map((t) => `<option value="${t}">${SHAPES[t] || ""} ${esc(typeName(t))}</option>`).join("") + `<option value="0">Нет типа</option>`);
+  $("#mo-type").insertAdjacentHTML("beforeend", order.map((t) => `<option value="${t}">${SHAPES[t] || ""} ${esc(typeName(t))}</option>`).join("") + `<option value="0">Без типа</option>`);
   for (const id of ["mo-ctl", "mo-wrap"]) $("#" + id).hidden = false;
   let tq = 0;
   $("#mo-q").addEventListener("input", () => { clearTimeout(tq); tq = setTimeout(allFilter, 120); });
@@ -1029,6 +1031,9 @@ function initNet(nm) {
       else { PX[i] = pad + NX[i] * s; PY[i] = pad + NY[i] * s; }
     }
     R = Math.max(1.9, Math.min(3.3, Math.sqrt(((W - 2 * pad) * (H - 2 * pad)) / N) * 0.25));
+    // 6o (judge-c6, check-ux 05.10): на узкой вертикальной схеме точки ≈ 3 px — фигуры типов не различить;
+    // радиус не меньше 2,6 px (фигура ≈ 5–6 px), точки сильнее перекрываются, но форма читается
+    if (vert) R = Math.max(R, 2.6);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     cv.style.width = W + "px"; cv.style.height = H + "px";
@@ -1167,8 +1172,11 @@ function initNet(nm) {
     tipEl.hidden = true;
     if (hover >= 0) { hover = -1; update(); }
   });
+  const noHover = matchMedia("(hover: none)");
   cv.addEventListener("click", (e) => {
-    if (lastType === "touch") { // касание: соседи и кнопка карточки рядом со схемой; пусто — снять
+    // 6o (check-ux 05.10): касание или устройство без наведения — та же логика, что у подсказки
+    // (.net-hint-touch по hover: none): соседи и кнопка карточки рядом со схемой; пусто — снять
+    if (lastType === "touch" || noHover.matches) {
       const i = nearest(e, 24);
       hover = i; showPanel(i); update();
       return;
@@ -1189,7 +1197,7 @@ function initNet(nm) {
     b.addEventListener("click", () => {
       keyPin = keyPin === t ? null : t;
       keyHover = null;
-      if (hover >= 0 && lastType === "touch") { hover = -1; showPanel(-1); }
+      if (hover >= 0 && (lastType === "touch" || noHover.matches)) { hover = -1; showPanel(-1); }
       setKeys(); update();
     });
   }

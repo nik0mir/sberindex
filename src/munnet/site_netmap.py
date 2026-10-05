@@ -228,6 +228,18 @@ def strings(t: Mapping[str, str] | None) -> list[str]:
     return [str(v) for v in (t or {}).values()]
 
 
+def strip_order(data: Mapping, type_of: Mapping[int, Any]) -> list[int]:
+    """6o (check-ux 05.10): типы в порядке их участков на полосе — по медиане координаты x их точек (на
+    телефоне x идёт сверху вниз). Легенда схемы идёт в том же порядке. Нет точек типа — тип в конце."""
+    xs = decode(data["x"])
+    by: dict[int, list[int]] = {}
+    for i, x in zip(data["ids"], xs, strict=True):
+        t = type_of.get(int(i))
+        if t is not None and t == t:  # без NaN
+            by.setdefault(int(t), []).append(int(x))
+    return sorted(by, key=lambda t: (sorted(by[t])[len(by[t]) // 2], t))
+
+
 def html_block(
     t: Mapping[str, str],
     data: Mapping,

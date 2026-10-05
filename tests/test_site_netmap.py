@@ -134,7 +134,7 @@ def test_texts_numbers_from_data():
     assert "{" not in "".join(t.values())
     pct = landing.style.fmt_pct(d["preserved"])
     assert pct in t["caption"] and landing.style.fmt_pct(d["random"]) in t["caption"]
-    assert "в среднем хотя бы 30% из 3 ближайших" in t["caption"]  # min_pct — из min_preserved
+    assert "в среднем не меньше 30% из 3 ближайших" in t["caption"]  # min_pct — из min_preserved
     assert "с 3 самыми похожими" in t["hint"]
     assert site_netmap.texts(None, d) is None and site_netmap.texts(TX, None) is None
 
@@ -144,10 +144,14 @@ def test_real_texts_numbers_and_style():
          "n_edges": 12418, "niter": 1000, "seed": 42}  # fmt: skip
     t = site_netmap.texts(TX, d)
     assert (
-        "в среднем хотя бы 30% из 10 ближайших к муниципалитету точек — его соседи по сети корзин; "
-        "здесь таких 29,9%, у случайной раскладки было бы 0,8%" in t["caption"]
+        "По правилу, записанному до расчётов, такую раскладку показываем, если в среднем не меньше 30% из 10 "
+        "ближайших к муниципалитету точек на ней — его соседи по сети корзин; здесь таких 29,9%, у случайной "
+        "раскладки было бы 0,8%" in t["caption"]
     )
-    assert "отдельных островов на ней нет" in t["lead"] and "обособленных" not in t["lead"]
+    # 6o (совет 05.10): подводка — иллюстрация, без «так выглядит главный вывод»; без «обычно мы показываем»
+    assert t["lead"].startswith("Иллюстрация.") and "главный вывод" not in t["lead"]
+    assert "Обычно" not in t["caption"] and "отступлен" not in t["caption"] and "нарушен" not in t["caption"]
+    assert "схема и типы построены из одних и тех же данных" in t["caption"].lower()
     assert "для дополнительной иллюстрации, в качестве исключения" in t["caption"]
     assert "с 10 самыми похожими" in t["hint"] and "12 418 связей" in t["how"]
     low = " ".join(t.values()).lower()

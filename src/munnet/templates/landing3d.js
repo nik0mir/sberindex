@@ -539,20 +539,54 @@ async function main() {
       proj.set(s.x, s.h + 2, s.z).project(camera);
       const x = (proj.x * 0.5 + 0.5) * w, y = (-proj.y * 0.5 + 0.5) * h;
       const [bw, bh] = cityW[j];
-      const box = [x - bw / 2, y - bh - 6, x + bw / 2, y - 6];
-      const off = proj.z > 1 || box[0] < 0 || box[2] > w || box[1] < 0 || box[3] > h;
-      const hit = taken.some((b) => box[0] < b[2] + 4 && box[2] + 4 > b[0] && box[1] < b[3] + 2 && box[3] + 2 > b[1]);
-      const ok = !off && !hit;
+      // 6o (check-ux 05.10): зазор между подписями не меньше 8 px по горизонтали или 10 px по вертикали; если
+      // подпись над ячейкой задевает уже поставленную, она сдвигается вбок (хвостик остаётся над ячейкой)
+      const shiftMax = Math.max(0, bw / 2 - 12);
+      let box = null, ok = false, shift = 0;
+      for (const sx of [0, shiftMax, -shiftMax]) {
+        const b0 = [x - bw / 2 + sx, y - bh - 6, x + bw / 2 + sx, y - 6];
+        const off = proj.z > 1 || b0[0] < 0 || b0[2] > w || b0[1] < 0 || b0[3] > h;
+        const hit = taken.some((b) => b0[0] < b[2] + 8 && b0[2] + 8 > b[0] && b0[1] < b[3] + 10 && b0[3] + 10 > b[1]);
+        if (!box) box = b0;
+        if (!off && !hit) { box = b0; ok = true; shift = sx; break; }
+      }
       if (ok) taken.push(box);
       cityEls[j].style.visibility = ok ? "visible" : "hidden";
+      cityEls[j].style.setProperty("--tail", `${(bw / 2 - shift).toFixed(1)}px`);
       cityEls[j].style.transform = `translate(${box[0].toFixed(1)}px, ${box[1].toFixed(1)}px)`;
     });
   }
   let userMoved = false, visible = true;
-  controls.addEventListener("start", () => { userMoved = true; tip.hidden = true; });
+  // 6o (judge-c6 05.10): покачивание карты — кнопкой «Пауза / Вращать» рядом с масштабом; при
+  // prefers-reduced-motion карта стоит с начала. Фаза копится только во время покачивания: пауза и возврат без скачка
+  let motionOn = !reduce, swayT = 0, lastNow = null;
+  const btnMotion = $("#h0-motion");
+  function setMotionBtn() {
+    if (!btnMotion) return;
+    const txt = motionOn && !userMoved ? btnMotion.dataset.pause : btnMotion.dataset.play;
+    btnMotion.textContent = txt;
+    btnMotion.setAttribute("aria-label", `${txt}: ${btnMotion.dataset.label || ""}`);
+  }
+  if (btnMotion) {
+    btnMotion.addEventListener("click", () => {
+      if (motionOn && !userMoved) motionOn = false;
+      else {
+        motionOn = true;
+        if (userMoved) {  // карту двигали: вернуть исходный вид и качать от него
+          userMoved = false; swayT = 0;
+          if (mode === "map" && selected < 0) setView("map", 900);
+        }
+      }
+      setMotionBtn();
+    });
+    setMotionBtn();
+  }
+  controls.addEventListener("start", () => { userMoved = true; tip.hidden = true; setMotionBtn(); });
   new IntersectionObserver((es) => { visible = es[0].isIntersecting; }).observe(stage);
   function frame(now) {
     requestAnimationFrame(frame);
+    const dt = lastNow == null ? 0 : Math.min(100, now - lastNow);
+    lastNow = now;
     if ((!visible || flat) && !tween && !camTween) return;
     stepTween(now);
     if (camTween) {
@@ -560,9 +594,10 @@ async function main() {
       controls.target.lerpVectors(camTween.ft, camTween.tt, e);
       camera.position.lerpVectors(camTween.fp, camTween.tp, e);
       if (k >= 1) camTween = null;
-    } else if (!reduce && !userMoved && mode === "map" && selected < 0) {
-      // лёгкое покачивание, пока карту никто не трогал
-      const a = Math.sin(now / 5200) * 0.045, v = VIEWS.map;
+    } else if (motionOn && !userMoved && mode === "map" && selected < 0) {
+      // лёгкое покачивание, пока карту никто не трогал и его не остановили кнопкой
+      swayT += dt;
+      const a = Math.sin(swayT / 5200) * 0.045, v = VIEWS.map;
       camera.position.copy(v.target).add(viewPos(v).sub(v.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), a));
       controls.target.copy(v.target);
     }

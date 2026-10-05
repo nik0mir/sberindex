@@ -1203,3 +1203,41 @@ html.has-3d.h0-flat .lede-flat { display: block; }
   .net-key { font-size: 13px; padding: 4px 10px 4px 7px; }
   .net-key small { font-size: 12px; }
 }
+
+/* === порция 6o: правки по совету 05.10 (judge-c6, check-ux) ====================================================== */
+/* кнопки вида вынесены из колонки текста (landing.html): на широком экране — над картой справа, рядом с масштабом;
+   колонка текста короче и не уходит под строку источника внизу первого экрана */
+@media (min-width: 901px) {
+  /* правее — столбик масштаба (right 28 px, ширина ≈ 72 px по кнопке «Сбросить»): отступ 112 px, без касания */
+  .has-3d .h0-actions { position: absolute; z-index: 3; top: 20px; right: 112px; margin: 0; justify-content: flex-end; }
+  .has-3d .h0-howto { top: 78px; right: 112px; }
+  .has-3d.h0-picked .h0-actions { visibility: hidden; }   /* под карточкой МО — как колонка текста */
+  /* разложено по типам: легенда высоты — вверх справа, подписи островов внизу её не задевают */
+  .has-3d.h0-islands .h0-legend { top: 140px; bottom: auto; right: 112px; }
+}
+@media (min-width: 901px) and (max-width: 1240px) {   /* три кнопки в ряд не помещаются рядом с колонкой текста */
+  .has-3d .h0-actions { max-width: 380px; flex-wrap: wrap; }
+  .has-3d .h0-howto { top: 132px; }
+  .has-3d.h0-islands .h0-legend { top: 196px; }
+}
+@media (min-width: 600px) and (max-width: 900px) {
+  .has-3d .h0-actions { margin: 4px 16px 10px; }
+}
+/* кнопка «Пауза / Вращать» — в ряду кнопок вида; у плоской карты покачивания нет */
+.h0-flat #h0-motion { display: none; }
+/* плоская карта по кнопке: где смотреть долю кафе — строка над картой (flat_note), в пояснении не повторяется */
+.has-3d.h0-flat .lf-where { display: none; }
+.flat-note { margin: 0 0 6px; }
+/* хвостик подписи города — над ячейкой и при сдвинутой вбок подписи */
+.h0-cities span::after { left: var(--tail, 50%); }
+/* «Зачем сверять» под советами; дословный текст исхода с подписью */
+.fd > p.fd-why { margin: 10px 0 0; font-size: 14.5px; line-height: 1.5; }
+p.verbatim b { font-weight: 600; }
+.dyn-flows .rel-key { margin: 6px 0 0; font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.dyn-placebo .pl-key b, .dyn-flows .rel-key b { color: var(--ink); }
+/* плоская карта по кнопке на широком экране: кнопки вида теперь сверху справа — карта ниже их, строка о цвете
+   слева от кнопок масштаба плоской карты */
+@media (min-width: 901px) {
+  .has-3d.h0-flat .h0-fallback { top: 78px; }
+  .has-3d.h0-flat .flat-note { padding-right: 200px; }
+}

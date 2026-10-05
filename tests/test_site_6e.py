@@ -51,7 +51,7 @@ def test_reverse_example_takes_chapter6_number_by_code():
     ex = site_useful.example_texts(ux, _uf(), {}, t7_example=t7ex)
     rev = ex["reverse"]
     assert "0,058 против 0,033 без поправки на регион (в главе 6, с поправкой на регион, — 0,050)" in rev
-    assert "ошибаются больше похожих по тратам" in rev
+    assert "ошибаются больше похожих по корзине" in rev  # 6o: единый термин «похожие по корзине»
     # пример главы 6 — другой муниципалитет: скобки с его числом нет, пустого поля тоже
     rev2 = site_useful.example_texts(ux, _uf(), {}, t7_example={**t7ex, "territory_id": 7})["reverse"]
     assert "главы 6 —" not in rev2 and "{" not in rev2 and "без поправки на регион." in rev2
@@ -60,7 +60,7 @@ def test_reverse_example_takes_chapter6_number_by_code():
 def test_card_texts_net_and_similar_caption():
     checks = {"t7": None}
     out = site_findings.card_texts(TX["card"], checks, k_net=5, sim_fields={"n_shown": "5", "n_set": "10"})
-    assert out["net_note"].startswith("До 5 муниципалитетов") and "не «похожие по тратам" in out["net_note"]
+    assert out["net_note"].startswith("До 5 муниципалитетов") and "не «похожие по корзине" in out["net_note"]
     assert (
         out["sim_caption"].startswith("Показаны 5 из 10, на которых проверяли точность сверки")
         and "первый — самый похожий" in out["sim_caption"]

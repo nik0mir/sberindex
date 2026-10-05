@@ -72,11 +72,14 @@ $hero_head
         <p class="sr-only" id="search-status" aria-live="polite"></p>
         <div class="examples" id="examples" aria-label="Примеры муниципалитетов">$examples_html</div>
       </div>
-      <div class="h0-actions" id="h0-actions" hidden>
-        <button type="button" class="h0-btn" id="h0-types">$to_types</button>
-        <button type="button" class="h0-btn ghost" id="h0-map" hidden>$to_map</button>
-        <button type="button" class="h0-btn ghost" id="h0-flat" data-flat="$to_flat" data-solid="$to_3d" aria-controls="map0">$to_flat</button>
-      </div>
+    </div>
+    <!-- 6o (judge-c6 05.10): кнопки вида — вне колонки текста: на широком экране они над картой справа и не
+         уходят под строку источника; на телефоне встают в общий столбец по order, как раньше -->
+    <div class="h0-actions" id="h0-actions" hidden>
+      <button type="button" class="h0-btn" id="h0-types">$to_types</button>
+      <button type="button" class="h0-btn ghost" id="h0-map" hidden>$to_map</button>
+      <button type="button" class="h0-btn ghost" id="h0-flat" data-flat="$to_flat" data-solid="$to_3d" aria-controls="map0">$to_flat</button>
+      <button type="button" class="h0-btn ghost" id="h0-motion" aria-label="$pause: $motion_label" data-label="$motion_label" data-pause="$pause" data-play="$play">$pause</button>
     </div>
 
     <div class="hero-stage" id="map0">
@@ -97,6 +100,7 @@ $hero_head
         <p class="h0-arcs" id="h0-arcs" hidden></p>
       </div>
       <figure class="answer-map h0-fallback" id="map-fig">
+        <p class="flat-note" id="flat-note">$flat_note</p>
         <div class="map-tools" id="map-tools" hidden>
           <button type="button" class="tool" data-zoom="in" aria-label="Увеличить карту">+</button>
           <button type="button" class="tool" data-zoom="out" aria-label="Уменьшить карту">−</button>
@@ -108,11 +112,10 @@ $first_screen_svg
           <div class="pick" id="map-pick" role="dialog" aria-label="Выберите муниципалитет" hidden></div>
         </div>
         <p class="ego-note" id="ego-note" hidden></p>
-        <p class="flat-note" id="flat-note">$flat_note</p>
         <ul class="map-key" id="map-key" aria-label="Типы на карте">$map_key</ul>
         <figcaption class="source" id="map-caption">
           Одна ячейка — один муниципалитет (Москва и Петербург — по ячейке на город); ячейки сдвинуты с мест, чтобы
-          не перекрываться<span id="map-shift">$map_shift</span>. Штриховка — нет типа: ряд трат неполный (меньше 24 месяцев
+          не перекрываться<span id="map-shift">$map_shift</span>. Штриховка — без типа: ряд трат неполный (меньше 24 месяцев
           или с пропусками). Источник: СберИндекс (CC BY-SA 4.0), расчёт «Корзина и регион».
         </figcaption>
       </figure>

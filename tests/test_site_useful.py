@@ -114,7 +114,7 @@ def test_share_and_r_line_from_facts():
     """Доля, интервал, ориентир 50% и слова — из facts.json; оговорка о наборе R — по медианам ошибок."""
     u = site_useful.use_texts(TX["useful"], _uf(), WORDS)
     assert u["share"] == (
-        "Соседи по своему региону точнее похожих по тратам чаще, чем нет: в 57,2% случаев из 1542 их ошибка "
+        "Соседи по своему региону точнее похожих по корзине чаще, чем нет: в 57,2% случаев из 1542 их ошибка "
         "меньше (95% интервал 54,7–59,7%; при равной точности было бы 50%)"
     )
     assert "не больше соседей (0,035 против 0,036)" in u["r_line"] and "сам регион" in u["r_line"]
@@ -129,11 +129,11 @@ def test_edits_by_words_executed_literally():
     и «реже» — текст меняется; доля B против R не «чаще, чем нет» — совет «со своим регионом»."""
     ft = _ft(_uf())
     assert "ориентир лучше" in ft["use"]["text"] and ft["use"]["title"] == TX["findings"]["use"]["title"]
-    assert ft["use"]["share"].startswith("Соседи по своему региону точнее похожих по тратам чаще, чем нет")
+    assert ft["use"]["share"].startswith("Соседи по своему региону точнее похожих по корзине чаще, чем нет")
     ft = _ft(_uf(d_words=WORDS["about_half"]))
     assert "ориентир лучше" not in ft["use"]["text"] and "примерно в половине случаев" in ft["use"]["text"]
     ft = _ft(_uf(d_words=WORDS["less_often"]))
-    assert "в большинстве случаев похожие по тратам" in ft["use"]["text"]
+    assert "в большинстве случаев похожие по корзине" in ft["use"]["text"]
     assert ft["use"]["title"] == TX["findings"]["use"]["title_less_often"]
     ft = _ft(_uf(r_words=WORDS["about_half"]))
     assert ft["use"]["title"] == "Сверяйте со своим регионом"
@@ -419,7 +419,7 @@ def test_hero_why_and_stood_title():
     assert trust.startswith("Проверки смысла типов записаны до расчётов") and "уже видя результаты" in trust
     assert "Высота" not in hero["lede_flat"] and "карточке муниципалитета" in hero["lede_flat"]
     f = TX["findings"]
-    assert f["stood"]["title"] == "Тот же порядок виден в обороте Росстата"
+    assert f["stood"]["title"] == "Порядок типов виден в обороте Росстата"
     assert f["stood"]["text"].count("ранговая корреляция Спирмена") == 1 and "вскрыт" not in f["use"]["note"]
     banned = list(CFG["site"]["forbidden_words"]["headlines_always"]) + list(
         CFG["interpret"]["naming"]["banned"]
@@ -490,12 +490,22 @@ def test_border_sep_from_report_facts():
         "icvi.final_avi_base": {"value": 0.2495, "text": "0,249"},
         "icvi.final_sw": {"value": 0.00666, "text": "0,007"},
     }
-    args = (TX["findings"], _story(), _facts(), _checks(), _useful(_uf()))
+    facts = _facts() | {"tree": {"accuracy": 0.92736}}
+    args = (TX["findings"], _story(), facts, _checks(), _useful(_uf()))
     b = site_findings.findings_texts(*args, icvi=icvi)["border"]
-    assert "с 10 самыми похожими" in b["sep"] and "в среднем 91% этих связей" in b["sep"]
-    assert "было бы 25%" in b["sep"]
+    # 6o (совет 05.10): «идут друг за другом вдоль одной оси», а не «чётко разделены»; точность дерева — кодом
+    assert b["sep"].startswith("По корзине трат типы идут друг за другом вдоль одной оси")
+    assert "разделены" not in b["sep"] and "90,5" not in b["sep"]
+    assert (
+        "с 10 самыми похожими" in b["sep"] and "в среднем по четырём типам 91% силы этих связей" in b["sep"]
+    )
+    assert "при случайном делении на группы тех же размеров — 25%" in b["sep"]
+    assert "угадывает тип у 93% муниципалитетов" in b["sep"]
     assert "силуэт 0,007" in b["sep"]
     assert "sep" not in site_findings.findings_texts(*args)["border"]
+    # нет точности дерева — строки нет (шаблон с {tree_acc} не показывается с пустым полем)
+    args2 = (TX["findings"], _story(), _facts(), _checks(), _useful(_uf()))
+    assert "sep" not in site_findings.findings_texts(*args2, icvi=icvi)["border"]
 
 
 def _chg(own, b, d, closer, eb=0.05, ed=0.06):
@@ -515,9 +525,10 @@ def test_example_small_texts_and_html(tmp_path):
         "flag_text": "тип зависит от варианта расчёта",
         "pop_avg_2023": 18555.0,
         "per_target": {
-            "shipments": _chg(0.2896, 0.2095, 0.1377, "B"),
-            "ndfl": _chg(0.1540, 0.1913, 0.1949, "B"),
-            "catering": _chg(1.0711, 0.0186, 0.0472, "D", 0.7097, 0.6819),
+            "shipments": _chg(0.2896, 0.2095, 0.1377, "B", 0.0641, 0.1253),
+            "ndfl": _chg(0.1540, 0.1913, 0.1949, "B", 0.0319, 0.0348),
+            "catering": _chg(1.0711, 0.0186, 0.0472, "D", 0.7097, 0.6819)
+            | {"pct_B_pool": 0.9376, "pct_D_pool": 0.9293},
         },
         "retail": _chg(0.1647, 0.2745, 0.1406, "D"),
         "members_B": [{"territory_id": 872, "name": "Благовещенский", "region": "Амурская область"}],
@@ -534,9 +545,18 @@ def test_example_small_texts_and_html(tmp_path):
     assert es["title"] == "Октябрьский муниципальный район, Амурская область"
     assert "18,6 тыс. жителей" in es["sub"] and "(тип зависит от варианта расчёта)" in es["sub"]
     assert [r[0] for r in es["rows"]] == ["Отгрузка", "Доход по 5-НДФЛ", "Оборот общепита"]
-    assert es["rows"][0][1:] == ["+29%", "+21%", "+14%", "соседи"]
-    assert es["rows"][1][1:] == ["+15,4%", "+19,1%", "+19,5%", "соседи"]  # медианы равны при целых — десятые
+    # 6o (check-ux 05.10): все проценты таблицы — с одним знаком; почти равные ошибки — «разница мала»
+    assert es["rows"][0][1:] == ["+29,0%", "+20,9%", "+13,8%", "соседи"]
+    assert es["rows"][1][1:] == ["+15,4%", "+19,1%", "+19,5%", "соседи, разница мала"]
     assert es["rows"][2][-1] == "оба далеко, похожие чуть ближе"  # обе ошибки больше far_err
+    # 6o (решение участника 05.10): зачем сверять — показатель, где оба ориентира далеко, числа — из примера
+    assert es["why"].startswith(
+        "Зачем сверять: если показатель муниципалитета изменился совсем не так, как у обоих"
+    )
+    assert "Пример ниже — Октябрьский муниципальный район, Амурская область." in es["why"]
+    assert "Изменение оборота общепита 2023 → 2024 там +107,1%, у соседей по региону +1,9%" in es["why"]
+    assert "у похожих по корзине +4,7%" in es["why"]
+    assert "Ошибка обоих ориентиров" in es["why"] and "больше, чем у 93–94% муниципалитетов" in es["why"]
     assert es["retail"].startswith("Розница — на этом показателе совет и нашли")
     assert "оборот +16%" in es["retail"]
     assert "ближе похожие" in es["retail"]

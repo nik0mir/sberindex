@@ -204,6 +204,10 @@ def findings_texts(
         use |= {k: ut.get(k, "") for k in ("share", "r_line", "rules", "r_edit")}
     if (useful or {}).get("size"):  # порция 6f: два совета по размеру МО (site_size)
         use["size"] = useful["size"]
+    # 6o (решение участника 05.10): для какого решения совет — пример, где оба ориентира далеко
+    why = ((useful or {}).get("example_small") or {}).get("why")
+    if why:
+        use["why"] = why
     border_flag = (useful or {}).get("flag")
     return {
         "title": tx["title"],
@@ -234,7 +238,8 @@ def findings_texts(
                 else ""
             ),
             # порция 6m (совет 04.10): разделение типов в сети корзин и в признаках (report_facts)
-            **sep_texts(tx["border"].get("sep"), icvi),
+            # 6o (совет 05.10): плюс точность правила дерева этапа interpret (facts.tree.accuracy)
+            **sep_texts(tx["border"].get("sep"), icvi, (facts.get("tree") or {}).get("accuracy")),
             **(
                 {"flag": border_flag, "flag_label": (useful or {}).get("flag_label", "")}
                 if border_flag
@@ -250,13 +255,16 @@ def findings_texts(
     }
 
 
-def sep_texts(tpl: str | None, icvi: Mapping | None) -> dict[str, str]:
-    """Порция 6m (совет 04.10): «по корзине трат типы разделены…, по уровню трат и экономике места чётких
-    границ нет» — доля силы связей внутри типа (AVI итога и её случайный базис) и силуэт итога из
-    ``outputs/evaluate/report_facts.json`` (``icvi.final_avi``, ``icvi.final_avi_base``, ``icvi.final_sw``).
-    Нет шаблона или чисел — пусто."""
+def sep_texts(tpl: str | None, icvi: Mapping | None, tree_acc: float | None = None) -> dict[str, str]:
+    """Порция 6m (совет 04.10): «по корзине трат типы идут друг за другом вдоль одной оси…, по уровню трат
+    и экономике места чётких границ нет» — доля силы связей внутри типа (AVI итога и её случайный базис)
+    и силуэт итога из ``outputs/evaluate/report_facts.json`` (``icvi.final_avi``, ``icvi.final_avi_base``,
+    ``icvi.final_sw``); 6o — точность правила дерева на перекрёстной проверке ``{tree_acc}``
+    (``facts.tree.accuracy`` этапа interpret). Нет шаблона или чисел — пусто."""
     keys = ("icvi.final_avi", "icvi.final_avi_base", "icvi.final_sw")
     if not tpl or not icvi or any((icvi.get(k) or {}).get("value") is None for k in keys):
+        return {}
+    if "{tree_acc}" in str(tpl) and tree_acc is None:
         return {}
     val = lambda k: float(icvi[k]["value"])  # noqa: E731
     sw = icvi["icvi.final_sw"].get("text") or _f(val("icvi.final_sw"), 3)
@@ -268,6 +276,7 @@ def sep_texts(tpl: str | None, icvi: Mapping | None) -> dict[str, str]:
                 "base": style.fmt_pct(val("icvi.final_avi_base"), 0),
                 "sw": str(sw),
                 "k": _f(int(icvi.get("knn_k") or 10)),
+                "tree_acc": style.fmt_pct(float(tree_acc), 0) if tree_acc is not None else "",
             },
         )
     }
@@ -507,6 +516,8 @@ def findings_html(
             body += f'<p class="fd-share">{esc(_dot(p["share"]))}</p><p>{esc(_dot(p["r_line"]))}</p>'
             if p.get("r_edit"):  # порция 6g: откуда заголовок «со своим регионом» (edits.vs_R_not_more_often)
                 body += f'<p class="fd-note fd-redit">{esc(_dot(p["r_edit"]))}</p>'
+        if key == "use" and p.get("why") and not p.get("size"):  # 6o: без советов по размеру — под текстом
+            body += f'<p class="fd-why">{esc(_dot(p["why"]))}</p>'
         if key == "use" and p.get(
             "size"
         ):  # порция 6f: два совета по размеру; розница — под «Где нашли совет»
@@ -545,8 +556,11 @@ def _use_size_html(p: Mapping, body: str, fig: str, extra: str, esc: Esc) -> str
     from munnet import site_size
 
     st = p["size"]
+    # 6o, второй круг (check-ux 05.10): «Зачем сверять» — сразу после совета небольшим и средним МО
+    why = f'<p class="fd-why">{esc(_dot(p["why"]))}</p>' if p.get("why") else ""
     advice = "".join(
         f'<p class="fd-adv fd-adv-{k}"><b>{esc(st["lead_" + k])}</b> {esc(_dot(st["advice_" + k]))}</p>'
+        + (why if k == "small" else "")
         for k in ("small", "large")
     )
     if st.get(

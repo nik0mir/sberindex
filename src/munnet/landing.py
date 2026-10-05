@@ -32,7 +32,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -488,9 +488,10 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
     )
     # порция 6j (check-ux): заголовок T7 — фактом с медианными ошибками (site.build.texts.comparable_title),
     # и у главы 6, и в пункте первого экрана; иначе — заголовок словаря
-    t7_title = comparable_title(
+    c_long = comparable_title(
         (site["build"].get("texts") or {}).get("comparable_title"), t7, facts.get("t7") or {}
-    ) or _headline(H, "T7_utility", t7, vd)
+    )
+    t7_title = c_long or _headline(H, "T7_utility", t7, vd)
     # после вскрытия (site.build.texts, §4.4): короткие заголовки пунктов — те же заголовки site.headlines,
     # что у глав (по тем же правилам показа); полные тексты пунктов — дословно под «Как проверяли»
     heads_by_test = {
@@ -514,6 +515,7 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             hs.append(_headline(H, "T7_type_gain", v["T7_type_gain"], vd))
         heads.append(hs)
     TX = site["build"].get("texts") or {}
+    o_long = order_title(TX.get("order_title"), t1, facts.get("t1") or {}, vd)
     n_types = len(facts["ladder"]["order"])
     screen0 |= {
         "intro": fill(
@@ -547,6 +549,16 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
         "search_none": fill_if_all(TX.get("search_none"), numbers),
         "hero": hero_texts(cfg, TX.get("hero") or {}, scope, n_types),
         "checked_title": TX.get("checked_title"),  # порция 6j: h2 «Что проверяли» при первом экране-карте
+        # 6o (check-ux 05.10): лид под checked_title — как устроена проверка, а не повтор пункта о смене типа
+        "checked_lead": fill(
+            TX["checked_lead"],
+            {
+                "n_nodes": style.fmt_num(scope["n_nodes"]),
+                "n_types": f"{n_types} {plural_ru(n_types, 'тип', 'типа', 'типов')}",
+            },
+        )
+        if TX.get("checked_lead") and scope.get("n_nodes") is not None
+        else None,
     }
     # порция 6m (совет 04.10): почему регионов 73, а не 77 — коротко в подзаголовке первого экрана
     kn = fill_if_all((TX.get("hero") or {}).get("kicker_note"), numbers)
@@ -572,8 +584,11 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "explain": types_explain((TX.get("types_explain") or {}).get(t5), facts.get("t5") or {}),
         },
         "order": {
-            "title": order_title(TX.get("order_title"), t1, facts.get("t1") or {}, vd)
+            # 6o (check-ux 05.10): при order_title — короткий h2 (order_short), полный текст — первым абзацем
+            "title": (order_short(TX, facts.get("t1") or {}) if o_long else None)
+            or o_long
             or _headline(H, "T1_ladder_external", t1, vd),
+            "title_long": o_long if order_short(TX, facts.get("t1") or {}) else None,
             "text": texts["T1_ladder_external"] + facts.get("t1_notes", {}).get("T1_ladder_external", ""),
             # порция 6m (совет 04.10, блокер): «по ступеням снизу вверх» из шаблона proxy_item нарушает правку
             # T1 partial_overall («слов „ступени“ и „лестница“ нет») — на сайте порядок назван типами
@@ -598,7 +613,10 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "layer_name": flows["layer_name"],
         },
         "comparable": {
-            "title": t7_title,
+            # 6o (check-ux 05.10): при comparable_title — короткий h2 (comparable_short), полный — первым
+            # абзацем
+            "title": (TX.get("comparable_short") if c_long else None) or t7_title,
+            "title_long": c_long if TX.get("comparable_short") else None,
             "abs_note": comparable_abs(TX.get("comparable_abs"), t7, facts.get("t7") or {}),
             "lead": _headline(H, "T7_type_gain", v["T7_type_gain"], vd),
             "text": texts["T7_utility"],
@@ -614,6 +632,11 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             "text": texts["T6_bank_coverage"],
             "items": limits_items(TX.get("limits") or {}, numbers, scope, screen0.get("regions_note")),
             "key": limits_key(TX.get("limits_key"), texts["T6_bank_coverage"], facts["names_final"]),
+            # 6o (check-ux 05.10): пересказ исхода T6 названиями типов; дословный текст — под «Как проверяли»
+            "plain": limits_plain(
+                TX, t6, bool(v["caveat"]), it["tests"]["T6_bank_coverage"].get("movers"), facts
+            ),
+            "verbatim_label": TX.get("verbatim_label"),
         },
         "explore": {"title": H["descriptive"]["explore"], "nodata": A["honesty"]["nodata"]},
         "method": {
@@ -868,6 +891,34 @@ def order_title(tpl: str | None, verdict: str, t1: Mapping, vd: Any) -> str | No
     return fill(tpl, {"turnovers": str(turn)}) if turn else None
 
 
+def order_short(tx: Mapping, t1: Mapping) -> str | None:
+    """6o (check-ux 05.10): короткий h2 главы 4 — «оборот растёт от типа к типу, но при том же размере и доле
+    горожан сильнее упорядочены группы {rivals}». Лучшие деления без типов — ``facts.t1.per.*.best_rival``
+    (признак между двоеточиями, слова — ``order_rival_words``), обороты — ``order_turnover_words``.
+    Только если
+    медианы типов монотонны по каждому обороту (``mono_a``) и для каждого признака есть слова; иначе None."""
+    tpl, rw, tw = (
+        tx.get("order_short"),
+        tx.get("order_rival_words") or {},
+        tx.get("order_turnover_words") or {},
+    )
+    per = t1.get("per") or {}
+    if not tpl or not per or not all(r.get("mono_a") for r in per.values()):
+        return None
+    pairs = []
+    for name, r in per.items():
+        feat = str(r.get("best_rival") or "").split(":")
+        w = rw.get(feat[1]) if len(feat) > 2 else None
+        if not w or not tw.get(name):
+            return None
+        pairs.append((str(w), str(tw[name])))
+    if len({w for w, _ in pairs}) == 1:
+        rivals = pairs[0][0]
+    else:
+        rivals = " и ".join(f"{w} ({t})" for w, t in pairs)
+    return fill(str(tpl), {"rivals": rivals})
+
+
 def comp_link(tpl: str | None, t7: Mapping) -> str | None:
     """Связка главы 6 с блоком «Что с этим делать» (порция 6b): медианные ошибки соседей по региону (B)
     и набора продукта в обеих целях — ``facts.t7``."""
@@ -916,6 +967,28 @@ def limits_items(
 
 
 _TYPE_REF = re.compile(r"\bтип(?:а|е|у|ом)?\s+(\d+)\b")
+
+
+def limits_plain(tx: Mapping, verdict: str, caveat: bool, movers: Any, facts: Mapping) -> str | None:
+    """6o (check-ux 05.10): пересказ текста исхода T6 для читателя — названия типов вместо номеров,
+    «муниципалитет», «без малого бизнеса», ε² со шкалой. Шаблон ``limits_plain`` написан под исход ``not``
+    с оговоркой об охвате безнала; иначе (или без потоков, названий, ε²) — None, и показывается дословный
+    текст, как раньше. Потоки — ``interpret.tests.T6_bank_coverage.movers``,
+    ε² — ``facts.t6.coverage_eps2``."""
+    tpl, ftpl = tx.get("limits_plain"), tx.get("limits_plain_flow")
+    eps = (facts.get("t6") or {}).get("coverage_eps2")
+    names = facts.get("names_final") or {}
+    if not tpl or not ftpl or verdict != "not" or not caveat or eps is None or not movers:
+        return None
+    flows = []
+    for pair in movers:
+        a, b = (str(int(x)) for x in pair)
+        if a not in names or b not in names:
+            return None
+        flows.append(fill(str(ftpl), {"a": str(names[a]), "b": str(names[b])}))
+    nb = "\u00a0"
+    eps_txt = f"сила различия ε²{nb}={nb}{style.fmt_num(float(eps), 3)}"
+    return fill(str(tpl), {"flows": " и ".join(flows), "eps": eps_txt})
 
 
 def limits_key(tpl: Mapping | None, text: str, names: Mapping[str, str]) -> str | None:
@@ -1556,7 +1629,7 @@ def first_screen_svg(d: SiteData, hm: HexMap, hexgrid: Mapping, mo: pd.DataFrame
             continue
         x, y = g.center(sub["hq"], sub["hr"])
         fill = "url(#hatch0)" if t == 0 else colors[str(t)]
-        label = "нет типа" if t == 0 else names.get(str(t), f"Тип {t}")
+        label = "Без типа" if t == 0 else names.get(str(t), f"Тип {t}")
         parts.append(
             f'<path class="cells-t{t}" fill="{fill}" stroke="#fff" stroke-width="0.6" '
             f'aria-label="{_esc(label)}: {len(sub)}" d="{site_hexgrid.hex_path(x, y, g.size)}"/>'
@@ -2607,6 +2680,13 @@ def _t(s: Any) -> str:
     return nbsp(_esc(s)) if s else ""
 
 
+def _nb_short(s: str) -> str:
+    """Неразрывный пробел после двухбуквенных предлогов (со, по, на, из, до, от, за) — для заголовков."""
+    return re.sub(
+        r"(?<![\w-])(со|по|на|из|до|от|за|во|не) ", lambda m: m.group(1) + "\u00a0", s, flags=re.IGNORECASE
+    )
+
+
 def _dot(s: str) -> str:
     return s if s.rstrip().endswith((".", "!", "?", "…")) else s + "."
 
@@ -2643,7 +2723,9 @@ def screen0_html(
         else '<div class="banner" id="banner" role="status" hidden></div>'
     )
     head = []
-    if s0.get("intro"):
+    # 6o (check-ux 05.10): при первом экране-карте лид раздела «Что проверяли» — checked_lead (в нём и intro)
+    c_lead = s0.get("checked_lead") if s0.get("hero") else None
+    if s0.get("intro") and not c_lead:
         head.append(f'<p class="intro" id="answer-intro">{_t(_dot(s0["intro"]))}</p>')
     # порция 5a: h1 страницы — заголовок первого экрана (site.build.texts.hero.title); заголовок по T1
     # остаётся    # заголовком раздела «Что проверяли» (h2) и главы 4
@@ -2652,8 +2734,9 @@ def screen0_html(
     # остаётся у главы 4 (иначе два одинаковых h2)
     h_title = s0.get("checked_title") if s0.get("hero") else None
     head.append(f'<{tag} id="answer-title" class="answer-h">{_t(h_title or s0["title"])}</{tag}>')
-    head.append(f'<p class="lead" id="answer-lead">{_t(s0["lead"])}</p>')
-    head += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, [s0["title"], s0["lead"]])]
+    head.append(f'<p class="lead" id="answer-lead">{_t(_dot(c_lead) if c_lead else s0["lead"])}</p>')
+    g_src = [s0["title"]] + ([] if c_lead else [s0["lead"]])
+    head += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, g_src)]
     out["answer_head"] = "\n".join(head)
 
     items = []
@@ -2685,9 +2768,23 @@ def screen0_html(
         body = "".join(f"<p>{_t(x)}</p>" for x in cav) + "".join(
             f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, cav)
         )
-        # порция 6m (check-ux 03.10): в дословной оговорке типы — номерами; «Как читать» — как в главе 7
-        lkey = (story["chapters"].get("limits") or {}).get("key")
-        if lkey and re.search(r"\bтип(а|ов|ы)? [1-4]\b", " ".join(cav)):
+        # порция 6m (check-ux 03.10): в дословной оговорке типы — номерами; «Как читать» — как в главе 7;
+        # 6o (check-ux 05.10): есть пересказ исхода T6 (limits.plain) — он первым, дословный — с подписью
+        lim = story["chapters"].get("limits") or {}
+        lkey = lim.get("key")
+        if lim.get("plain") and lim.get("text") in cav:
+            vl = lim.get("verbatim_label") or ""
+            body = (
+                f"<p>{_t(_dot(lim['plain']))}</p>"
+                + "".join(
+                    f'<p class="verbatim"><b>{_t(vl)}.</b> {_t(x)}</p>'
+                    if vl and x == lim["text"]
+                    else f"<p>{_t(x)}</p>"
+                    for x in cav
+                )
+                + "".join(f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, cav))
+            )
+        elif lkey and re.search(r"\bтип(а|ов|ы)? [1-4]\b", " ".join(cav)):
             body = f'<p class="explain">{_t(_dot(lkey))}</p>' + body
         notes.append(
             f'<div class="caveat"><p><b>{_t(lab.get("caveat_label", "Оговорка"))}.</b> '
@@ -2722,7 +2819,7 @@ def screen0_html(
                 f"{style.fmt_num(int(counts.get(int(t), 0)))}</span></li>"
             )
         n0 = int((mo["role"] == "untyped").sum())
-        key.append(f"<li>{fig_html(None, shapes)}<span>нет типа · {style.fmt_num(n0)}</span></li>")
+        key.append(f"<li>{fig_html(None, shapes)}<span>Без типа · {style.fmt_num(n0)}</span></li>")
         rows = mo.set_index("id")
         for i in s0.get("examples") or []:
             if i in rows.index:
@@ -2749,7 +2846,17 @@ HERO_KEYS = (
     "brand", "brand_sub", "to_types", "to_map", "howto", "howto_touch", "more", "reset", "zoom_in",
     "zoom_out",
     "canvas_label", "checked_label", "to_flat", "to_3d", "flat_note", "picked_note",
+    "pause", "play", "motion_label",
 )  # fmt: skip
+
+
+def _lede_flat_html(text: str, t: Callable[[str], str]) -> str:
+    """6o (check-ux 05.10): первое предложение пояснения плоской карты (где смотреть долю кафе) — отдельным
+    span: при плоской карте по кнопке его заменяет строка flat_note над картой, без WebGL оно видно."""
+    head, sep, rest = str(text).partition(". ")
+    if not sep:
+        return t(text)
+    return f'<span class="lf-where">{t(head)}. </span>{t(rest)}'
 
 
 def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[str, str]:
@@ -2765,7 +2872,8 @@ def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[
     lede_flat = hx.get("lede_flat")
     out["hero_head"] = (
         f'<p class="h0-kicker" id="hero-kicker">{_t(hx.get("kicker", ""))}</p>'
-        f'<h1 id="hero-title">{_t(hx.get("title") or s0["title"])}</h1>'
+        # 6o (check-ux 05.10): неразрывный пробел после коротких предлогов в h1 («со своим» не разрывается)
+        f'<h1 id="hero-title">{_nb_short(_t(hx.get("title") or s0["title"]))}</h1>'
         + (f'<p class="h0-why" id="hero-why">{_t(_dot(hx["why"]))}</p>' if hx.get("why") else "")
         # порция 6j (check-ux): что такое тип и почему верить — на телефоне сразу под «зачем»
         + (
@@ -2787,7 +2895,11 @@ def hero_parts(story: Mapping, map_shift: str, mo: pd.DataFrame | None) -> dict[
             else ""
         )
         + f'<p class="h0-lede{" lede-3d" if lede_flat else ""}" id="hero-lede">{_t(hx.get("lede", ""))}</p>'
-        + (f'<p class="h0-lede lede-flat" id="hero-lede-flat">{_t(lede_flat)}</p>' if lede_flat else "")
+        + (
+            f'<p class="h0-lede lede-flat" id="hero-lede-flat">{_lede_flat_html(lede_flat, _t)}</p>'
+            if lede_flat
+            else ""
+        )
         + (
             f'<p class="h0-trust" id="hero-trust">{_t(_dot(hx["why_trust"]))}</p>'
             if hx.get("why_trust")
@@ -3314,9 +3426,19 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
     story["chapters"]["method"]["numbers"] = method_numbers(story, mo, checks, methods)
     geo = cells_geo(hm, mo)
     rival = site_chapters_tail.rival_maps(rival_partition(d, checks, mo), story, geo, _t)
+    if net_t and netmap:  # 6o (check-ux 05.10): легенда схемы — в порядке участков полосы
+        pos = {
+            t: j
+            for j, t in enumerate(
+                site_netmap.strip_order(netmap, {int(i): t for i, t in zip(mo["id"], mo["t"], strict=True)})
+            )
+        }
+        net_types = sorted(types, key=lambda ty: (pos.get(int(ty["t"]), len(pos)), int(ty["t"])))
+    else:
+        net_types = types
     net_html = (
         site_netmap.html_block(
-            net_t, netmap, types, story["names"]["final"], story["view"]["shapes"], _t,
+            net_t, netmap, net_types, story["names"]["final"], story["view"]["shapes"], _t,
             site_chapters.UI["src_rosstat"],
         )
         if net_t and netmap

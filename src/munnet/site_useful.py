@@ -483,14 +483,27 @@ def example_small_texts(
     ) + (f" ({flag})" if flag else "")
     rows = []
     far = float(tx.get("far_err") or 0)
+    close = float(tx.get("close_err") or 0)
+    digits = tx.get("pct_digits")
+    far_targets = []
     for t in EXAMPLE_SMALL_TARGETS:
         d = pt[t]
-        # порция 6m, п. 14: медианы ориентиров совпали при целых процентах — все три числа строки с десятыми
-        dec = 1 if pct(d["median_B_change"]) == pct(d["median_D_change"]) else 0
+        # порция 6m, п. 14: медианы ориентиров совпали при целых процентах — все три числа строки с десятыми;
+        # 6o (check-ux 05.10): pct_digits — один формат для всей таблицы
+        if digits is not None:
+            dec = int(digits)
+        else:
+            dec = 1 if pct(d["median_B_change"]) == pct(d["median_D_change"]) else 0
         fmt = lambda v, n=dec: style.fmt_pct(float(v), n, sign=True)  # noqa: E731
         c = str(d.get("closer"))
-        both_far = far > 0 and min(float(d.get("err_B", 0)), float(d.get("err_D", 0))) > far
+        eb, ed = float(d.get("err_B", 0)), float(d.get("err_D", 0))
+        both_far = far > 0 and min(eb, ed) > far
+        if both_far:
+            far_targets.append(t)
         closer = (tx.get("closer_far") or {}).get(c) if both_far else None
+        # 6o: ошибки двух ориентиров почти равны — «соседи, разница мала» (описание, порог close_err)
+        if closer is None and close > 0 and abs(eb - ed) < close:
+            closer = (tx.get("closer_close") or {}).get(c)
         rows.append(
             [
                 str(tx["targets"][t]),
@@ -531,10 +544,33 @@ def example_small_texts(
                 "closer": str(tx["closer"].get(str(rt.get("closer")), "")),
             },
         )
+    why = ""
+    if tx.get("why") and far_targets:  # 6o: зачем сверять — показатель, где оба ориентира далеко
+        t = far_targets[0]
+        d = pt[t]
+        fmt1 = lambda v: style.fmt_pct(float(v), int(digits if digits is not None else 1), sign=True)  # noqa: E731
+        pcts = sorted(
+            {round(100 * float(d[k])) for k in ("pct_B_pool", "pct_D_pool") if d.get(k) is not None}
+        )
+        if pcts:
+            pct_txt = f"{pcts[0]}%" if len(pcts) == 1 else f"{pcts[0]}–{pcts[-1]}%"
+            why = _fill(
+                tx["why"],
+                {
+                    "name": name,
+                    "region": region,
+                    "target": str((tx.get("why_targets") or {}).get(t, "")),
+                    "own": fmt1(d["own_change"]),
+                    "b": fmt1(d["median_B_change"]),
+                    "d": fmt1(d["median_D_change"]),
+                    "pct": pct_txt,
+                },
+            )
     return {
         "id": tid,
         "label": tx["label"],
         "title": f"{name}, {region}",
+        "why": why,
         "sub": sub,
         "intro": tx["intro"],
         "head": list(tx["head"]),
@@ -555,6 +591,7 @@ def example_small_strings(es: Mapping | None) -> list[str]:
         return []
     out = [es["label"], es["title"], es["sub"], es["intro"], es["members_b"], es["members_d"], es["open"]]
     out += [es.get("retail") or "", es.get("rule") or "", es.get("no_claim") or "", es.get("caption") or ""]
+    out += [es.get("why") or ""]
     out += list(es["head"]) + [c for r in es["rows"] for c in r]
     return [s for s in out if s]
 

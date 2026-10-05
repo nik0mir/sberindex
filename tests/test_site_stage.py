@@ -559,7 +559,10 @@ def test_screen0_readable_without_js(tmp_path):
     s0 = story["screen0"]
     assert '<h2 id="answer-title" class="answer-h">' in html and html.count("<h1") == 1
     assert _squash(s0["title"]) in text and _squash(s0["lead"]) in text
-    assert s0["intro"] and _squash(s0["intro"]) in text
+    # 6o (check-ux 05.10): при первом экране-карте лид «Что проверяли» — checked_lead, он заменяет вводную
+    assert s0["checked_lead"] and _squash(s0["checked_lead"]) in text
+    assert s0["intro"] and _squash(s0["intro"]) not in text
+    assert "Мы разделили" in s0["checked_lead"] and "до проверочных расчётов" in s0["checked_lead"]
     assert html.count('<li class="pt') == 3 and html.count('<details class="how">') >= 3
     for point in s0["points"]:  # все тексты пункта, не только первый
         for t in point:
@@ -569,7 +572,7 @@ def test_screen0_readable_without_js(tmp_path):
     for k in ("question", "coverage", "scope"):
         assert _squash(s0[k]) in text, k
     assert "Данные. Данные" not in text and 'id="map-shift"> (медианное смещение' in html
-    assert 'class="map-key"' in html and "нет типа" in text
+    assert 'class="map-key"' in html and "Без типа" in text  # 6o: «Без типа» везде
     # заголовок и подзаголовок — по site.headlines.screen0 (T1, затем T3), порядок не меняется
     body = html[html.index("<body>") :]
     assert (

@@ -228,8 +228,8 @@ def test_placebo_rows_final_and_main():
     assert len(runs) == 2
     assert "другое правило связей между муниципалитетами" in runs[0]["label"] + (runs[0]["sub"] or "")
     assert runs[0]["label"].startswith(
-        "Самый строгий вариант расчёта"
-    )  # порция 6b: без «наименьшего вердикта»
+        "Самый слабый результат"
+    )  # порция 6b: без «наименьшего вердикта»; 6o (check-ux 05.10): «слабый», как в тексте главы
     assert "неустойчиво" in runs[1]["label"] + (runs[1]["sub"] or "")
     svg = SC.placebo_svg(runs)
     assert "наблюдение 50" in svg and "наблюдение 40" in svg
@@ -241,7 +241,7 @@ def test_placebo_summary_by_verdicts():
     t3 = checks()["t3"] | {"verdict_final": "not", "unstable": True}
     t3["main"] = t3["main"] | {"passed": True, "median": 2.0}
     s = SC.placebo_summary(t3)
-    assert s.startswith("Заголовок главы — по самому строгому варианту расчёта.")
+    assert s.startswith("Заголовок главы — по самому слабому результату из вариантов расчёта.")
     # порция 6l (check-ux 04.10): «не больше, чем на плацебо» и «порог» вместо «не отличается» и перцентиля
     assert "муниципалитетами» смен не больше, чем на плацебо: 50 при пороге 88." in s
     # порция 6l: одно опорное число плацебо — 95-й перцентиль (медианы в итоге нет)

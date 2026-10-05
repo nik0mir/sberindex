@@ -109,7 +109,7 @@ UI: dict[str, str] = {
     "ami_aria": "Совпадение типов с делениями без типов, AMI",
     # глава 4
     "order_a": "Оборот на жителя по типам, медиана",
-    "order_a_note": "Оборот Росстата (без МСП) в кластеризации не участвовал",
+    "order_a_note": "Оборот Росстата (без малого бизнеса) в расчёт типов не входил",  # 6o (check-ux 05.10)
     "order_axis": (
         "относительно своего региона, логарифмическая шкала: ×2 — вдвое больше, чем обычно в регионе"
     ),
@@ -151,9 +151,10 @@ UI: dict[str, str] = {
     "flows_col_n": "Муниципалитетов",
     "flows_col_rel": "Из них обе половины года согласны",
     "placebo_title": "Смен типа за год, в которых обе половины года согласны: наблюдение и плацебо",
-    "placebo_final": "Самый строгий вариант расчёта — {variant}",
+    # 6o (check-ux 05.10): было «Самый строгий вариант расчёта»
+    "placebo_final": "Самый слабый результат — {variant}",
     # порция 6b (check-ux): итог под графиком плацебо словами; фразы — по вердиктам checks.t3, числа — там же
-    "placebo_sum_head": "Заголовок главы — по самому строгому варианту расчёта.",
+    "placebo_sum_head": "Заголовок главы — по самому слабому результату из вариантов расчёта.",
     "placebo_sum_final_not": (
         "При варианте «{variant}» смен не больше, чем на плацебо: {obs} при пороге {p95}."
     ),
@@ -170,6 +171,8 @@ UI: dict[str, str] = {
         "больше этого числа смен дают только 5% плацебо (95-й перцентиль). Красная черта — наблюдение. "
         "Проверка пройдена, если черта правее пунктира."
     ),
+    "placebo_key_head": "График плацебо",  # 6o: ключ стилей начинается с имени графика
+    "flows_key_head": "Потоки смен типа",
     "placebo_aria": "Число смен типа: {label}; наблюдение {obs}, 95-й перцентиль плацебо {p95}",
     "placebo_col_run": "Расчёт",
     "placebo_col_obs": "Наблюдение",
@@ -982,6 +985,8 @@ def chapter_order(story: Mapping, checks: Mapping, esc: Esc) -> str:
     ch = story["chapters"]["order"]
     view = story["view"]
     text = f"<p>{esc(UI['order_read'])}</p>"
+    if ch.get("title_long"):  # 6o (check-ux 05.10): h2 короткий, полное утверждение — первым абзацем
+        text = f'<p class="sub">{esc(ch["title_long"].rstrip(".") + ".")}</p>' + text
     if ch.get("text"):
         text += f'<details class="how"><summary>{esc(UI["how"])}</summary><p>{esc(ch["text"])}</p></details>'
     if ch.get("proxies"):
@@ -1402,14 +1407,22 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
         '<figure class="ch-fig dyn-fig"><div class="dyn-grid">'
         f'<div class="dyn-flows">{svg}<ul class="type-key">{names}</ul>'
         f'<ul class="flow-key">{"".join(key)}</ul>'
-        f'<p class="note">{esc(UI["flows_sizes"])}</p>'
+        # 6o (check-ux 05.10): ключ стилей потоков — вплотную к своему графику и с его именем;
+        # у графика плацебо свой ключ (pl-key), его пунктир значит другое
+        + (
+            f'<p class="rel-key"><b>{esc(UI["flows_key_head"])}.</b> '
+            f"{esc(rel_key(story, placebo=False))}.</p>"
+            if story.get("reliability_key")
+            else ""
+        )
+        + f'<p class="note">{esc(UI["flows_sizes"])}</p>'
         f'<p class="hint">{esc(UI["flows_hint"])}</p>'
         f'<h3 class="flows-h">{esc(UI["flows_changes"])}</h3>'
         f'<ul class="flow-list" id="flow-list">{items}</ul>'
         '<div class="flow-mo" id="flow-mo" aria-live="polite" hidden></div></div>'
         + (
             f'<div class="dyn-placebo"><h3>{esc(UI["placebo_title"])}</h3>{psvg}'
-            f'<p class="note">{esc(UI["placebo_key"])}</p>'
+            f'<p class="note pl-key"><b>{esc(UI["placebo_key_head"])}.</b> {esc(UI["placebo_key"])}</p>'
             + (
                 f'<p class="placebo-sum">{esc(placebo_summary(checks.get("t3")))}</p>'
                 if checks.get("t3")
@@ -1420,7 +1433,6 @@ def chapter_dynamics(story: Mapping, checks: Mapping, esc: Esc) -> str:
             else ""
         )
         + "</div>"
-        f'<p class="rel-key">{esc(story.get("reliability_key") or "")}</p>'
         f'<figcaption class="source">{esc(UI["src_sber"])}</figcaption>'
         + _table(head, trows, esc, UI["alt_flows"])
         + (

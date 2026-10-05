@@ -92,7 +92,7 @@ UI: dict[str, str] = {
     "ex_col_km": "км по прямой",
     "src_comp": (
         "Источник: СберИндекс (CC BY-SA 4.0); оборот розничной торговли — Росстат, БД ПМО в обработке "
-        "«Если быть точным» (CC BY 4.0), без МСП; расчёт «Корзина и регион»."
+        "«Если быть точным» (CC BY 4.0), без малого бизнеса; расчёт «Корзина и регион»."
     ),
     # глава 3: карта-соперник T5 (порция 6c, §4.3: при T5 ≠ confirmed)
     "rv_title": "Типы и самое близкое к ним деление без типов на одной раскладке",
@@ -128,7 +128,8 @@ UI: dict[str, str] = {
     "r1_unstable": "Выводы, которые меняются в этих вариантах, на странице помечены: «{label}».",
     "r1_col_var": "Вариант расчёта",
     "r1_col_same": "Тот же тип",
-    "r1_col_ari": "ARI",
+    "r1_col_ari": "ARI (0 — как у случайного деления, 1 — полное совпадение)",  # 6o (check-ux 05.10)
+    "r1_ari_first": " (0 — как у случайного деления, 1 — полное совпадение)",
     "alt_r1": "Варианты расчёта таблицей",
     "limits_list": "Ограничения данных",
     "lim_fragile": "Хрупкость",
@@ -205,7 +206,7 @@ UI: dict[str, str] = {
     ),
     "all_note": (
         "Устойчивость: «тип не зависит от варианта расчёта» — тот же тип во всех вариантах расчёта "
-        "и повторах с другим случайным начальным значением; смену типа между годами показывают колонки "
+        "и повторах расчёта с другим случайным стартом; смену типа между годами показывают колонки "
         "2023 и 2024. Тип, итог 2023–2024 — по всем 24 месяцам сразу; 2023 и 2024 — тип по каждому году "
         "отдельно. У районов Москвы и Петербурга тип и годы — города целиком."
     ),
@@ -266,7 +267,7 @@ SOURCES = [
     ),
     (
         "Росстат, база данных показателей муниципальных образований в обработке «Если быть точным»",
-        "оборот розницы и общепита, население, занятость и зарплаты (без МСП)",
+        "оборот розницы и общепита, население, занятость и зарплаты (без малого бизнеса)",
         "CC BY 4.0",
         "https://tochno.st/datasets/bdmo",
     ),
@@ -653,6 +654,8 @@ def chapter_comparable(
     view = story["view"]
     t7 = checks.get("t7")
     text = ""
+    if ch.get("title_long"):  # 6o (check-ux 05.10): h2 короткий, утверждение с числами — первым абзацем
+        text += f'<p class="sub">{esc(_dot_end(ch["title_long"]))}</p>'
     if ch.get("lead"):
         text += f'<p class="sub">{esc(ch["lead"])}</p>'
     k = (t7 or {}).get("k") or ""
@@ -791,6 +794,8 @@ def r1_maps(r1: Mapping, geo: Mapping | None, esc: Esc) -> tuple[str, list[list[
         word = VARIANT_WORDS.get(v["variant"], v["variant"])
         same = UI["r1_same"].format(pct=_pct0(v["same"] / v["n"]), same=_f(v["same"]), n=_f(v["n"]))
         ari = UI["r1_ari"].format(ari=_num(v.get("ari"), 2)) if v.get("ari") is not None else ""
+        if ari and not out:  # 6o (check-ux 05.10): что такое ARI — при первом упоминании
+            ari += UI["r1_ari_first"]
         rows.append([esc(word), esc(same), _num(v.get("ari"), 2)])
         if not geo:
             continue
@@ -826,7 +831,16 @@ def _pct0(x: float) -> str:
 def chapter_limits(story: Mapping, checks: Mapping, geo: Mapping | None, esc: Esc) -> str:
     ch = story["chapters"]["limits"]
     text = f'<p class="outcome">{esc(ch["text"])}</p>' if ch.get("text") else ""
-    if ch.get("context") and text:  # порция 6j: перед дословным исходом T6 — что смена типа не подтверждена
+    if ch.get("plain") and text:
+        # 6o (check-ux 05.10): пересказ исхода T6 названиями типов; дословный текст — под «Как проверяли»
+        vl = f"<b>{esc(ch['verbatim_label'])}.</b> " if ch.get("verbatim_label") else ""
+        text = (
+            (f'<p class="sub">{esc(_dot_end(ch["context"]))}</p>' if ch.get("context") else "")
+            + f'<p class="outcome">{esc(_dot_end(ch["plain"]))}</p>'
+            + f'<details class="how"><summary>{esc(SC_UI["how"])}</summary>'
+            + f'<p class="verbatim">{vl}{esc(ch["text"])}</p></details>'
+        )
+    elif ch.get("context") and text:  # порция 6j: перед дословным исходом T6 — что смена типа не подтверждена
         # порция 6k: «как читать» (типы названиями, МО, ε²) — тоже до текста исхода
         key = f'<p class="explain">{esc(_dot_end(ch["key"]))}</p>' if ch.get("key") else ""
         text = f'<p class="sub">{esc(_dot_end(ch["context"]))}</p>' + key + text
