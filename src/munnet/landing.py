@@ -542,6 +542,14 @@ def build_story(cfg: Config, facts: Mapping, numbers: Mapping[str, str], mode: M
             else None
             for k in ("point_1", "point_2", "point_3")
         ],
+        # 6p (решение участника 05.10): пересказ исхода T5 строкой под заголовком пункта
+        "point_plain": [
+            [t5_plain(TX, t5, facts.get("t5") or {}) if t == "T5_trivial" else None for t in ta[k]]
+            if len(ta[k]) == len(th[k])
+            else None
+            for k in ("point_1", "point_2", "point_3")
+        ],
+        "plain_label": TX.get("t5_plain_label"),
         "caveat_head": H["T6_caveat"]["caveat"] if v["caveat"] else limits_title,
         "labels": {k: TX.get(k) for k in ("question_label", "how_checked", "caveat_label") if TX.get(k)},
         "gloss": dict(TX.get("gloss") or {}),
@@ -873,6 +881,30 @@ def types_title(tpl: str | None, verdict: str, t5: Mapping) -> str | None:
     if not tpl or verdict != "not_repeats" or t5.get("max_ami") is None or not t5.get("max_label"):
         return None
     return fill(tpl, {"max_label": str(t5["max_label"]), "ami": style.fmt_num(float(t5["max_ami"]), 2)})
+
+
+def t5_plain(tx: Mapping, verdict: str, t5: Mapping) -> str | None:
+    """6p (решение участника 05.10): пересказ замороженного исхода T5 ``not_repeats`` простыми словами —
+    строка под заголовком пункта «Что проверяли». Ближайшее деление (наибольший AMI) —
+    ``facts.t5.max_partition``; обороты — ключи ``facts.t5.per`` (слова ``t5_plain_turnover``); пример
+    соперника — только у оборота ``t5_plain_example_from`` (``facts.t5.per.<оборот>.best_rival``): соперник
+    T5 для розницы не совпадает с соперником T1 главы 4, поэтому его не называем. Слова делений —
+    ``t5_plain_words`` по полному ключу. Другой вердикт, неизвестное деление или оборот — None; нет слова
+    для соперника — строка без примера."""
+    tpl, words, turn = tx.get("t5_plain"), tx.get("t5_plain_words") or {}, tx.get("t5_plain_turnover") or {}
+    per = t5.get("per") or {}
+    mx = words.get(str(t5.get("max_partition") or ""))
+    if not tpl or verdict != "not_repeats" or not mx or not per or not all(turn.get(n) for n in per):
+        return None
+    ex_from = str(tx.get("t5_plain_example_from") or "")
+    rival = words.get(str((per.get(ex_from) or {}).get("best_rival") or ""))
+    ex = (
+        fill(str(tx["t5_plain_example"]), {"rival": str(rival)})
+        if rival and tx.get("t5_plain_example")
+        else ""
+    )
+    turnovers = " и ".join(str(turn[n]) for n in per)
+    return fill(str(tpl), {"max_partition": str(mx), "turnovers": turnovers}).replace("{example}", ex)
 
 
 def order_title(tpl: str | None, verdict: str, t1: Mapping, vd: Any) -> str | None:
@@ -2703,6 +2735,36 @@ def fig_html(t: int | None, shapes: Mapping[str, str]) -> str:
     return f'<i class="fig fig-t{int(t)}" aria-hidden="true">{_esc(shapes.get(str(int(t)), ""))}</i>'
 
 
+def point_texts_html(texts: Sequence[str], runs: Sequence[str], pre: Sequence[str | None]) -> list[str]:
+    """Абзацы пункта «Что проверяли» под «Как проверяли»: подпись прогона (6l) и строка-разложение перед
+    дословным текстом (6l)."""
+    body = []
+    for j, x in enumerate(texts):
+        rl = f'<b class="run-lab">{_t(runs[j])}.</b> ' if j < len(runs) else ""
+        if j < len(pre) and pre[j]:
+            body += [f"<p>{rl}{_t(_dot(pre[j]))}</p>", f"<p>{_t(x)}</p>"]
+        else:
+            body.append(f"<p>{rl}{_t(x)}</p>")
+    return body
+
+
+def point_plain_html(plain: Iterable[str | None], label: str | None) -> str:
+    """6p: пересказ исхода простыми словами — под видимым без щелчка заголовком пункта, с меткой ``label``;
+    нет метки или текста — пусто."""
+    if not label:
+        return ""
+    return "".join(f'<p class="plain"><b>{_t(label)}:</b> {_t(_dot(x))}</p>' for x in plain if x)
+
+
+def point_li_html(hs: Iterable[str], plain: str, how: str, body: Iterable[str], extra: bool) -> str:
+    """Пункт «Что проверяли»: видимые заголовки, под ними пересказ (6p), ниже — «Как проверяли» с текстами."""
+    heads = "".join(f'<span class="pt-h">{_t(_dot(h))}</span> ' for h in hs).strip()
+    return (
+        f'<li class="pt{" extra" if extra else ""}"><p class="pt-head">{heads}</p>{plain}'
+        f'<details class="how"><summary>{_t(how)}</summary>{"".join(body)}</details></li>'
+    )
+
+
 def screen0_html(
     story: Mapping, meta: Mapping, hexgrid: Mapping | None, mo: pd.DataFrame | None
 ) -> dict[str, str]:
@@ -2750,18 +2812,12 @@ def screen0_html(
         # порция 6l, третий круг: подпись прогона — с точкой (дословный текст начинается с прописной); своя
         # строка-разложение — отдельным абзацем с подписью, дословный текст — следом
         pre = ((s0.get("point_pre") or [None] * 3)[i] if i < len(s0.get("point_pre") or []) else None) or []
-        for j, x in enumerate(texts):
-            rl = f'<b class="run-lab">{_t(runs[j])}.</b> ' if j < len(runs) else ""
-            if j < len(pre) and pre[j]:
-                body += [f"<p>{rl}{_t(_dot(pre[j]))}</p>", f"<p>{_t(x)}</p>"]
-            else:
-                body.append(f"<p>{rl}{_t(x)}</p>")
+        body += point_texts_html(texts, runs, pre)
+        # 6p: пересказ исхода T5 — под заголовком пункта, видим без щелчка (в «Как проверяли» его нет)
+        pp = s0.get("point_plain") or []
+        plain = point_plain_html((pp[i] if i < len(pp) else None) or [], s0.get("plain_label"))
         body += [f'<p class="gloss">{_t(_dot(g))}</p>' for g in _glosses(gloss, texts)]
-        heads = "".join(f'<span class="pt-h">{_t(_dot(h))}</span> ' for h in hs).strip()
-        items.append(
-            f'<li class="pt{" extra" if i else ""}"><p class="pt-head">{heads}</p>'
-            f'<details class="how"><summary>{_t(how)}</summary>{"".join(body)}</details></li>'
-        )
+        items.append(point_li_html(hs, plain, how, body, extra=bool(i)))
     notes = []
     cav = list(s0.get("caveat") or [])
     if s0.get("caveat_head") or cav:

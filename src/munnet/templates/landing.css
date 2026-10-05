@@ -97,6 +97,10 @@ h1 {
 .pt-h { display: inline; }
 .how p { margin: 4px 0 0; font-size: 13.5px; line-height: 1.42; color: var(--ink); font-weight: 400; }
 .how .q { color: var(--ink-2); }
+/* 6p: пересказ исхода под заголовком пункта — подчинён ему: серым, мельче, с чертой слева */
+.points p.plain { margin: 4px 0 2px; padding-left: 9px; border-left: 2px solid var(--rule); color: var(--ink-2);
+  font-size: 13.5px; line-height: 1.42; font-weight: 400; }
+.points p.plain b { color: var(--ink); font-weight: 600; }
 .caveat details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; list-style: none; }
 .caveat details summary::-webkit-details-marker { display: none; }
 .caveat details summary::before { content: "+ "; font-weight: 700; }
