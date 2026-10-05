@@ -247,36 +247,67 @@ description: >-
 
 ## 8. Перезапуск этапов без следов
 
-Выходы идут во временную папку, `data/raw` читается по абсолютному пути; отчёты этапов по умолчанию
-пишутся в `docs/` — `eda.report` и `eda.report_images`, `features.report`, `network.report`
-и `network.report_images`, — их тоже уводим во временную папку (одной командой Bash: переменные между вызовами
-не сохраняются):
+Выходы идут во временную папку, `data/raw` читается по абсолютному пути. Кроме каталогов `paths`, этапы пишут
+в `docs/` и `site/` по ключам из таблицы — их тоже уводим во временную папку, сохраняя относительный путь
+(`docs/dynamics.md` → `$T/docs/dynamics.md`). Причина: 05.10.2026 перезапуск `dynamics` по прежнему шаблону,
+где уводились только отчёты `eda`, `features` и `network`, переписал `docs/dynamics.md` в основной копии;
+текст совпал побайтно, поэтому `git status` этого не показал.
+
+| Этап | Ключи | Куда пишет по умолчанию |
+|---|---|---|
+| `eda` | `eda.report`, `eda.report_images` | `docs/eda.md`, `docs/img/eda/` |
+| `features` | `features.report` | `docs/features.md` |
+| `network` | `network.report`, `network.report_images` | `docs/network.md`, `docs/img/network/` |
+| `cluster` | `clustering.report`, `clustering.report_images` | `docs/clustering.md`, `docs/img/cluster/` |
+| `evaluate` | `icvi.report`, `icvi.report_images` | `docs/icvi.md`, `docs/img/icvi/` |
+| `dynamics` | `dynamics.report`, `dynamics.report_images` | `docs/dynamics.md`, `docs/img/dynamics/` |
+| `interpret` | `interpret.report`, `interpret.report_images` | `docs/interpretation.md`, `docs/img/interpret/` |
+| `site` | `site.build.out`; `site.build.dev_blind_out`, `site.demo.out` | `site/`; `outputs/site_dev_blind/`, `outputs/site_demo/` |
+
+`usefulness` пишет только в `paths.outputs`. Его ключи `source`, `base`, `members`, `types` — записанные заранее
+правила: код не читает их как пути, а сверяет с замороженным текстом, поэтому их не меняй. `interpret` читает ответ
+слепой проверки названий рядом со своим отчётом — шаблон копирует `docs/interpretation_naming_test.json`.
+Всё делай одной командой Bash: переменные между вызовами не сохраняются.
 
 ```bash
 T=$(mktemp -d); command -v cygpath >/dev/null && T=$(cygpath -m "$T")
 PYTHONIOENCODING=utf-8 uv run --frozen python - "$T" <<'EOF'
-import pathlib, sys, yaml
+import pathlib, shutil, sys, yaml
 t = pathlib.Path(sys.argv[1])
 cfg = yaml.safe_load(open("configs/default.yaml", encoding="utf-8"))
 cfg["paths"]["raw"] = str(pathlib.Path("data/raw").resolve())
 for k in ("interim", "processed", "outputs"):
     cfg["paths"][k] = str(t / k)
-for stage in ("eda", "features", "network"):  # иначе этапы перепишут отчёты и картинки в docs/ репозитория
-    if stage in cfg and "report" in cfg[stage]:
-        cfg[stage]["report"] = str(t / "docs" / f"{stage}.md")
-    if stage in cfg and "report_images" in cfg[stage]:
-        cfg[stage]["report_images"] = str(t / "docs" / "img" / stage)
+# отчёты, картинки и сайт — во временную папку с тем же относительным путём, иначе этапы перепишут docs/ и site/
+for block in ("eda", "features", "network", "clustering", "icvi", "dynamics", "interpret"):
+    for key in ("report", "report_images"):
+        if key in cfg.get(block, {}):
+            cfg[block][key] = str(t / cfg[block][key])
+for part, key in (("build", "out"), ("build", "dev_blind_out"), ("demo", "out")):
+    cfg["site"][part][key] = str(t / cfg["site"][part][key])
+(t / "docs").mkdir(exist_ok=True)
+shutil.copy("docs/interpretation_naming_test.json", t / "docs")  # ответ проверки названий для interpret
+def left(o, p=""):  # ключи, которые ещё указывают в docs/ или site/ репозитория
+    if isinstance(o, dict):
+        for k, v in o.items():
+            yield from left(v, f"{p}.{k}".lstrip("."))
+    elif isinstance(o, str) and o.split("/")[0] in ("docs", "site"):
+        yield p
+assert not list(left(cfg)), list(left(cfg))
 with open(t / "check.yaml", "w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
 EOF
 PYTHONIOENCODING=utf-8 uv run --frozen python -m munnet --config "$T/check.yaml" panel eda
-git status --short   # после прогона — то же, что до него
+git status --short                              # после прогона — то же, что до него
+find docs site -type f -newer "$T/check.yaml"   # пусто или только параллельные правки текстов
 ```
 
 Этапы берёшь те, что проверяешь, но `eda` читает выходы `panel` из `paths.processed`: запускай их вместе
 (этап 1 целиком — несколько минут; без `panel` — код 1). Проверка устойчивости к seed — та же схема плюс `cfg["seed"] += 1`.
 Нереализованный этап завершается кодом 2 и сообщением «ещё не реализован» — это «не начато», а не сбой;
 код 3 — не сошлось контрольное число или проверка заголовка: это находка, а не сбой запуска.
+`interpret` с таким конфигом кэш основной копии не берёт: в ключ кэша входят блоки `features` и `network` целиком,
+вместе с путями их отчётов. Это полный пересчёт (около 2 ч) — только с согласия участника.
 
 ## 9. Первоисточники (проверено 26.09.2026, дополнено 28.09.2026)
 
