@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
@@ -113,3 +115,19 @@ def test_level_p_is_not_an_argument():
 
 def test_pct_range_keeps_one_percent_sign():
     assert R.pct_range(0.137, 0.1712) == "13,7–17,1%"
+
+
+def test_transitions_title_is_neutral(tmp_path):
+    """Заголовок D03 описывает рисунок и не выбирает «главный» поток: смена типа за год не подтверждена
+    (T3, раздел 7 отчёта), и заголовок по наибольшей клетке спорил бы с выводом (совет 06.10)."""
+    import numpy as np
+
+    from munnet.dynamics import figures as F
+
+    m_all = np.array([[300, 20, 5, 0], [74, 200, 3, 1], [9, 0, 341, 22], [0, 1, 2, 80]])
+    m_rel = np.array([[0, 10, 2, 0], [60, 0, 1, 0], [5, 0, 0, 18], [0, 1, 1, 0]])
+    change = SimpleNamespace(matrix=m_all, window_reliable_matrix=m_rel, n_reliable_window_same=8)
+    info = F.fig_transitions(tmp_path, change, 4)
+    assert info.title == "Надёжные смены типа между окнами 2023 и 2024 годов"
+    assert "Чаще" not in info.title
+    assert info.png.exists() and info.data_csv.exists()
