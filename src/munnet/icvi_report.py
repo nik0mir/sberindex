@@ -62,6 +62,28 @@ def cand_label(method: str, k: int) -> str:
     return f"{method_label(method)}, K = {int(k)}"
 
 
+def between_share(ch: float, n: int, k: int) -> float:
+    """Доля межгрупповой суммы квадратов в общей, B / T, по значению CH (Caliński, Harabasz, 1974).
+
+    CH = [B / (K − 1)] / [W / (n − K)] и T = B + W, поэтому B / W = CH · (K − 1) / (n − K) и
+    B / T = CH · (K − 1) / (CH · (K − 1) + n − K) — тождество, без повторного чтения X. Это R² разбиения:
+    какая доля разброса признаков приходится на различия средних типов. n — объекты без шума; NaN, если CH
+    не определён или n ≤ K.
+    """
+    if not np.isfinite(ch) or n <= k or k < 2:
+        return float("nan")
+    b = float(ch) * (k - 1)
+    return b / (b + (n - k))
+
+
+def sd_rel_error(n: int) -> float:
+    """Относительная стандартная ошибка выборочного SD по n значениям нормального распределения:
+    ≈ 1/√(2(n − 1)) (при n = 200 — 5,0%). Знаменатель z — SD случайного базиса, поэтому крупная z
+    (z ≫ 1, ошибка среднего базиса пренебрежимо мала) колеблется относительно на столько же; при тяжёлом
+    хвосте базиса — сильнее. NaN при n < 2."""
+    return float(1 / np.sqrt(2 * (n - 1))) if n >= 2 else float("nan")
+
+
 # --- Факты ---------------------------------------------------------------------------------------
 
 
@@ -90,6 +112,9 @@ def build_facts(out: Path, p: EvalParams, extra: Mapping) -> tuple[dict[str, Fac
     _fact(facts, "subsample", style.fmt_pct(p.subsample, 0), "str")
     _fact(facts, "ci_scale", float(np.sqrt(p.subsample / (1 - p.subsample))), "num1")
     _fact(facts, "s_dbw_density", p.options["s_dbw_density"], "str")
+    rel = sd_rel_error(p.permutations)
+    _fact(facts, "z_rel_err", rel, "pct")
+    _fact(facts, "z_rel_err_text", style.fmt_pct(rel, 0), "str")
 
     # итог и победители
     fin = cands.loc[cands["is_final"].astype(bool)]
@@ -118,6 +143,12 @@ def build_facts(out: Path, p: EvalParams, extra: Mapping) -> tuple[dict[str, Fac
                 rank = int((col > z).sum()) + 1 if np.isfinite(z) else None
                 _fact(facts, f"final_rank_{m}", rank, "int")
                 _fact(facts, f"final_rank_n_{m}", len(col), "int")
+        # CH и силуэт итога: доля межгрупповой суммы квадратов в общей (R²) по CH, шум исключён
+        n_ok = int(round(int(extra["n_nodes"]) * (1 - float(f["noise_share"]))))
+        share = between_share(float(w.loc["ch", "value"]), n_ok, int(f["k_eff"]))
+        _fact(facts, "final_between_share", share, "pct")
+        _fact(facts, "final_between_share_text", style.fmt_pct(share, 0), "str")
+        _fact(facts, "final_z_ch_round", w.loc["ch", "z"], "int")
     _fact(facts, "n_winners", int(cands["is_method_winner"].astype(bool).sum()), "int")
 
     # согласие метрик
@@ -556,6 +587,9 @@ CLAIMS: dict[str, Callable[[Mapping[str, Fact]], bool]] = {
         _v(f, "avu_z_neg_share") > 0.5
     ),
     "радиус окрестности S_Dbw убывает с K": lambda f: _v(f, "rho_stdev_k") < 0,
+    "CH итога намного выше случайного (z > 3), а интервал силуэта итога включает ноль": lambda f: (
+        _v(f, "final_z_ch") > 3 and _v(f, "final_sw_lo") <= 0 <= _v(f, "final_sw_hi")
+    ),
     "S_Dbw не определён у части допустимых кандидатов («ломается при больших K»)": lambda f: (
         _v(f, "sdbw_nan") > 0 and _v(f, "stdev_median_nan") < _v(f, "stdev_median_ok")
     ),

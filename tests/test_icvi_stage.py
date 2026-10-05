@@ -372,3 +372,56 @@ def test_k_fair_table(result):
     assert kf.loc[kf["k_eff"] == 4, "rank_in_k_avi"].min() == 1
     assert kf.loc["leiden_k04", "rank_in_k_avi"] == 1  # посаженное разбиение сети — лучшее при K = 4
     assert kf["pct_avi"].between(0, 1).all()
+
+
+# ---------------------------------------------------------------------------------------------
+# Защитные формулировки отчёта (финальный совет 05.10.2026): CH и силуэт, точность z, подпись рис. I02
+
+
+def test_between_share_equals_direct_sum_of_squares():
+    """Доля межгрупповой суммы квадратов в общей, восстановленная из CH, равна прямому счёту B / T."""
+    from sklearn.metrics import calinski_harabasz_score
+
+    x, y = make_blobs(n_samples=[40, 25, 60], n_features=4, cluster_std=3.0, random_state=1)
+    n, k = len(y), 3
+    tot = ((x - x.mean(0)) ** 2).sum()
+    between = sum((y == c).sum() * ((x[y == c].mean(0) - x.mean(0)) ** 2).sum() for c in range(k))
+    ch = calinski_harabasz_score(x, y)
+    assert icvi_report.between_share(ch, n, k) == pytest.approx(between / tot, abs=1e-12)
+    assert icvi_report.between_share(0.0, n, k) == 0.0
+    assert math.isnan(icvi_report.between_share(float("nan"), n, k))
+    assert math.isnan(icvi_report.between_share(ch, k, k))  # n ≤ K: CH не определён
+
+
+def test_sd_rel_error_matches_simulation():
+    """Относительная ошибка SD по n значениям нормального базиса ≈ 1/√(2(n − 1)); при 200 — около 5%."""
+    assert icvi_report.sd_rel_error(200) == pytest.approx(1 / math.sqrt(398))
+    rng = np.random.default_rng(0)
+    sds = rng.normal(size=(4000, 200)).std(axis=1, ddof=1)
+    assert sds.std() / sds.mean() == pytest.approx(icvi_report.sd_rel_error(200), rel=0.08)
+    assert math.isnan(icvi_report.sd_rel_error(1))
+
+
+def test_report_wording_ch_silhouette_z_precision_and_fig2(tmp_path, monkeypatch):
+    ids, x, a, truth = synth()
+    cfg = _cfg(tmp_path)
+    write_table(fake_labels(ids, x, truth), CLUSTER_LABELS, tmp_path / "processed" / "cluster_labels.parquet")
+    monkeypatch.setattr(icvi_stage, "load_xa", lambda cfg: (ids, x, a))
+    monkeypatch.setattr(icvi_report, "CLAIMS", {})
+    icvi.run(cfg)
+    facts = icvi_report.load_facts(tmp_path / "outputs" / "evaluate")
+    md = (tmp_path / "docs" / "icvi.md").read_text(encoding="utf-8").replace(" ", " ")
+    # рис. 2: z тоже зависит от K, поэтому «только через неё сравниваются разные K» — неверно
+    assert "только через неё" not in md
+    assert "поправк" in md.split("*Рисунок 2.")[1].split("Источник")[0]
+    # CH и силуэт сведены одной фразой, доля межгрупповой суммы квадратов — из кода
+    share = facts["icvi.final_between_share"].value
+    assert 0 < share < 1
+    assert facts["icvi.final_between_share_text"].text in md
+    assert "Верно и то и другое" in md
+    # точность z: число — из кода, по числу перестановок
+    assert facts["icvi.z_rel_err"].value == pytest.approx(1 / math.sqrt(2 * (20 - 1)))
+    assert "Точность z" in md and facts["icvi.z_rel_err_text"].text in md
+    # о хвостах базиса — только общее утверждение: распределение базиса в выходах не сохраняется
+    assert "Если у базиса тяжёлый хвост, колебание больше" in md
+    assert "У CH и S_Dbw" not in md

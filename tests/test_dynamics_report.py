@@ -93,7 +93,6 @@ def test_posthoc_claims_hold_on_observed_numbers():
     "over",
     [
         {"drv_n_sig": (3, "int")},  # первая часть выполнилась бы не почти для любой части
-        {"drv_level_p": (0.01, "p")},  # уровень трат у перешедших менялся бы сильнее
         {"drv_level_ratio": (1.3, "num2")},  # уровень не меньше любой части корзины
         {"drv_rank": (1, "int")},  # по записанному правилу — не «частично»
         {"drv_cafe_span": (0.4, "num2")},  # по общепиту типы различались бы не сильнее всего
@@ -101,6 +100,15 @@ def test_posthoc_claims_hold_on_observed_numbers():
 )
 def test_posthoc_claims_break_when_numbers_change(over):
     assert not all(R.CLAIMS[t](_facts(**over)) for t in POSTHOC_CLAIMS)
+
+
+def test_level_p_is_not_an_argument():
+    """Уровень трат входит в признаки X окна: p по нему смещено, поэтому ни текст, ни утверждения на него
+    не опираются (замечание судьи критерия 1, 05.10.2026); отношение медиан остаётся описанием."""
+    assert "dyn.drv_level_p" not in R.TEMPLATE.read_text(encoding="utf-8")
+    for text, fn in R.CLAIMS.items():
+        if "уровень трат" in text:
+            assert fn(_facts(drv_level_p=(0.01, "p"))) == fn(_facts()), text
 
 
 def test_pct_range_keeps_one_percent_sign():
