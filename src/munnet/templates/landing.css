@@ -1245,3 +1245,25 @@ p.verbatim b { font-weight: 600; }
   .has-3d.h0-flat .h0-fallback { top: 78px; }
   .has-3d.h0-flat .flat-note { padding-right: 200px; }
 }
+
+/* === порция 6q: совет 06.10 ======================================================================================= */
+/* пересказ исхода T1 под подписью графика «Что устояло» — как пересказ T5 в «Что проверяли» */
+.fd-plain { margin: 8px 0 0; padding-left: 9px; border-left: 2px solid var(--rule); color: var(--ink-2);
+  font-size: 13px; line-height: 1.4; }
+.fd-plain b { color: var(--ink); font-weight: 600; }
+/* подписи не меньше 12 px: примеры и размеры в паспортах типов, оси графиков блока «Что устояло» (холст 440
+   единиц в колонке 435 px — 12,5 единицы дают ≥ 12 px) */
+#types small { font-size: 12px; }
+.fd-svg .axis { font-size: 12.5px; }
+/* пример по правилу в узкой колонке «Что с этим делать»: текст и график друг под другом, график во всю колонку */
+.fd .fd-ex { grid-template-columns: minmax(0, 1fr); grid-template-areas: "text" "fig" "rev"; gap: 10px; }
+/* ссылка на таблицу под схемой сети корзин (после подписи и источника) — заметная и удобная для касания */
+.net-block .net-table { margin: 8px 0 6px; }   /* рамка фокуса не наезжает на строку источника */
+.net-block .net-table a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; }
+/* строка над таблицей всех муниципалитетов: что значат колонки 2023 и 2024 */
+.mo-years { margin: 0 0 8px; max-width: 46rem; font-size: 13.5px; line-height: 1.42; color: var(--ink-2);
+  padding-left: 9px; border-left: 2px solid var(--rule); }
+/* номера похожих муниципалитетов на плоской карте (кружок 16 px): было 11 px на 1440 и 11,3 px на 375 */
+.hexmap .ego .num text { font-size: calc(var(--u, 7) * 12.2px); }
+/* раздел таблицы получает фокус после перехода по ссылке (tabindex="-1") — без рамки вокруг всего раздела */
+.chapter[tabindex="-1"]:focus { outline: none; }

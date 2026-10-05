@@ -494,6 +494,8 @@ def findings_html(
         extra = ""
         if key == "stood":
             extra = f'<p class="fd-cap">{esc(_dot(p["chart"]))} {esc(_dot(p["chart_note"]))}</p>'
+            if p.get("plain") and p.get("plain_label"):  # 6q (совет 06.10): пересказ исхода T1 под подписью
+                extra += f'<p class="fd-plain"><b>{esc(p["plain_label"])}:</b> {esc(_dot(p["plain"]))}</p>'
         elif key == "border":
             extra = f'<p class="fd-cap">{esc(_dot(p["chart"]))}</p>'
             if p.get("flag"):  # порция 6b: флаг устойчивости типа (usefulness.type_flag)

@@ -367,12 +367,21 @@ def rel_key(story: Mapping, placebo: bool = True) -> str:
 
 
 def _section(
-    cid: str, title: str, text_html: str, fig_html: str, esc: Esc, wide: bool = False, kicker: str = ""
+    cid: str,
+    title: str,
+    text_html: str,
+    fig_html: str,
+    esc: Esc,
+    wide: bool = False,
+    kicker: str = "",
+    focus: bool = False,
 ) -> str:
+    """Раздел главы; ``focus`` (6q) — ``tabindex="-1"``: переход по ссылке на раздел ставит в него фокус."""
     cls = "chapter wide" if wide else "chapter"
+    tab = ' tabindex="-1"' if focus else ""
     kick = f'<p class="kicker">{esc(kicker)}</p>' if kicker else ""
     return (
-        f'<section class="{cls}" id="{cid}" aria-labelledby="{cid}-title"><div class="ch-text">{kick}'
+        f'<section class="{cls}" id="{cid}"{tab} aria-labelledby="{cid}-title"><div class="ch-text">{kick}'
         f'<h2 id="{cid}-title">{esc(title)}</h2>{text_html}</div>{fig_html}</section>'
     )
 
@@ -1297,7 +1306,7 @@ def dynamics_texts(tx: Mapping | None, t3: Mapping | None) -> dict[str, str] | N
         "fin_p95": _f(fin["p95"]),
     }
     out = {k: str(tx[k]) for k in ("title", "short", "lead")}
-    out |= {k: str(tx[k]) for k in ("sub", "limits_context", "card_status") if tx.get(k)}
+    out |= {k: str(tx[k]) for k in ("sub", "limits_context", "card_status", "table_years") if tx.get(k)}
     lead = out["lead"].format(**vals).rstrip()
     out["lead"] = lead if lead.endswith((".", "!", "?", "…")) else lead + "."  # абзац — с точкой
     return out
@@ -1315,6 +1324,10 @@ def apply_dynamics(story: dict, dt: Mapping[str, str] | None, old_head: str) -> 
         ch["lead"] = dt["sub"]
     if dt.get("limits_context") and "limits" in story["chapters"]:  # строка перед дословным исходом T6
         story["chapters"]["limits"]["context"] = dt["limits_context"]
+    if dt.get(
+        "table_years"
+    ):  # 6q (совет 06.10): строка над колонками 2023 и 2024 таблицы всех муниципалитетов
+        story["table_years"] = dt["table_years"]
     s0 = story["screen0"]
     if s0.get("lead") == old_head:
         s0["lead"] = dt["short"]

@@ -907,6 +907,29 @@ def t5_plain(tx: Mapping, verdict: str, t5: Mapping) -> str | None:
     return fill(str(tpl), {"max_partition": str(mx), "turnovers": turnovers}).replace("{example}", ex)
 
 
+def t1_plain(tx: Mapping, verdict: str, t1: Mapping) -> str | None:
+    """6q (совет 06.10): пересказ исхода T1 ``partial_overall`` под подписью графика «Что устояло» — порядок
+    типов по обороту Росстата виден в целом, а внутри страт размера и доли горожан он слабее простых делений.
+    Пары — по оборотам ``facts.t1.per`` в их порядке (``t1_plain_pair``): лучшее деление без типов
+    (``best_rival``, признак между двоеточиями — ``order_rival_words``) и оборот (``t1_plain_turnover``).
+    Чисел в строке нет (check-ux 06.10), условие то же: у каждого оборота ``best_rival_rho`` > ``rho_b``.
+    Другой вердикт, деление не сильнее типов, нет числа или слова — None."""
+    tpl, pair = tx.get("t1_plain"), tx.get("t1_plain_pair")
+    rw, tw = tx.get("order_rival_words") or {}, tx.get("t1_plain_turnover") or {}
+    per = t1.get("per") or {}
+    if not tpl or not pair or verdict != "partial_overall" or not per:
+        return None
+    pairs = []
+    for name, r in per.items():
+        feat = str(r.get("best_rival") or "").split(":")
+        rival = rw.get(feat[1]) if len(feat) > 2 else None
+        rho, rr = r.get("rho_b"), r.get("best_rival_rho")
+        if not rival or not tw.get(name) or rho is None or rr is None or not float(rr) > float(rho):
+            return None
+        pairs.append(fill(str(pair), {"turnover": str(tw[name]), "rival": str(rival)}))
+    return fill(str(tpl), {"pairs": ", ".join(pairs)})
+
+
 def order_title(tpl: str | None, verdict: str, t1: Mapping, vd: Any) -> str | None:
     """Порция 6k (check-ux): h2 главы 4 при вердикте T1 ``partial_overall`` без «— не доказано» в конце —
     фактом, если у каждого оборота лучшее деление без типов упорядочено сильнее типов (``facts.t1.per``:
@@ -3424,6 +3447,10 @@ def run(cfg: Config, dev_blind: str | Path | None = None, demo: str | Path | Non
         ),
         icvi=report_facts(cfg, mode.name),
     )
+    if ft:  # 6q (совет 06.10): «Простыми словами» под подписью графика «Что устояло» (chart_note не меняется)
+        t1p = t1_plain(tx, str(story["verdicts"].get("T1_ladder_external")), facts.get("t1") or {})
+        if t1p and tx.get("t5_plain_label"):
+            ft["stood"] |= {"plain": t1p, "plain_label": str(tx["t5_plain_label"])}
     if useful_in is not None and ft is None:
         log.warning("site: блок «Что устояло» не собран — доля случаев и пример пользы не показаны")
     if tx.get("findings") and ft is None:

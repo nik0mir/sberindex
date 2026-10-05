@@ -206,9 +206,9 @@ UI: dict[str, str] = {
     ),
     "all_note": (
         "Устойчивость: «тип не зависит от варианта расчёта» — тот же тип во всех вариантах расчёта "
-        "и повторах расчёта с другим случайным стартом; смену типа между годами показывают колонки "
-        "2023 и 2024. Тип, итог 2023–2024 — по всем 24 месяцам сразу; 2023 и 2024 — тип по каждому году "
-        "отдельно. У районов Москвы и Петербурга тип и годы — города целиком."
+        "и повторах расчёта с другим случайным стартом. Тип, итог 2023–2024 — по всем 24 месяцам сразу; "
+        "2023 и 2024 — тип по каждому году отдельно. У районов Москвы и Петербурга тип и годы — города "
+        "целиком."
     ),
     "all_nojs": "Таблица строится в браузере. Без JavaScript её можно скачать одним файлом:",
     "all_nojs_tail": "UTF-8, открывается в Excel.",
@@ -1103,10 +1103,12 @@ def chapter_method(story: Mapping, checks: Mapping, methods: Mapping | None, met
 # --- таблица всех муниципалитетов (порция 6c)
 
 
-def chapter_all_mo(downloads: Mapping[str, int] | None, esc: Esc) -> str:
+def chapter_all_mo(downloads: Mapping[str, int] | None, esc: Esc, years_note: str | None = None) -> str:
     """Каркас таблицы всех муниципалитетов: подписи, фильтры и заголовки с сортировкой (``aria-sort``);
     строки рисует landing.js по ``data/mo.json`` страницами (2192 строки сразу в DOM не идут). Без JS —
-    ссылка на ``mo.csv`` и подсказка."""
+    ссылка на ``mo.csv`` и подсказка. ``years_note`` (6q, совет 06.10; ``texts.dynamics.table_years``
+    при исходе главы 5) — строка над таблицей, на неё ссылаются заголовки колонок 2023 и 2024
+    (``aria-describedby``)."""
     size = (downloads or {}).get("mo.csv")
     kb = f" <small>({_f(max(1, round(size / 1024)))} КБ)</small>" if size else ""
     cols = [("all_c_name", "text"), ("all_c_region", "text"), ("all_c_type", "num"), ("all_c_flag", "num"),
@@ -1114,7 +1116,9 @@ def chapter_all_mo(downloads: Mapping[str, int] | None, esc: Esc) -> str:
     th = "".join(
         f'<th scope="col" data-kind="{kind}"'
         + (' aria-sort="ascending"' if j == 0 else "")
-        + f'><button type="button" class="sort" data-col="{j}">{esc(UI[k])}</button></th>'
+        + f'><button type="button" class="sort" data-col="{j}"'
+        + (' aria-describedby="mo-years"' if years_note and k in ("all_c_23", "all_c_24") else "")
+        + f">{esc(UI[k])}</button></th>"
         for j, (k, kind) in enumerate(cols)
     )
     text = (
@@ -1138,6 +1142,7 @@ def chapter_all_mo(downloads: Mapping[str, int] | None, esc: Esc) -> str:
         '<div class="ch-fig mo-fig">'
         + ctl
         + '<p class="mo-status" id="mo-status" aria-live="polite"></p>'
+        + (f'<p class="mo-years" id="mo-years">{esc(years_note.rstrip(".") + ".")}</p>' if years_note else "")
         + '<div class="mo-wrap" id="mo-wrap" hidden><table class="motable" id="mo-table">'
         + f'<caption class="sr-only">{esc(UI["all_caption"])}</caption>'
         + f"<thead><tr>{th}</tr></thead><tbody></tbody></table></div>"
@@ -1147,7 +1152,8 @@ def chapter_all_mo(downloads: Mapping[str, int] | None, esc: Esc) -> str:
         + f'<p class="source">{esc(SC_UI["src_sber"])}</p>'
         + "</div>"
     )
-    return _section("all-mo", UI["all_title"], text, fig, esc, wide=True, kicker=UI["all_kicker"])
+    # 6q (check-ux 06.10): tabindex="-1" — после ссылки «Перейти к таблице…» фокус оказывается в разделе
+    return _section("all-mo", UI["all_title"], text, fig, esc, wide=True, kicker=UI["all_kicker"], focus=True)
 
 
 # --- глава 10: источники и лицензии
@@ -1202,7 +1208,7 @@ def chapters_html(
             cells_defs(geo),
             chapter_comparable(story, checks, mo, geo, esc),
             chapter_limits(story, checks, geo, esc),
-            chapter_all_mo(downloads, esc),
+            chapter_all_mo(downloads, esc, story.get("table_years")),
             chapter_method(story, checks, methods, meta, esc),
         ]
     )

@@ -250,7 +250,8 @@ def html_block(
     src: str,
 ) -> str:
     """Блок схемы для главы «Типы»: заголовок-вывод, подводка, легенда-кнопки, холст (рисует ``landing.js``),
-    подсказки, подпись, «Как построена схема», ссылка на таблицу. Без осей, стрелок и подписей порядка."""
+    подсказки, подпись, «Как построена схема», источник и ссылка на таблицу (6q). Без осей, стрелок
+    и подписей порядка."""
     keys = []
     for ty in types:
         tt = int(ty["t"])
@@ -289,7 +290,8 @@ def html_block(
         f'<p class="note net-cap">{esc(t["caption"])}.</p>'
         f'<details class="how net-how"><summary>{esc(t["how_label"])}</summary>'
         f"<p>{esc(t['how'])}.</p></details>"
-        f'<p class="net-table"><a href="#all-mo">{esc(t["to_table"])}</a></p>'
         f'<p class="source">{esc(src)}</p>'
+        # 6q (совет 06.10, check-ux): ссылка на таблицу — после подписи и источника схемы (клавиатура, диктор)
+        f'<p class="net-table"><a href="#all-mo">{esc(t["to_table"])}</a></p>'
         "</div>"
     )
