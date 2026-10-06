@@ -1,0 +1,162 @@
+# Шаги прогона с нуля 06.10.2026 (коммит 3b07cae). Первая часть — run.sh, 02:00–02:10; вторая — run_resume.sh, 20:13–23:02.
+## driver.log (клон, uv sync, pytest, ruff)
+START 2026-10-06 02:00:22
+CLONE_EXIT=0 2026-10-06 02:00:23
+3b07cae Статус 06.10: короткий совет (S 2,55), правки по нему; журнал самопроверки
+UVSYNC_EXIT=0 seconds=7 2026-10-06 02:00:30
+PYTEST_EXIT=0 seconds=608 2026-10-06 02:10:38
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1346 passed, 62 warnings in 606.56s (0:10:06)
+RUFF_EXIT=0
+RUFF_FMT_EXIT=0
+RAW_COPIED 2026-10-06 02:10:38
+## uvsync.log (пустой кэш uv)
+Using CPython 3.12.14 interpreter at: C:\Users\1\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\python.exe
+Creating virtual environment at: .venv
+   Building munnet @ file:///C:/Users/1/AppData/Local/Temp/claude/C--Users-1-Desktop-sberindex/bcd40b4a-f816-4cf8-a99e-31dab84a25d9/scratchpad/w0510/repro_0610/copy
+Downloading fonttools (2.4MiB)
+Downloading pygments (1.2MiB)
+Downloading numpy (12.0MiB)
+Downloading pandas (9.2MiB)
+Downloading pyproj (6.4MiB)
+Downloading matplotlib (8.9MiB)
+Downloading igraph (3.1MiB)
+Downloading scipy (35.0MiB)
+Downloading pyarrow (26.7MiB)
+Downloading leidenalg (1.9MiB)
+Downloading shapely (1.6MiB)
+Downloading scikit-learn (7.9MiB)
+Downloading networkx (2.0MiB)
+Downloading pillow (6.9MiB)
+Downloading ruff (10.1MiB)
+Downloading dtaidistance (1.5MiB)
+Downloading pyogrio (22.7MiB)
+ Downloaded dtaidistance
+ Downloaded shapely
+ Downloaded pygments
+ Downloaded leidenalg
+ Downloaded fonttools
+ Downloaded networkx
+ Downloaded igraph
+ Downloaded pyproj
+ Downloaded pillow
+ Downloaded scikit-learn
+      Built munnet @ file:///C:/Users/1/AppData/Local/Temp/claude/C--Users-1-Desktop-sberindex/bcd40b4a-f816-4cf8-a99e-31dab84a25d9/scratchpad/w0510/repro_0610/copy
+ Downloaded matplotlib
+ Downloaded pandas
+ Downloaded ruff
+ Downloaded numpy
+ Downloaded pyogrio
+ Downloaded pyarrow
+ Downloaded scipy
+Prepared 46 packages in 5.24s
+Installed 46 packages in 1.16s
+ + certifi==2026.7.22
+ + charset-normalizer==3.5.1
+ + cloudpickle==3.1.2
+ + colorama==0.4.6
+ + contourpy==1.4.0
+ + cycler==0.12.1
+ + dtaidistance==2.5.1
+ + et-xmlfile==2.0.0
+ + fonttools==4.66.0
+ + geopandas==1.1.4
+ + idna==3.20
+ + igraph==1.0.0
+ + iniconfig==2.3.0
+ + joblib==1.6.0
+ + kiwisolver==1.5.1
+ + leidenalg==0.12.0
+ + libarchive-c==5.3
+ + matplotlib==3.11.2
+ + munnet==0.1.0 (from file:///C:/Users/1/AppData/Local/Temp/claude/C--Users-1-Desktop-sberindex/bcd40b4a-f816-4cf8-a99e-31dab84a25d9/scratchpad/w0510/repro_0610/copy)
+ + narwhals==2.26.0
+ + networkx==3.7
+ + numpy==2.5.3
+ + openpyxl==3.1.5
+ + packaging==26.3
+ + pandas==3.0.6
+ + pillow==12.3.0
+ + pluggy==1.6.0
+ + pyarrow==25.0.1
+ + pygments==2.21.0
+ + pyogrio==0.13.0
+ + pyparsing==3.3.3
+ + pyproj==3.8.0
+ + pytest==9.1.1
+ + python-dateutil==2.9.0.post0
+ + python-igraph==1.0.0
+ + pyyaml==6.0.3
+ + requests==2.34.2
+ + ruff==0.16.9
+ + scikit-learn==1.9.1
+ + scipy==1.18.1
+ + shapely==2.1.2
+ + six==1.17.0
+ + texttable==1.7.0
+ + threadpoolctl==3.7.0
+ + tzdata==2026.4
+ + urllib3==2.8.0
+## pytest.log (итог)
+1346 passed, 62 warnings in 606.56s (0:10:06)
+## ruff.log
+All checks passed!
+201 files already formatted
+## driver2.log (munnet all, выходы этапов перед запуском удалены)
+START 2026-10-06 20:13:08
+3b07cae Статус 06.10: короткий совет (S 2,55), правки по нему; журнал самопроверки
+ALL_EXIT=0 seconds=10134 2026-10-06 23:02:02
+DONE 2026-10-06 23:02:02
+## git status --short после прогона
+ M docs/clustering.md
+ M docs/eda.md
+ M docs/icvi.md
+ M docs/interpretation.md
+ M site/data/story.json
+ M site/index.html
+## run.sh (первая часть)
+#!/usr/bin/env bash
+# Прогон с нуля 06–07.10.2026: чистая копия HEAD, uv sync с пустым кэшем, pytest, munnet all (с data).
+set -u
+R="C:/Users/1/AppData/Local/Temp/claude/C--Users-1-Desktop-sberindex/bcd40b4a-f816-4cf8-a99e-31dab84a25d9/scratchpad/w0510/repro_0610"
+SRC="C:/Users/1/Desktop/sberindex"
+PY="C:/Users/1/AppData/Roaming/uv/python/cpython-3.12.14-windows-x86_64-none/python.exe"
+export PYTHONIOENCODING=utf-8
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+echo "START $(ts)"
+cd "$R" || exit 1
+rm -rf copy uvcache
+git clone --no-hardlinks --branch claude/agents-panel-eda "$SRC" copy > clone.log 2>&1; echo "CLONE_EXIT=$? $(ts)"
+cd copy || exit 1
+git log --oneline -1
+export UV_CACHE_DIR="$R/uvcache"
+start=$(date +%s)
+uv sync --frozen --python "$PY" > ../uvsync.log 2>&1; echo "UVSYNC_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+start=$(date +%s)
+HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 uv run --frozen --offline pytest -q -p no:cacheprovider > ../pytest.log 2>&1; echo "PYTEST_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+tail -3 ../pytest.log
+uv run --frozen --offline ruff check . > ../ruff.log 2>&1; echo "RUFF_EXIT=$?"
+uv run --frozen --offline ruff format --check . >> ../ruff.log 2>&1; echo "RUFF_FMT_EXIT=$?"
+mkdir -p data
+cp -r "$SRC/data/raw" data/raw; echo "RAW_COPIED $(ts)"
+start=$(date +%s)
+uv run --frozen --offline python -m munnet all > ../run.log 2>&1; echo "ALL_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+git status --short > ../git_status_after.txt
+echo "DONE $(ts)"
+## run_resume.sh (вторая часть; перед запуском в копии удалены outputs/, data/interim, data/processed и восстановлен docs/eda.md: git status был чистым)
+#!/usr/bin/env bash
+# Повтор прогона с нуля (продолжение 06.10): чистая копия уже есть в copy/ (коммит 3b07cae), окружение и тесты прошли.
+# Запуск: cd <эта папка> && nohup bash run_resume.sh > driver2.log 2>&1 & disown
+set -u
+R="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONIOENCODING=utf-8
+export UV_CACHE_DIR="$R/uvcache"
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+echo "START $(ts)"
+cd "$R/copy" || exit 1
+git log --oneline -1
+start=$(date +%s)
+uv run --frozen --offline python -m munnet all > ../run2.log 2>&1; echo "ALL_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+git status --short > ../git_status_after.txt
+echo "DONE $(ts)"

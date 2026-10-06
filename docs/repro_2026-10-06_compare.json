@@ -1,0 +1,399 @@
+{
+ "outputs/panel": {
+  "counts": {
+   "всего": 5,
+   "побайтно": 5,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "outputs/eda": {
+  "counts": {
+   "всего": 89,
+   "побайтно": 80,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 9,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\eda\\_style_demo\\demo_lines.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_lines.svg": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_map_synth.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_map_synth.svg": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_points.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\demo_points.svg": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\real_diverging_map.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\real_level_map.png": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\eda\\_style_demo\\real_level_map.svg": {
+    "status": "нет в чистой копии"
+   }
+  }
+ },
+ "outputs/features": {
+  "counts": {
+   "всего": 6,
+   "побайтно": 6,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "outputs/network": {
+  "counts": {
+   "всего": 31,
+   "побайтно": 30,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 1,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\network\\timing.csv": {
+    "kind": "csv",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<таблица>: seconds: 10 ячеек, max|Δ|=0.216, напр. строка 0: np.float64(0.0736771) против np.float64(0.101808)"
+    ]
+   }
+  }
+ },
+ "outputs/cluster": {
+  "counts": {
+   "всего": 57,
+   "побайтно": 55,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 2,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\cluster\\report_facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 6 мест",
+    "details": [
+     ".cl.time_bootstrap_min.text: \"3\" | \"4\"",
+     ".cl.time_bootstrap_min.value: 3.0090999999999997 | 3.948183333333333",
+     ".cl.time_total_min.text: \"43\" | \"69\"",
+     ".cl.time_total_min.value: 42.900666666666666 | 69.49283333333332",
+     ".cl.time_variants_min.text: \"8\" | \"13\"",
+     ".cl.time_variants_min.value: 8.015533333333334 | 12.700766666666668"
+    ]
+   },
+   "outputs\\cluster\\timing.csv": {
+    "kind": "csv",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<таблица>: seconds: 106 ячеек, max|Δ|=1.6e+03, напр. строка 0: np.float64(24.6523) против np.float64(32.0486)"
+    ]
+   }
+  }
+ },
+ "outputs/evaluate": {
+  "counts": {
+   "всего": 27,
+   "побайтно": 27,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "outputs/dynamics": {
+  "counts": {
+   "всего": 25,
+   "побайтно": 23,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 2,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\dynamics\\facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ".seconds: 32.22939647408202 | 33.69932149187662"
+    ]
+   },
+   "outputs\\dynamics\\periods.csv": {
+    "kind": "csv",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<таблица>: seconds: 18 ячеек, max|Δ|=0.157, напр. строка 0: np.float64(1.5153682241216302) против np.float64(1.4586691190488636)"
+    ]
+   }
+  }
+ },
+ "outputs/interpret": {
+  "counts": {
+   "всего": 53,
+   "побайтно": 28,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 9,
+   "нет в чистой": 16,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\interpret\\cache\\0e1bf94703e59c8610cf.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\15a3412cbe58f926b46d.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\189e7c1ea0f2d32d9383.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\1a946bdfc8080337ca7a.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\20da23563655bf6dc1f8.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<RunOut>.seconds: 823.6233412348665 | 950.3187322691083"
+    ]
+   },
+   "outputs\\interpret\\cache\\296180a990671e2cb96c.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\2d935e230371d592abc9.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<RunOut>.seconds: 823.5109369349666 | 933.941745180171"
+    ]
+   },
+   "outputs\\interpret\\cache\\2e920a9046b21b120fe1.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\37d507b4cb3e5a92ac74.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\50bcf90cd95f9dea2eaf.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<RunOut>.seconds: 762.6584170609713 | 887.6167279640213"
+    ]
+   },
+   "outputs\\interpret\\cache\\55e74fbe02b33a27cf4f.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\5cb40b2160ececb362c2.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "[0]<RunOut>.seconds: 850.7439129832201 | 957.4180393042043"
+    ]
+   },
+   "outputs\\interpret\\cache\\6510b40d43658109215b.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\65fd7c155926b3634840.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<RunOut>.seconds: 816.7553256070241 | 934.0435695040505"
+    ]
+   },
+   "outputs\\interpret\\cache\\6ddcbd3024e2a5839670.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<RunOut>.seconds: 819.905771125108 | 953.1582046740223"
+    ]
+   },
+   "outputs\\interpret\\cache\\80b205b47fb058b2a98d.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\8f38a4a3b4d27853c46f.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\96208c550a4d3281c06b.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<RunOut>.seconds: 825.511411156971 | 881.0014491369948"
+    ]
+   },
+   "outputs\\interpret\\cache\\a304bb023f7479bebcf8.pkl": {
+    "kind": "pkl",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     "<RunOut>.seconds: 818.6824595020153 | 995.6333339849953"
+    ]
+   },
+   "outputs\\interpret\\cache\\c845637cee469db6c4c4.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\d211cb070f0afff125f3.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\de386b9f09b04a02fee1.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\e1f0228f0108a2609da7.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\cache\\e7b1ae9c06679f3677df.pkl": {
+    "status": "нет в чистой копии"
+   },
+   "outputs\\interpret\\facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 12 мест",
+    "details": [
+     ".qc.freshness.cluster_labels: 1791309821.5121503 | 1790715918.1935313",
+     ".qc.freshness.dynamics: 1791309934.0335326 | 1790735556.6874344",
+     ".qc.freshness.evaluate: 1791309897.3131402 | 1790735516.190534",
+     ".qc.inputs_sha256.dynamics_facts: \"1b063ec2df93da63767cf773b7836e1568b53a8a5e251ff597ec64a69b1a9955\" | \"1853d9f3c4b54bd12e6a3190089f2acd36627f595f15d2f65033f629dcb94be3\"",
+     ".seconds: 6922.617238922976 | 7885.761315613985",
+     ".timing.controls: 166.94663113588467 | 173.47901101899333",
+     ".timing.describe: 19.51535230036825 | 19.685476924991235",
+     ".timing.evidence: 17.170717996079475 | 17.851018775021657",
+     ".timing.placebo_main: 851.197356088087 | 957.8739040149376",
+     ".timing.robustness: 5781.838285174221 | 6627.516958998982",
+     ".timing.t1_t5_t4: 60.24508219584823 | 63.417586172930896",
+     ".timing.t6_t7: 17.287988278083503 | 17.002384171821177"
+    ]
+   }
+  }
+ },
+ "outputs/usefulness": {
+  "counts": {
+   "всего": 10,
+   "побайтно": 8,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 2,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "outputs\\usefulness\\facts.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ".inputs_sha256.facts: \"1071178da5ebb665f3f53f0aad0a9c9e9c9ec21ca8c839e1a1dc69aff437bdfc\" | \"cc4f54aa11856f5b09f877ef7f501731e3dd8e69d9dd530181be0a68e52a54d3\""
+    ]
+   },
+   "outputs\\usefulness\\size_check.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 2 мест",
+    "details": [
+     ".seconds: 6.0 | 6.8",
+     ".shared_members_bootstrap.seconds: 2.0 | 2.2"
+    ]
+   }
+  }
+ },
+ "data/interim": {
+  "counts": {
+   "всего": 3,
+   "побайтно": 3,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "data/processed": {
+  "counts": {
+   "всего": 22,
+   "побайтно": 22,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ },
+ "site": {
+  "counts": {
+   "всего": 29,
+   "побайтно": 27,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 2,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {
+   "site\\data\\story.json": {
+    "kind": "json",
+    "status": "РАЗЛИЧАЕТСЯ: 1 мест",
+    "details": [
+     ".meta.facts_sha256: \"dac577886090143ff5eff5d3b45993f1a0ae6278894a97a683358b28c8fd8f6d\" | \"9ab800c87ffdde6be99e0fa13a2a71a126085ba68dd6f53b28e072b4d707c5f9\""
+    ]
+   },
+   "site\\index.html": {
+    "kind": "html",
+    "status": "РАЗЛИЧАЕТСЯ: 4 мест",
+    "details": [
+     "стр. 1440: <section class=\"chapter wide\" id=\"method\" aria-labelledby=\"method-title\"><div class=\"ch-text\"><h2 id | <section class=\"chapter wide\" id=\"method\" aria-labelledby=\"method-title\"><div class=\"ch-text\"><h2 id",
+     "стр. 1460: <p class=\"meta\" id=\"meta-line\">Воспроизводимость: seed 42 · код — коммит 3b07cae298d5 · выводы — fac | <p class=\"meta\" id=\"meta-line\">Воспроизводимость: seed 42 · код — коммит 9e1c46f49e36 · выводы — fac",
+     "стр. 1463: <script type=\"application/json\" id=\"story\">{\"meta\":{\"mode\":\"normal\",\"banner\":null,\"seed\":42,\"site_fr | <script type=\"application/json\" id=\"story\">{\"meta\":{\"mode\":\"normal\",\"banner\":null,\"seed\":42,\"site_fr",
+     "стр. 1465: <script type=\"application/json\" id=\"meta\">{\"seed\":42,\"sha\":\"3b07cae298d5\",\"mode\":\"normal\",\"banner\":n | <script type=\"application/json\" id=\"meta\">{\"seed\":42,\"sha\":\"9e1c46f49e36\",\"mode\":\"normal\",\"banner\":n"
+    ]
+   }
+  }
+ },
+ "docs/img": {
+  "counts": {
+   "всего": 40,
+   "побайтно": 40,
+   "по значениям": 0,
+   "рисунки разные": 0,
+   "различаются": 0,
+   "нет в чистой": 0,
+   "нет в основной": 0,
+   "не разобрать": 0
+  },
+  "files": {}
+ }
+}
