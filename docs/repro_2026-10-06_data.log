@@ -1,0 +1,133 @@
+# Этап data с пустой data/raw, 06.10.2026 23:40–23:47, свежая копия коммита 04c2088 (код и конфиг те же, что в 3b07cae). Windows 10, Git Bash; шаги — по README, раздел «Windows».
+## driver.log (шаги и коды выхода)
+START 2026-10-06 23:40:48
+CLONE_EXIT=0 2026-10-06 23:40:50
+04c2088 Статус 06.10, вечер: прогон с нуля пройден, check-repro 15 из 15, judge-c1 — 3 из 3
+UVSYNC_EXIT=0 seconds=3 2026-10-06 23:40:53
+DATA_DIR_BEFORE: 0 entries
+DATA1_EXIT=1 seconds=228 2026-10-06 23:44:41
+TAR_EXIT=0 2026-10-06 23:44:41
+DATA2_EXIT=0 seconds=78 2026-10-06 23:45:59
+2026-10-06 23:45:15,880 INFO munnet.data: Y49010003.csv.gz скачан из data_section39_112_v20250918.zip
+2026-10-06 23:45:52,404 INFO munnet.data: Y48109001.csv.gz скачан из data_section9_112_v20250918.zip
+2026-10-06 23:45:54,163 INFO munnet.data: Y47000004.csv.gz скачан из data_section60_112_v20250918.zip
+2026-10-06 23:45:54,681 INFO munnet.data: Y48060002.csv.gz скачан из data_section60_112_v20250918.zip
+2026-10-06 23:45:59,730 INFO munnet.data: data_5ndfl_155_v20260722.parquet скачан с https://storage.yandexcloud.net/tochno-st-catalog/FNS/data_ndfl_155_v20260722/data_5ndfl_155_v20260722.parquet
+263M	data/raw
+25
+PANEL_FEATURES_EXIT=0 seconds=59 2026-10-06 23:46:58
+DONE 2026-10-06 23:46:59
+## data1.log — первый запуск data (README: падает на RAR без системной libarchive)
+2026-10-06 23:40:56,549 INFO munnet: Этап data: скачать и распаковать исходные данные
+2026-10-06 23:42:29,574 INFO munnet.data: hackathonlicence.zip скачан с https://www.sberbank.com/common/img/uploaded/files/pdf/sberindex/hackathonlicence.zip
+2026-10-06 23:42:29,695 INFO munnet.data: hackathonlicence.zip распакован в data\raw\hackathon
+2026-10-06 23:44:41,315 INFO munnet.data: t_dict_municipal.rar скачан с https://www.sberbank.com/common/files/t_dict_municipal.rar
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\src\munnet\__main__.py", line 7, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\src\munnet\cli.py", line 123, in main
+    module.run(cfg)
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\src\munnet\data.py", line 161, in run
+    extract_once(path, dest_dir, source["sha256"])
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\src\munnet\data.py", line 130, in extract_once
+    extract(archive, dest_dir)
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\src\munnet\data.py", line 113, in extract
+    import libarchive  # нужна системная libarchive, см. README
+    ^^^^^^^^^^^^^^^^^
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\.venv\Lib\site-packages\libarchive\__init__.py", line 1, in <module>
+    from .entry import ArchiveEntry
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\.venv\Lib\site-packages\libarchive\entry.py", line 6, in <module>
+    from . import ffi
+  File "C:\Users\1\AppData\Local\Temp\claude\C--Users-1-Desktop-sberindex\63a5e94a-cf00-4c68-815a-4b5e097b5a39\scratchpad\data_check\copy\.venv\Lib\site-packages\libarchive\ffi.py", line 26, in <module>
+    libarchive = ctypes.cdll.LoadLibrary(libarchive_path)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\1\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\ctypes\__init__.py", line 460, in LoadLibrary
+    return self._dlltype(name)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\1\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\ctypes\__init__.py", line 369, in __init__
+    if '/' in name or '\\' in name:
+       ^^^^^^^^^^^
+TypeError: argument of type 'NoneType' is not iterable
+## data2.log — после tar.exe и метки .extracted_sha256
+2026-10-06 23:44:43,008 INFO munnet: Этап data: скачать и распаковать исходные данные
+2026-10-06 23:44:43,187 INFO munnet.data: hackathonlicence.zip уже скачан
+2026-10-06 23:44:43,188 INFO munnet.data: hackathonlicence.zip уже распакован в data\raw\hackathon
+2026-10-06 23:44:43,210 INFO munnet.data: t_dict_municipal.rar уже скачан
+2026-10-06 23:44:43,211 INFO munnet.data: t_dict_municipal.rar уже распакован в data\raw\borders
+2026-10-06 23:44:46,515 INFO munnet.data: Y48112027.csv.gz скачан из data_section31_112_v20250918.zip
+2026-10-06 23:44:48,265 INFO munnet.data: Y48112014_2023.csv.gz скачан из data_section31_112_v20250918.zip
+2026-10-06 23:44:50,221 INFO munnet.data: Y48112014_2024.csv.gz скачан из data_section31_112_v20250918.zip
+2026-10-06 23:44:58,929 INFO munnet.data: Y48423005.csv.gz скачан из data_section32_112_v20250918.zip
+2026-10-06 23:45:03,722 INFO munnet.data: Y48423006.csv.gz скачан из data_section32_112_v20250918.zip
+2026-10-06 23:45:08,348 INFO munnet.data: Y48423007.csv.gz скачан из data_section32_112_v20250918.zip
+2026-10-06 23:45:12,026 INFO munnet.data: Y48401003.csv.gz скачан из data_section2_112_v20250918.zip
+2026-10-06 23:45:12,786 INFO munnet.data: Y48401006.csv.gz скачан из data_section2_112_v20250918.zip
+2026-10-06 23:45:14,953 INFO munnet.data: Y48401011.csv.gz скачан из data_section39_112_v20250918.zip
+2026-10-06 23:45:15,451 INFO munnet.data: Y49010002.csv.gz скачан из data_section39_112_v20250918.zip
+2026-10-06 23:45:15,880 INFO munnet.data: Y49010003.csv.gz скачан из data_section39_112_v20250918.zip
+2026-10-06 23:45:52,404 INFO munnet.data: Y48109001.csv.gz скачан из data_section9_112_v20250918.zip
+2026-10-06 23:45:54,163 INFO munnet.data: Y47000004.csv.gz скачан из data_section60_112_v20250918.zip
+2026-10-06 23:45:54,681 INFO munnet.data: Y48060002.csv.gz скачан из data_section60_112_v20250918.zip
+2026-10-06 23:45:59,730 INFO munnet.data: data_5ndfl_155_v20260722.parquet скачан с https://storage.yandexcloud.net/tochno-st-catalog/FNS/data_ndfl_155_v20260722/data_5ndfl_155_v20260722.parquet
+## panel.log — panel features на свежескачанных данных (итог)
+2026-10-06 23:46:37,367 WARNING munnet.panel.context: доля горожан вне [0; 1] у 1 МО-лет — пропуск
+2026-10-06 23:46:46,661 INFO munnet.panel: этап panel готов за 45.4 с; мягких расхождений: 0; выходы: data\processed, outputs\panel
+## git status --short после
+## Сверка с основной копией: scripts/compare_outputs.py <копия> . data/raw outputs/panel outputs/features data/interim data/processed
+
+## data/raw: всего 25, побайтно 25
+
+## outputs/panel: всего 5, побайтно 5
+
+## outputs/features: всего 6, побайтно 6
+
+## data/interim: всего 3, побайтно 2, нет в чистой 1
+  - data\interim\interpret\naming_test_key.json: нет в чистой копии
+
+## data/processed: всего 22, побайтно 15, нет в чистой 7
+  - data\processed\cluster_final.parquet: нет в чистой копии
+  - data\processed\cluster_labels.parquet: нет в чистой копии
+  - data\processed\dynamics_history.parquet: нет в чистой копии
+  - data\processed\network_edges.parquet: нет в чистой копии
+  - data\processed\network_nodes.parquet: нет в чистой копии
+  - data\processed\network_window_nodes.parquet: нет в чистой копии
+  - data\processed\network_windows.parquet: нет в чистой копии
+## run_data.sh
+#!/usr/bin/env bash
+# Проверка этапа data с пустой data/raw (06.10.2026): свежая копия HEAD, скачивание из источников по README (Windows).
+set -u
+R="$(cd "$(dirname "$0")" && pwd)"
+SRC="C:/Users/1/Desktop/sberindex"
+PY="C:/Users/1/AppData/Roaming/uv/python/cpython-3.12.14-windows-x86_64-none/python.exe"
+export PYTHONIOENCODING=utf-8
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+echo "START $(ts)"
+cd "$R" || exit 1
+rm -rf copy
+git clone --no-hardlinks --branch claude/agents-panel-eda "$SRC" copy > clone.log 2>&1; echo "CLONE_EXIT=$? $(ts)"
+cd copy || exit 1
+git log --oneline -1
+start=$(date +%s)
+uv sync --frozen --python "$PY" > ../uvsync.log 2>&1; echo "UVSYNC_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+ls data 2>/dev/null; echo "DATA_DIR_BEFORE: $(ls -A data 2>/dev/null | wc -l) entries"
+# 1. Этап data с пустой data/raw (README: uv run --frozen python -m munnet data)
+start=$(date +%s)
+uv run --frozen python -m munnet data > ../data1.log 2>&1; echo "DATA1_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+tail -5 ../data1.log
+# 2. README, раздел «Windows»: распаковать RAR встроенным tar.exe, записать метку, повторить data
+if [ -f data/raw/borders/t_dict_municipal.rar ] && [ ! -f data/raw/borders/.extracted_sha256 ]; then
+  /c/Windows/System32/tar.exe -xf data/raw/borders/t_dict_municipal.rar -C data/raw/borders; echo "TAR_EXIT=$? $(ts)"
+  printf %s 319ed22684b77716641bc15b61f7325adc44e9fc47e9be2973d88412d27d21f5 > data/raw/borders/.extracted_sha256
+  start=$(date +%s)
+  uv run --frozen python -m munnet data > ../data2.log 2>&1; echo "DATA2_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+  tail -5 ../data2.log
+fi
+du -sh data/raw; find data/raw -type f | wc -l
+# 3. Контроль: лёгкие этапы panel и features на свежескачанных данных
+start=$(date +%s)
+uv run --frozen python -m munnet panel features > ../panel.log 2>&1; echo "PANEL_FEATURES_EXIT=$? seconds=$(( $(date +%s) - start )) $(ts)"
+git status --short > ../git_status_after.txt
+echo "DONE $(ts)"
