@@ -2925,7 +2925,6 @@ HERO_KEYS = (
     "brand", "brand_sub", "to_types", "to_map", "howto", "howto_touch", "more", "reset", "zoom_in",
     "zoom_out",
     "canvas_label", "checked_label", "to_flat", "to_3d", "flat_note", "picked_note",
-    "pause", "play", "motion_label",
 )  # fmt: skip
 
 

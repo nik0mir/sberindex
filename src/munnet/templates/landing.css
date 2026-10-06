@@ -1219,7 +1219,7 @@ html.has-3d.h0-flat .lede-flat { display: block; }
   /* разложено по типам: легенда высоты — вверх справа, подписи островов внизу её не задевают */
   .has-3d.h0-islands .h0-legend { top: 140px; bottom: auto; right: 112px; }
 }
-@media (min-width: 901px) and (max-width: 1240px) {   /* три кнопки в ряд не помещаются рядом с колонкой текста */
+@media (min-width: 901px) and (max-width: 1240px) {   /* кнопки вида рядом с колонкой текста — с переносом */
   .has-3d .h0-actions { max-width: 380px; flex-wrap: wrap; }
   .has-3d .h0-howto { top: 132px; }
   .has-3d.h0-islands .h0-legend { top: 196px; }
@@ -1227,8 +1227,6 @@ html.has-3d.h0-flat .lede-flat { display: block; }
 @media (min-width: 600px) and (max-width: 900px) {
   .has-3d .h0-actions { margin: 4px 16px 10px; }
 }
-/* кнопка «Пауза / Вращать» — в ряду кнопок вида; у плоской карты покачивания нет */
-.h0-flat #h0-motion { display: none; }
 /* плоская карта по кнопке: где смотреть долю кафе — строка над картой (flat_note), в пояснении не повторяется */
 .has-3d.h0-flat .lf-where { display: none; }
 .flat-note { margin: 0 0 6px; }

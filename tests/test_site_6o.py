@@ -1,7 +1,7 @@
 """Порция 6o лендинга (``docs/landing_spec.md``, §4.3, журнал 05.10): правки по финальному совету 05.10 —
 пересказ исхода T6 названиями типов, короткие h2 глав 4 и 6, лид «Что проверяли», кнопки первого экрана вне
-колонки текста и «Пауза / Вращать», строка о цвете над плоской картой, ключ стилей у своего графика.
-Синтетика с известным ответом, без data/ и outputs/."""
+колонки текста (кнопку «Пауза / Вращать» и покачивание карты 07.10 убрали), строка о цвете над плоской
+картой, ключ стилей у своего графика. Синтетика с известным ответом, без data/ и outputs/."""
 
 from __future__ import annotations
 
@@ -72,22 +72,24 @@ def test_order_chapter_long_title_first_paragraph():
     assert '<p class="sub">Полное утверждение.</p>' in h
 
 
-def test_hero_actions_outside_text_column_and_motion_button():
-    """Кнопки вида — вне колонки текста (на 1440 × 900 их не закрывает строка источника); «Пауза / Вращать»
-    рядом с ними; строка о цвете — над плоской картой, одна."""
+def test_hero_actions_outside_text_column_and_no_motion():
+    """Кнопки вида — вне колонки текста (на 1440 × 900 их не закрывает строка источника); кнопки «Пауза /
+    Вращать» и покачивания объёмной карты нет (решение участника 07.10: карта стоит, поворот — мышью
+    и пальцем); строка о цвете — над плоской картой, одна."""
     html = (TPL / "landing.html").read_text(encoding="utf-8")
     text_col = html.split('<div class="hero-text">')[1].split('<div class="hero-stage"')[0]
     head = text_col.split('<div class="h0-actions"')[0]
     assert 'id="search-input"' in head and 'id="h0-types"' not in head
-    assert 'id="h0-motion"' in html and "$pause" in html and "$motion_label" in html
+    assert 'id="h0-motion"' not in html and "$pause" not in html and "$motion_label" not in html
     assert html.count('id="flat-note"') == 1
     assert html.index('id="flat-note"') < html.index('id="map-frame"')
     for k in ("pause", "play", "motion_label"):
-        assert k in landing.HERO_KEYS and TX["hero"][k]
+        assert k not in landing.HERO_KEYS and k not in TX["hero"]
     js = (TPL / "landing3d.js").read_text(encoding="utf-8")
-    assert "let motionOn = !reduce" in js and "swayT += dt" in js
+    assert "motionOn" not in js and "swayT" not in js and "#h0-motion" not in js
+    assert "userMoved = true" in js  # ручной поворот по-прежнему отключает подстройку вида под размер окна
     css = (TPL / "landing.css").read_text(encoding="utf-8")
-    assert ".has-3d .h0-actions { position: absolute;" in css
+    assert ".has-3d .h0-actions { position: absolute;" in css and "h0-motion" not in css
 
 
 def test_dynamics_style_keys_next_to_own_chart():
