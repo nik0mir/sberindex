@@ -227,12 +227,42 @@ async function main() {
   }
   function setView(name, dur) { const v = VIEWS[name]; flyTo(v.target, viewPos(v), dur); }
   let narrow = false;
+  // порция 6s (check-ux 07.10): на 901–1299 px колонка текста (слева, ≈ 530 px) занимает почти половину холста,
+  // и карта с видом широкого экрана заходила под текст. Здесь вид подбирается по проекции ячеек: края карты —
+  // между колонкой текста и правым краем холста (меняются только сдвиг вбок и расстояние, наклон прежний).
+  // Острова между колонкой текста и краем стояли бы так тесно, что подписи типов наезжают друг на друга, поэтому
+  // при «Разложить по типам» колонка текста на этих ширинах скрыта (CSS, как под карточкой МО), а острова —
+  // во всю ширину холста. На ≥ 1300 px и на узком экране вид прежний
+  const MID = matchMedia("(min-width: 901px) and (max-width: 1299px)");
+  const fitV = new THREE.Vector3();
+  function fitBetween(v, xs, zs, L, R) {
+    const w = stage.clientWidth, h = stage.clientHeight, cam = camera.clone();
+    const tanH = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
+    for (let it = 0; it < 6; it++) {
+      cam.position.copy(viewPos(v));
+      cam.lookAt(v.target);
+      cam.updateMatrixWorld(true);
+      let a = Infinity, c = -Infinity;
+      cells.forEach((p, j) => {
+        for (const y of [0, p.h]) {
+          fitV.set(xs[j], y, zs[j]).project(cam);
+          const X = (fitV.x * 0.5 + 0.5) * w;
+          a = Math.min(a, X); c = Math.max(c, X);
+        }
+      });
+      v.target.x += (((a + c) / 2 - (L + R) / 2) / (w / 2)) * v.dist * tanH;   // центр карты — в середину промежутка
+      v.dist *= Math.max(1, (c - a) / (R - L));                               // не помещается — камера дальше
+    }
+  }
+  const CX = cells.map((c) => c.x), CZ = cells.map((c) => c.z), IX = cells.map((c) => c.ix), IZ = cells.map((c) => c.iz);
   function resize() {
     const w = stage.clientWidth, h = stage.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
-    narrow = w < 900;
+    // узкий экран — как в CSS (≤ 900 px окна: текст над картой); ширина холста меньше окна на полосу прокрутки,
+    // и прежнее w < 900 на окне 901–914 px ставило карту в центр, под колонку текста
+    narrow = matchMedia("(max-width: 900px)").matches;
     // на узком экране карта в центре; расстояние — чтобы по ширине поместилась вся карта (половина ширины
     // карты с запасом — 560 единиц, ряд островов — 700) при горизонтальном угле обзора этой камеры
     const tanH = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
@@ -244,6 +274,16 @@ async function main() {
     VIEWS.map.dist = phone ? Math.max(1100, 560 / tanH) : narrow ? Math.max(2300, 560 / tanH) : 2080;
     VIEWS.islands.target.x = narrow ? 0 : -390;
     VIEWS.islands.dist = narrow ? Math.max(3600, 720 / tanH) : 2750;
+    camera.updateProjectionMatrix();
+    const text = doc.querySelector(".hero-text");
+    if (MID.matches && text) {
+      const L = text.getBoundingClientRect().right - stage.getBoundingClientRect().left + 24, R = w - 24;
+      fitBetween(VIEWS.map, CX, CZ, L, R);
+      fitBetween(VIEWS.islands, IX, IZ, 32, R);
+    }
+    // камера дальше прежнего — отдаление колесом и дальняя плоскость не меньше подобранного вида
+    controls.maxDistance = Math.max(5600, 1.25 * Math.max(VIEWS.map.dist, VIEWS.islands.dist));
+    camera.far = Math.max(8000, controls.maxDistance + 2400);
     camera.updateProjectionMatrix();
   }
   resize();

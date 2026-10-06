@@ -1219,11 +1219,25 @@ html.has-3d.h0-flat .lede-flat { display: block; }
   /* разложено по типам: легенда высоты — вверх справа, подписи островов внизу её не задевают */
   .has-3d.h0-islands .h0-legend { top: 140px; bottom: auto; right: 112px; }
 }
-@media (min-width: 901px) and (max-width: 1240px) {   /* кнопки вида рядом с колонкой текста — с переносом */
+/* кнопки вида рядом с колонкой текста — с переносом, если не поместятся; 6s: после 6r их две и они в одном ряду,
+   поэтому подсказка и легенда по типам — на тех же местах, что на широком экране (top 78 и 140 px) */
+@media (min-width: 901px) and (max-width: 1240px) {
   .has-3d .h0-actions { max-width: 380px; flex-wrap: wrap; }
-  .has-3d .h0-howto { top: 132px; }
-  .has-3d.h0-islands .h0-legend { top: 196px; }
+  /* 6s: строка над h1 переносится раньше, чем дойдёт до кнопок вида (их ряд не шире 380 px, справа 112 px
+     и полоса прокрутки); на ≥ 1090 px ограничение шире колонки и ничего не меняет */
+  .has-3d .h0-kicker { max-width: calc(100vw - 555px); }
 }
+/* 6s: на 901–1199 px легенда «типы | высота» (≈ 610 px) заходила на колонку текста — на пример и поле поиска.
+   Здесь в легенде только типы и ссылка; что значит высота, сказано в пояснении рядом с картой (lede).
+   Разложено по типам — ключ высоты на месте (легенда типов там скрыта) */
+@media (min-width: 901px) and (max-width: 1199px) {
+  .has-3d:not(.h0-islands) .h0-legend .h0-hkey { display: none; }
+  .has-3d .h0-legend { grid-template-columns: auto; max-width: calc(100vw - 600px); }   /* на 901–960 px длинные названия переносятся */
+}
+@media (min-width: 901px) and (max-width: 960px) { .h0-more { bottom: 260px; } }   /* над легендой, ставшей выше от переносов */
+/* 6s: разложено по типам на 901–1299 px — острова во всю ширину холста (landing3d.js, fitBetween), колонка
+   текста скрыта, как под карточкой МО; «Вернуть на карту» возвращает её */
+@media (min-width: 901px) and (max-width: 1299px) { .has-3d.h0-islands .hero-text { visibility: hidden; } }
 @media (min-width: 600px) and (max-width: 900px) {
   .has-3d .h0-actions { margin: 4px 16px 10px; }
 }
