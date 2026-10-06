@@ -1,0 +1,75 @@
+# Повтор этапа site после правки сайта 6r (07.10.2026): чистая копия прогона с нуля 06.10 (выходы этапов data…usefulness — из того прогона), коммит 4aa9cb9 (исходники — 3b69543).
+## Команды (в копии)
+git checkout -q -- . && git fetch -q origin && git checkout -q --detach 4aa9cb9
+PYTHONIOENCODING=utf-8 uv run --frozen --offline python -m munnet site   # код 0, 14 с
+## Журнал этапа site
+2026-10-07 00:37:28,138 INFO munnet: Этап site: собрать данные для интерактивного лендинга
+2026-10-07 00:37:29,528 INFO munnet.landing: site: палитры типов — 39 проверок пройдены
+2026-10-07 00:37:31,811 INFO munnet.clustering.inputs: cluster: 1776 узлов, 12418 рёбер G, признаков X 11; пропуски заменены: {'urban_share_rel': 47, 'age_old_share_rel': 6, 'market_access_rel': 12}
+2026-10-07 00:37:36,783 INFO munnet.site_layout: site: доля сохранённых соседей (k = 10, 1776 узлов, 12418 рёбер): graph_fr 0.2989, hybrid_pca 0.0733; случайная схема 0.0078; выбор — перестановки нет
+2026-10-07 00:37:37,386 INFO munnet.site_hexgrid: site: ячейки 1945 (сторона 40 км, запас 15%): смещение медиана 408 км, 90% — 655, макс. 2613; регионов разорвано 0 из 77; сохранено ближайших соседей 0.58
+2026-10-07 00:37:39,023 INFO munnet.clustering.inputs: cluster: 1776 узлов, 12418 рёбер G, признаков X 11; пропуски заменены: {'urban_share_rel': 47, 'age_old_share_rel': 6, 'market_access_rel': 12}
+2026-10-07 00:37:41,250 INFO munnet.landing: site: страница 3.05 МБ (из них vendor 0.86 МБ), первый экран 0.81 МБ
+2026-10-07 00:37:41,250 WARNING munnet.landing: site: страница 3.05 МБ больше budget_mb.total 3.00
+2026-10-07 00:37:41,250 WARNING munnet.landing: site: первый экран 0.81 МБ больше budget_mb.first_screen 0.30
+2026-10-07 00:37:41,265 INFO munnet.landing: site (normal): 27 файлов в site (index.html 2237 КБ, data/story.json 39 КБ, data/mo.json 1161 КБ, data/types.json 16 КБ, data/checks.json 25 КБ, data/methods.json 27 КБ, data/hexgrid.json 47 КБ, data/scene.json 78 КБ, data/netmap.json 50 КБ, vendor/fonts/fonts.css 3 КБ, vendor/fonts/golos-text-cyrillic-ext-wght-normal.woff2 17 КБ, vendor/fonts/golos-text-cyrillic-wght-normal.woff2 22 КБ, vendor/fonts/golos-text-latin-ext-wght-normal.woff2 19 КБ, vendor/fonts/golos-text-latin-wght-normal.woff2 37 КБ, vendor/fonts/golos-text-OFL.txt 4 КБ, vendor/fonts/unbounded-cyrillic-ext-wght-normal.woff2 2 КБ, vendor/fonts/unbounded-cyrillic-wght-normal.woff2 31 КБ, vendor/fonts/unbounded-latin-wght-normal.woff2 50 КБ, vendor/fonts/unbounded-OFL.txt 4 КБ, vendor/three.module.min.js 675 КБ, vendor/OrbitControls.js 31 КБ, vendor/three-LICENSE.txt 1 КБ, vendor/README.md 4 КБ); строк mo.json 2192; ячеек 1945
+## Сверка: scripts/compare_outputs.py <копия> . site
+
+## site: всего 29, побайтно 27, различаются 2
+  - site\data\story.json: РАЗЛИЧАЕТСЯ: 1 мест
+      .meta.facts_sha256: "dac577886090143ff5eff5d3b45993f1a0ae6278894a97a683358b28c8fd8f6d" | "9ab800c87ffdde6be99e0fa13a2a71a126085ba68dd6f53b28e072b4d707c5f9"
+  - site\index.html: РАЗЛИЧАЕТСЯ: 4 мест
+      стр. 1437: <section class="chapter wide" id="method" aria-labelledby="method-title"><div class="ch-text"><h2 id | <section class="chapter wide" id="method" aria-labelledby="method-title"><div class="ch-text"><h2 id
+      стр. 1457: <p class="meta" id="meta-line">Воспроизводимость: seed 42 · код — коммит 4aa9cb996700 · выводы — fac | <p class="meta" id="meta-line">Воспроизводимость: seed 42 · код — коммит 3b695430a1b3 · выводы — fac
+      стр. 1460: <script type="application/json" id="story">{"meta":{"mode":"normal","banner":null,"seed":42,"site_fr | <script type="application/json" id="story">{"meta":{"mode":"normal","banner":null,"seed":42,"site_fr
+      стр. 1462: <script type="application/json" id="meta">{"seed":42,"sha":"4aa9cb996700","mode":"normal","banner":n | <script type="application/json" id="meta">{"seed":42,"sha":"3b695430a1b3","mode":"normal","banner":n
+## Ветки после публикации
+HEAD 4aa9cb9 = origin/main = origin/claude/agents-panel-eda; origin/gh-pages 26d05d9; дерево gh-pages = HEAD:site = 96c6c3b37917016bc2c0410f3589015b503c828a
+## git diff --stat 3b07cae 4aa9cb9 -- src configs tests pyproject.toml uv.lock
+ configs/default.yaml              |  3 ---
+ src/munnet/landing.py             |  1 -
+ src/munnet/templates/landing.css  |  4 +---
+ src/munnet/templates/landing.html |  1 -
+ src/munnet/templates/landing3d.js | 36 +++---------------------------------
+ tests/test_site_6o.py             | 20 +++++++++++---------
+ 6 files changed, 15 insertions(+), 50 deletions(-)
+
+# Повтор этапа site после правки сайта 6s (07.10.2026): та же копия, коммит 00cf0fa (исходники — 7858ea9).
+## Команды (в копии)
+git checkout -q -- . && git fetch -q origin && git checkout -q --detach 00cf0fa
+PYTHONIOENCODING=utf-8 uv run --frozen --offline python -m munnet site   # код 0, 14 с
+## Журнал этапа site
+2026-10-07 01:09:38,551 INFO munnet: Этап site: собрать данные для интерактивного лендинга
+2026-10-07 01:09:39,835 INFO munnet.landing: site: палитры типов — 39 проверок пройдены
+2026-10-07 01:09:42,041 INFO munnet.clustering.inputs: cluster: 1776 узлов, 12418 рёбер G, признаков X 11; пропуски заменены: {'urban_share_rel': 47, 'age_old_share_rel': 6, 'market_access_rel': 12}
+2026-10-07 01:09:46,936 INFO munnet.site_layout: site: доля сохранённых соседей (k = 10, 1776 узлов, 12418 рёбер): graph_fr 0.2989, hybrid_pca 0.0733; случайная схема 0.0078; выбор — перестановки нет
+2026-10-07 01:09:47,530 INFO munnet.site_hexgrid: site: ячейки 1945 (сторона 40 км, запас 15%): смещение медиана 408 км, 90% — 655, макс. 2613; регионов разорвано 0 из 77; сохранено ближайших соседей 0.58
+2026-10-07 01:09:49,182 INFO munnet.clustering.inputs: cluster: 1776 узлов, 12418 рёбер G, признаков X 11; пропуски заменены: {'urban_share_rel': 47, 'age_old_share_rel': 6, 'market_access_rel': 12}
+2026-10-07 01:09:51,419 INFO munnet.landing: site: страница 3.05 МБ (из них vendor 0.86 МБ), первый экран 0.82 МБ
+2026-10-07 01:09:51,419 WARNING munnet.landing: site: страница 3.05 МБ больше budget_mb.total 3.00
+2026-10-07 01:09:51,419 WARNING munnet.landing: site: первый экран 0.82 МБ больше budget_mb.first_screen 0.30
+2026-10-07 01:09:51,434 INFO munnet.landing: site (normal): 27 файлов в site (index.html 2242 КБ, data/story.json 39 КБ, data/mo.json 1161 КБ, data/types.json 16 КБ, data/checks.json 25 КБ, data/methods.json 27 КБ, data/hexgrid.json 47 КБ, data/scene.json 78 КБ, data/netmap.json 50 КБ, vendor/fonts/fonts.css 3 КБ, vendor/fonts/golos-text-cyrillic-ext-wght-normal.woff2 17 КБ, vendor/fonts/golos-text-cyrillic-wght-normal.woff2 22 КБ, vendor/fonts/golos-text-latin-ext-wght-normal.woff2 19 КБ, vendor/fonts/golos-text-latin-wght-normal.woff2 37 КБ, vendor/fonts/golos-text-OFL.txt 4 КБ, vendor/fonts/unbounded-cyrillic-ext-wght-normal.woff2 2 КБ, vendor/fonts/unbounded-cyrillic-wght-normal.woff2 31 КБ, vendor/fonts/unbounded-latin-wght-normal.woff2 50 КБ, vendor/fonts/unbounded-OFL.txt 4 КБ, vendor/three.module.min.js 675 КБ, vendor/OrbitControls.js 31 КБ, vendor/three-LICENSE.txt 1 КБ, vendor/README.md 4 КБ); строк mo.json 2192; ячеек 1945
+## Сверка: scripts/compare_outputs.py <копия> . site
+
+## site: всего 29, побайтно 27, различаются 2
+  - site\data\story.json: РАЗЛИЧАЕТСЯ: 1 мест
+      .meta.facts_sha256: "dac577886090143ff5eff5d3b45993f1a0ae6278894a97a683358b28c8fd8f6d" | "9ab800c87ffdde6be99e0fa13a2a71a126085ba68dd6f53b28e072b4d707c5f9"
+  - site\index.html: РАЗЛИЧАЕТСЯ: 4 мест
+      стр. 1451: <section class="chapter wide" id="method" aria-labelledby="method-title"><div class="ch-text"><h2 id | <section class="chapter wide" id="method" aria-labelledby="method-title"><div class="ch-text"><h2 id
+      стр. 1471: <p class="meta" id="meta-line">Воспроизводимость: seed 42 · код — коммит 00cf0fa5b293 · выводы — fac | <p class="meta" id="meta-line">Воспроизводимость: seed 42 · код — коммит 7858ea9c79ff · выводы — fac
+      стр. 1474: <script type="application/json" id="story">{"meta":{"mode":"normal","banner":null,"seed":42,"site_fr | <script type="application/json" id="story">{"meta":{"mode":"normal","banner":null,"seed":42,"site_fr
+      стр. 1476: <script type="application/json" id="meta">{"seed":42,"sha":"00cf0fa5b293","mode":"normal","banner":n | <script type="application/json" id="meta">{"seed":42,"sha":"7858ea9c79ff","mode":"normal","banner":n
+## Ветки после публикации
+HEAD 00cf0fa = origin/main = origin/claude/agents-panel-eda; origin/gh-pages 999b486; дерево gh-pages = HEAD:site = fe6e05c2a6adbcbdbab71c382d379d9cf931d3bf
+## git log --oneline 3b07cae..00cf0fa -- src configs tests pyproject.toml uv.lock
+7858ea9 Сайт 6s: на окне 901–1299 px объёмная карта — справа от колонки текста; пустая полоса над подсказкой убрана
+3b69543 Сайт 6r: убраны кнопка «Пауза / Вращать» и покачивание объёмной карты
+## git diff --stat 3b07cae 00cf0fa -- src configs tests pyproject.toml uv.lock
+ configs/default.yaml              |  3 --
+ src/munnet/landing.py             |  1 -
+ src/munnet/templates/landing.css  | 24 +++++++++---
+ src/munnet/templates/landing.html |  1 -
+ src/munnet/templates/landing3d.js | 78 ++++++++++++++++++++++-----------------
+ tests/test_site_6o.py             | 20 +++++-----
+ tests/test_site_6s.py             | 59 +++++++++++++++++++++++++++++
+ 7 files changed, 132 insertions(+), 54 deletions(-)
