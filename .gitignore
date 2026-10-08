@@ -12,3 +12,5 @@ __pycache__/
 # Локальные инструменты среды разработки: в решение не входят
 /.claude/
 /CLAUDE.md
+/PLAN.md
+/docs/selfcheck.md
