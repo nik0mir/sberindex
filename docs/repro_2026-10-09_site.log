@@ -1,0 +1,33 @@
+# Повтор этапа site после правки текстов сайта 6t (09.10.2026): чистая копия прогона с нуля 06.10 (выходы этапов data…usefulness — из того прогона), коммит 4309453 (исходники — ac42e9c).
+## Команды (в копии)
+git checkout -q -- . && git fetch -q origin && git checkout -q --detach 4309453
+PYTHONIOENCODING=utf-8 uv run --frozen --offline python -m munnet site   # код 0, 16 с
+## Журнал этапа site
+2026-10-09 00:46:44,150 INFO munnet: Этап site: собрать данные для интерактивного лендинга
+2026-10-09 00:46:45,954 INFO munnet.landing: site: палитры типов — 39 проверок пройдены
+2026-10-09 00:46:48,495 INFO munnet.clustering.inputs: cluster: 1776 узлов, 12418 рёбер G, признаков X 11; пропуски заменены: {'urban_share_rel': 47, 'age_old_share_rel': 6, 'market_access_rel': 12}
+2026-10-09 00:46:53,704 INFO munnet.site_layout: site: доля сохранённых соседей (k = 10, 1776 узлов, 12418 рёбер): graph_fr 0.2989, hybrid_pca 0.0733; случайная схема 0.0078; выбор — перестановки нет
+2026-10-09 00:46:54,297 INFO munnet.site_hexgrid: site: ячейки 1945 (сторона 40 км, запас 15%): смещение медиана 408 км, 90% — 655, макс. 2613; регионов разорвано 0 из 77; сохранено ближайших соседей 0.58
+2026-10-09 00:46:55,939 INFO munnet.clustering.inputs: cluster: 1776 узлов, 12418 рёбер G, признаков X 11; пропуски заменены: {'urban_share_rel': 47, 'age_old_share_rel': 6, 'market_access_rel': 12}
+2026-10-09 00:46:58,199 INFO munnet.landing: site: страница 3.05 МБ (из них vendor 0.86 МБ), первый экран 0.82 МБ
+2026-10-09 00:46:58,200 WARNING munnet.landing: site: страница 3.05 МБ больше budget_mb.total 3.00
+2026-10-09 00:46:58,200 WARNING munnet.landing: site: первый экран 0.82 МБ больше budget_mb.first_screen 0.30
+2026-10-09 00:46:58,215 INFO munnet.landing: site (normal): 27 файлов в site (index.html 2242 КБ, data/story.json 39 КБ, data/mo.json 1161 КБ, data/types.json 16 КБ, data/checks.json 25 КБ, data/methods.json 27 КБ, data/hexgrid.json 47 КБ, data/scene.json 78 КБ, data/netmap.json 50 КБ, vendor/fonts/fonts.css 3 КБ, vendor/fonts/golos-text-cyrillic-ext-wght-normal.woff2 17 КБ, vendor/fonts/golos-text-cyrillic-wght-normal.woff2 22 КБ, vendor/fonts/golos-text-latin-ext-wght-normal.woff2 19 КБ, vendor/fonts/golos-text-latin-wght-normal.woff2 37 КБ, vendor/fonts/golos-text-OFL.txt 4 КБ, vendor/fonts/unbounded-cyrillic-ext-wght-normal.woff2 2 КБ, vendor/fonts/unbounded-cyrillic-wght-normal.woff2 31 КБ, vendor/fonts/unbounded-latin-wght-normal.woff2 50 КБ, vendor/fonts/unbounded-OFL.txt 4 КБ, vendor/three.module.min.js 675 КБ, vendor/OrbitControls.js 31 КБ, vendor/three-LICENSE.txt 1 КБ, vendor/README.md 4 КБ); строк mo.json 2192; ячеек 1945
+## Сверка: scripts/compare_outputs.py <копия> . site
+
+## site: всего 29, побайтно 27, различаются 2
+  - site\data\story.json: РАЗЛИЧАЕТСЯ: 1 мест
+      .meta.facts_sha256: "dac577886090143ff5eff5d3b45993f1a0ae6278894a97a683358b28c8fd8f6d" | "9ab800c87ffdde6be99e0fa13a2a71a126085ba68dd6f53b28e072b4d707c5f9"
+  - site\index.html: РАЗЛИЧАЕТСЯ: 4 мест
+      стр. 1451: <section class="chapter wide" id="method" aria-labelledby="method-title"><div class="ch-text"><h2 id | <section class="chapter wide" id="method" aria-labelledby="method-title"><div class="ch-text"><h2 id
+      стр. 1471: <p class="meta" id="meta-line">Воспроизводимость: seed 42 · код — коммит 4309453bb6b9 · выводы — fac | <p class="meta" id="meta-line">Воспроизводимость: seed 42 · код — коммит ac42e9c346e9 · выводы — fac
+      стр. 1474: <script type="application/json" id="story">{"meta":{"mode":"normal","banner":null,"seed":42,"site_fr | <script type="application/json" id="story">{"meta":{"mode":"normal","banner":null,"seed":42,"site_fr
+      стр. 1476: <script type="application/json" id="meta">{"seed":42,"sha":"4309453bb6b9","mode":"normal","banner":n | <script type="application/json" id="meta">{"seed":42,"sha":"ac42e9c346e9","mode":"normal","banner":n
+## git diff --stat 00cf0fa 4309453 -- src configs tests pyproject.toml uv.lock
+ configs/default.yaml             | 26 +++++++++++++-------------
+ src/munnet/site_chapters.py      |  6 +++---
+ src/munnet/site_chapters_tail.py |  6 +++---
+ tests/test_site_6e.py            |  3 ++-
+ tests/test_site_chapters_tail.py |  2 +-
+ tests/test_site_netmap.py        |  2 +-
+ 6 files changed, 23 insertions(+), 22 deletions(-)
