@@ -279,5 +279,4 @@ make requirements   # обновить requirements.txt после измене�
 Код проекта — [MIT](LICENSE). Библиотеки Python ставятся из PyPI по `uv.lock` под своими лицензиями и в репозиторий
 не входят; среди них igraph (python-igraph) — GNU GPL версии 2, leidenalg — GNU GPL версии 3 и новее. Платных
 и закрытых зависимостей нет. Исходные и производные данные — на условиях их лицензий (раздел «Данные
-и лицензии»). Сторонние файлы в `.claude/skills/` — под собственными лицензиями, перечень —
-[.claude/skills/THIRD_PARTY.md](.claude/skills/THIRD_PARTY.md).
+и лицензии»).
