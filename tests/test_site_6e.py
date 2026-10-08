@@ -60,7 +60,8 @@ def test_reverse_example_takes_chapter6_number_by_code():
 def test_card_texts_net_and_similar_caption():
     checks = {"t7": None}
     out = site_findings.card_texts(TX["card"], checks, k_net=5, sim_fields={"n_shown": "5", "n_set": "10"})
-    assert out["net_note"].startswith("До 5 муниципалитетов") and "не «похожие по корзине" in out["net_note"]
+    assert out["net_note"].startswith("До 5 муниципалитетов")
+    assert "отличается от «похожих по корзине" in out["net_note"]
     assert (
         out["sim_caption"].startswith("Показаны 5 из 10, на которых проверяли точность сверки")
         and "первый — самый похожий" in out["sim_caption"]

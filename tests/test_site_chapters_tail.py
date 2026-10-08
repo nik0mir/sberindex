@@ -205,7 +205,7 @@ def test_methods_table_final_marked_winners_first_and_all_rows():
     assert best.count("<tr") == 1 + 2 and 'class="is-final"' in best and "итог" in best
     full = re.search(r'<table class="mtable" id="mtable-all".*?</table>', sec, re.S).group(0)
     assert full.count("<tr") == 1 + 3
-    assert "методы без допустимых кандидатов (1)" in sec
+    assert "Методы без допустимых кандидатов (1)" in sec
     assert 'data-v="0.007"' in best and "z 2,2" in best
     assert sec.count('class="mstep"') == 5 and "https://github.com/x/y/commit/abc61071df1a" in sec
 
